@@ -5,6 +5,9 @@ package-lock.json
 # Credentials
 *_cookies.txt
 *_cookies.txt.txt
+*.json
+!package.json
+.env*
 
 # Test
 test/
