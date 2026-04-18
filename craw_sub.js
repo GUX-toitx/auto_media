@@ -427,8 +427,14 @@ async function processNextInQueue() {
             
             fs.writeFileSync(path.join(vFolder, 'keywords.txt'), kws.join(', '));
             fs.writeFileSync(path.join(iFolder, 'keywords.txt'), kws.join(', '));
+
+            // Lưu file gốc (context.txt) cho hệ thống đọc mặc định
             fs.writeFileSync(path.join(vFolder, 'context.txt'), scene.text);
             fs.writeFileSync(path.join(iFolder, 'context.txt'), scene.text);
+
+            // LƯU THÊM FILE ĐỊNH DANH NGÔN NGỮ GỐC (ví dụ: vi.context.txt)
+            fs.writeFileSync(path.join(vFolder, `${lang}.context.txt`), scene.text);
+            fs.writeFileSync(path.join(iFolder, `${lang}.context.txt`), scene.text);
 
             if (targetLangs.length > 0) {
                 console.log(`   - [Cảnh ${gid}] Đang dịch sang ${targetLangs.length} ngôn ngữ...`);
