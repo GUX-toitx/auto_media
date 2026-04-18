@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Media Editor Dashboard Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #111827;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #374151;
+            border-radius: 10px;
+        }
+
+        .hide {
+            display: none !important;
+        }
+
+        .keyword-tag {
+            background: #1e293b;
+            color: #94a3b8;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid #334155;
+            font-family: monospace;
+        }
+
+        .card-asset {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+    </style>
+</head>
+
+<body class="bg-gray-950 text-gray-100 font-sans h-screen flex overflow-hidden">
+
+    <aside class="w-64 bg-gray-900 border-r border-gray-800 flex flex-col h-full shrink-0">
+        <div class="p-6 border-b border-gray-800 font-bold text-blue-500 tracking-widest text-sm text-center">📂 DỰ ÁN
+            MEDIA</div>
+        <div id="videoList" class="flex-1 overflow-y-auto p-4 space-y-1"></div>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto p-10 bg-black/20">
+        <div id="galleryContainer" class="max-w-6xl mx-auto hide">
+            <header class="mb-12 border-b border-gray-800 pb-8 flex justify-between items-end">
+                <div>
+                    <p class="text-blue-500 font-mono text-[10px] mb-2 uppercase tracking-[0.3em]">Workspace / Project
+                    </p>
+                    <h2 class="text-4xl font-black text-white" id="currentVidTitle"></h2>
+                </div>
+            </header>
+            <div id="groupList" class="space-y-24"></div>
+        </div>
+    </main>
+
+    <script>
+        let db = {};
+        let activeVideoId = '';
+
+        window.onload = async () => {
+            const res = await fetch('/api/scan');
+            db = await res.json();
+            renderSidebar();
+        };
+
+        function renderSidebar() {
+            const videoIds = Object.keys(db);
+            const sidebar = document.getElementById('videoList');
+            sidebar.innerHTML = '';
+            videoIds.forEach((vid, i) => {
+                const btn = document.createElement('button');
+                btn.className = "w-full text-left p-3 rounded-lg hover:bg-gray-800 text-xs truncate transition-all text-gray-500 hover:text-white font-medium";
+                btn.innerText = "📁 " + vid;
+                btn.onclick = () => renderGallery(vid);
+                sidebar.appendChild(btn);
+                if (i === 0) btn.click();
+            });
+        }
+
+        async function renderGallery(videoId) {
+            activeVideoId = videoId;
+            document.getElementById('galleryContainer').classList.remove('hide');
+            document.getElementById('currentVidTitle').innerText = videoId;
+            const data = db[videoId];
+            const sortedGroups = Object.keys(data.videos).sort((a, b) => parseInt(a) - parseInt(b));
+
+            let html = '';
+            for (const gid of sortedGroups) {
+                const script = data.contexts[gid] || "";
+                const videos = data.videos[gid] || [];
+                const images = data.images[gid] || [];
+                const currentKeywords = (data.keywords && data.keywords[gid]) ? data.keywords[gid] : [];
+                const voiceExists = false; // logic check file voice ở server nếu có
+
+                html += `
+                <div class="grid grid-cols-12 gap-12">
+                    <div class="col-span-9 space-y-10">
+                        <div>
+                            <div class="flex items-center gap-3 mb-4">
+                                <span class="bg-blue-600 text-[10px] font-black px-2 py-1 rounded">NHÓM ${gid}</span>
+                                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Kịch bản thoại</label>
+                            </div>
+                            <textarea id="script-${gid}" class="w-full bg-gray-900 border border-gray-800 rounded-xl p-6 text-sm leading-relaxed focus:border-blue-500 outline-none h-32 transition-all shadow-inner">${script}</textarea>
+                        </div>
+
+                        <div>
+                            <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-4 block">Từ khóa tìm kiếm (Keywords)</label>
+                            <div id="keywords-container-${gid}" class="flex flex-wrap gap-2 p-4 bg-gray-900/30 rounded-xl border border-gray-800">
+                                ${currentKeywords.map(kw => `
+                                    <span class="keyword-tag">
+                                        ${kw} <b class="cursor-pointer text-gray-600 hover:text-red-500 text-lg leading-none" onclick="this.parentElement.remove()">×</b>
+                                    </span>
+                                `).join('')}
+                                <input type="text" onkeydown="addKeyword(event, '${gid}')" placeholder="+ Thêm từ khóa..." class="bg-transparent text-xs p-1 outline-none text-blue-400 w-32 border-b border-transparent focus:border-blue-500">
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3 block">Âm thanh (Voice)</label>
+                            <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-900 border border-gray-800 text-[11px] ${voiceExists ? 'text-green-400 font-bold' : 'text-gray-500 italic'}">
+                                <span>${voiceExists ? '● Voice sẵn sàng' : '○ Chưa có audio'}</span>
+                            </div>
+                        </div>
+
+                        <div class="space-y-8 pt-4">
+                            <div>
+                                <h4 class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter">
+                                    <span class="w-2 h-2 bg-blue-500 rounded-full"></span> 🎬 Videos
+                                </h4>
+                                <div class="grid grid-cols-3 gap-4">
+                                    ${videos.length > 0 ? videos.map(v => renderAssetCard(v, 'video')).join('') : '<p class="text-xs text-gray-700 italic">Trống</p>'}
+                                </div>
+                            </div>
+
+                            <div>
+                                <h4 class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter">
+                                    <span class="w-2 h-2 bg-orange-500 rounded-full"></span> 🖼️ Images
+                                </h4>
+                                <div class="grid grid-cols-5 gap-3">
+                                    ${images.length > 0 ? images.map(i => renderAssetCard(i, 'image')).join('') : '<p class="text-xs text-gray-700 italic">Trống</p>'}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-span-3">
+    <div class="sticky top-10 space-y-3">
+        <button onclick="fetchVoice('${gid}')" 
+                class="w-full bg-purple-600 hover:bg-purple-500 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest transition-all shadow-lg active:scale-95">
+            🎙️ Lấy Voice
+        </button>
+
+        <button onclick="fetchMedia('${gid}')" 
+                class="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest transition-all shadow-lg active:scale-95">
+            🎬 Lấy Media
+        </button>
+
+        <div class="pt-6 border-t border-gray-800">
+            <button onclick="saveContent('${gid}')" 
+                    class="w-full bg-gray-800 hover:bg-gray-700 py-3 rounded-xl text-[10px] font-bold uppercase text-gray-500 hover:text-white transition-all tracking-widest">
+                Lưu kịch bản
+            </button>
+        </div>
+    </div>
+</div>
+                </div>
+                <hr class="border-gray-900/50 my-16">`;
+            }
+            document.getElementById('groupList').innerHTML = html;
+        }
+
+        function renderAssetCard(asset, type) {
+    const isSelected = asset.isSelected;
+    const borderCls = isSelected ? 'border-green-500 ring-2 ring-green-500/20' : 'border-gray-800 hover:border-gray-600';
+    const btnCls = isSelected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600';
+    const btnText = isSelected ? 'Đã chọn' : 'Chọn';
+
+    if (type === 'video') {
+        const durationId = `dur-${Math.random().toString(36).substr(2, 9)}`;
+        
+        return `
+        <div class="card-asset bg-gray-900 p-2 rounded-xl border relative ${borderCls}">
+            <span id="${durationId}" class="absolute top-3 right-3 bg-black/70 text-[10px] px-1.5 py-0.5 rounded font-mono text-white z-20 pointer-events-none">--:--</span>
+            
+            <video 
+                controls 
+                muted 
+                loop 
+                preload="metadata"
+                src="${asset.url}"
+                onmouseenter="this.play()" 
+                onmouseleave="this.pause()" 
+                onloadedmetadata="updateDuration(this, '${durationId}')"
+                class="w-full h-40 object-cover rounded-lg mb-2 bg-black shadow-lg focus:outline-none transition-transform duration-300 hover:scale-[1.01]">
+            </video>
+            
+            <button onclick="toggleSelect(this, 'video', '${asset.relativePath}')" 
+                class="w-full text-[10px] font-black py-2 rounded-lg uppercase tracking-wider transition-colors ${btnCls}">
+                ${btnText}
+            </button>
+        </div>`;
+    }
+    
+    // Phần ảnh giữ nguyên...
+    return `
+    <div class="card-asset bg-gray-900 p-1.5 rounded-lg border ${borderCls}">
+        <img src="${asset.url}" class="w-full h-24 object-cover rounded mb-2 shadow-lg">
+        <button onclick="toggleSelect(this, 'image', '${asset.relativePath}')" 
+            class="w-full text-[9px] font-black py-1.5 rounded uppercase tracking-wider transition-colors ${btnCls}">
+            ${btnText}
+        </button>
+    </div>`;
+}
+
+        async function toggleSelect(btn, type, relativePath) {
+            const card = btn.closest('.card-asset');
+            const isSelected = btn.classList.contains('bg-green-600');
+            const action = isSelected ? 'unselect' : 'select';
+            btn.innerHTML = '...';
+            try {
+                const response = await fetch('/api/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ relativePath, action })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    btn.setAttribute('onclick', `toggleSelect(this, '${type}', '${result.newRelativePath}')`);
+                    btn.classList.toggle('bg-green-600');
+                    btn.classList.toggle('bg-gray-800');
+                    btn.innerHTML = action === 'select' ? 'Đã chọn' : 'Chọn';
+                    card.classList.toggle('border-green-500');
+                    card.classList.toggle('ring-2');
+                }
+            } catch (error) { btn.innerHTML = 'Lỗi'; }
+        }
+
+        function addKeyword(e, gid) {
+            if (e.key === 'Enter' && e.target.value.trim()) {
+                const container = document.getElementById(`keywords-container-${gid}`);
+                const tag = document.createElement('span');
+                tag.className = "keyword-tag";
+                tag.innerHTML = `${e.target.value} <b class="cursor-pointer text-gray-600 hover:text-red-500" onclick="this.parentElement.remove()">×</b>`;
+                container.insertBefore(tag, e.target);
+                e.target.value = '';
+            }
+        }
+
+        function updateDuration(videoElem, badgeId) {
+            const badge = document.getElementById(badgeId);
+            if (!badge) return;
+
+            // Hàm thực hiện cập nhật
+            const setTime = () => {
+                if (videoElem.duration && videoElem.duration !== Infinity) {
+                    badge.innerText = formatTime(videoElem.duration);
+                    if (videoElem.duration < 2) {
+                        badge.classList.replace('bg-black/70', 'bg-red-600/80');
+                    }
+                }
+            };
+
+            // Nếu đã có sẵn duration (do cache), chạy luôn
+            if (videoElem.readyState >= 1) {
+                setTime();
+            } else {
+                // Nếu chưa có, đợi sự kiện loadedmetadata
+                videoElem.onloadedmetadata = setTime;
+            }
+        }
+
+        function formatTime(seconds) {
+            if (!seconds || isNaN(seconds)) return "0:00";
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // --- HÀM 1: CHUYÊN LƯU NỘI DUNG (Kịch bản & Keywords) ---
+        async function saveContent(groupId, silent = false) {
+            const script = document.getElementById(`script-${groupId}`).value;
+            const kwNodes = document.querySelectorAll(`#keywords-container-${groupId} .keyword-tag`);
+            const keywords = Array.from(kwNodes).map(node => node.innerText.replace('×', '').trim()).filter(k => k);
+
+            try {
+                const res = await fetch('/api/save-content', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoId: activeVideoId, groupId, script, keywords })
+                });
+                const result = await res.json();
+                if (result.success && !silent) {
+                    alert('✅ Đã lưu kịch bản & từ khóa!');
+                }
+                return result.success;
+            } catch (error) {
+                console.error("Lỗi lưu nội dung:", error);
+                alert("❌ Lỗi khi lưu!");
+                return false;
+            }
+        }
+
+        // --- HÀM 2: CHUYÊN LẤY MEDIA ---
+        async function fetchMedia(groupId) {
+            // Bước 1: Phải lưu trước để file keywords.txt được cập nhật mới nhất
+            const saveOk = await saveContent(groupId, true); // silent = true để ko hiện alert "Đã lưu"
+
+            if (saveOk) {
+                const kwNodes = document.querySelectorAll(`#keywords-container-${groupId} .keyword-tag`);
+                const keywords = Array.from(kwNodes).map(node => node.innerText.replace('×', '').trim()).filter(k => k);
+
+                try {
+                    alert('🚀 Đang bắt đầu tải thêm Media ngầm...');
+                    await fetch('/api/generate-media', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ videoId: activeVideoId, groupId, keywords })
+                    });
+                } catch (error) {
+                    alert("❌ Lỗi khi gọi Crawler!");
+                }
+            }
+        }
+
+        // --- HÀM 3: CHUYÊN LẤY VOICE (Nếu sau này bạn làm) ---
+        async function fetchVoice(groupId) {
+            const saveOk = await saveContent(groupId, true);
+            if (saveOk) {
+                alert('🎙️ Đang bắt đầu tạo Voice...');
+                // Gọi API lấy voice của bạn ở đây
+            }
+        }
+    </script>
+</body>
+
+</html>
