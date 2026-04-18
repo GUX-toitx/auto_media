@@ -50,24 +50,54 @@
         <div id="videoList" class="flex-1 overflow-y-auto p-4 space-y-1"></div>
     </aside>
 
-    <main class="flex-1 overflow-y-auto p-10 bg-black/20">
-        <div id="galleryContainer" class="max-w-6xl mx-auto hide">
-            <header class="mb-12 border-b border-gray-800 pb-8 flex justify-between items-end">
+    <main class="flex-1 overflow-y-auto px-5 bg-black/20">
+        <div id="galleryContainer" class="px-[30px] mx-auto hide">
+            <header class="fixed top-0 left-64 right-0 z-30 bg-black/80 backdrop-blur border-b border-gray-800 pb-8 pt-8 flex justify-between items-end px-5">
                 <div>
                     <p class="text-blue-500 font-mono text-[10px] mb-2 uppercase tracking-[0.3em]">Workspace / Project
                     </p>
                     <h2 class="text-4xl font-black text-white" id="currentVidTitle"></h2>
                 </div>
+                <div class="flex gap-3">
+                    <button onclick="createVoice()" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
+                    <button onclick="downloadVoice()" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice</button>
+                    <button onclick="generateMedia()" class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎬 Generate Media</button>
+                </div>
             </header>
-            <div id="groupList" class="space-y-24"></div>
+            <div id="groupList" class="space-y-24 mt-[150px]"></div>
         </div>
     </main>
+
+    <div id="voiceModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hide">
+        <div id="voiceModalBody" class="bg-gray-900 border border-gray-700 rounded-2xl p-8 w-[420px] space-y-6">
+            <h3 class="text-xl font-black text-white">🎙️ Tạo Voice</h3>
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Ngôn ngữ</label>
+                <select id="voiceLang" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
+                    <option value="">Đang tải...</option>
+                </select>
+            </div>
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Giọng mẫu</label>
+                <select id="voiceSpeaker" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
+                    <option value="">Đang tải...</option>
+                </select>
+            </div>
+            <div class="flex gap-3 justify-end pt-2">
+                <button onclick="closeVoiceModal()" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-400 transition-all">Huỷ</button>
+                <button onclick="submitCreateVoice()" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-purple-600 hover:bg-purple-500 transition-all">Tạo</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         let db = {};
         let activeVideoId = '';
+        const batchMap = {};
 
         window.onload = async () => {
+            const modalBody = document.getElementById('voiceModalBody');
+            modalBody.dataset.original = modalBody.innerHTML;
             const res = await fetch('/api/scan');
             db = await res.json();
             renderSidebar();
@@ -100,6 +130,9 @@
                 const videos = data.videos[gid] || [];
                 const images = data.images[gid] || [];
                 const currentKeywords = (data.keywords && data.keywords[gid]) ? data.keywords[gid] : [];
+                const genVideos = data.generatedVideos || {};
+                const audios = data.audios || {};
+                const langs = data.langs || [];
                 const voiceExists = false; // logic check file voice ở server nếu có
 
                 html += `
@@ -127,48 +160,70 @@
 
                         <div>
                             <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3 block">Âm thanh (Voice)</label>
-                            <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-900 border border-gray-800 text-[11px] ${voiceExists ? 'text-green-400 font-bold' : 'text-gray-500 italic'}">
-                                <span>${voiceExists ? '● Voice sẵn sàng' : '○ Chưa có audio'}</span>
-                            </div>
+                            ${langs.map(lang => {
+                                const audio = audios[lang] && audios[lang][gid];
+                                if (!audio) return `<div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-900 border border-gray-800 text-[11px] text-gray-500 italic mb-2"><span>[${lang.toUpperCase()}] ○ Chưa có audio</span></div>`;
+                                return `<div class="mb-2">
+                                    <div onclick="this.nextElementSibling.classList.toggle('hide'); this.querySelector('.acc-arrow').classList.toggle('rotate-90')" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-900 border border-green-800 text-[11px] text-green-400 font-bold cursor-pointer hover:border-green-600 transition-colors">
+                                        <span class="acc-arrow inline-block transition-transform duration-200">▶</span>
+                                        <span>[${lang.toUpperCase()}] ● Voice sẵn sàng</span>
+                                    </div>
+                                    <div class="hide mt-2 pl-2">
+                                        <audio controls src="${audio.url}" class="w-full h-8"></audio>
+                                    </div>
+                                </div>`;
+                            }).join('')}
                         </div>
 
                         <div class="space-y-8 pt-4">
                             <div>
-                                <h4 class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter">
-                                    <span class="w-2 h-2 bg-blue-500 rounded-full"></span> 🎬 Videos
+                                <h4 onclick="this.nextElementSibling.classList.toggle('hide'); this.querySelector('.acc-arrow').classList.toggle('rotate-90')" class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter cursor-pointer select-none hover:text-gray-200 transition-colors">
+                                    <span class="acc-arrow inline-block transition-transform duration-200">▶</span>
+                                    <span class="w-2 h-2 bg-blue-500 rounded-full"></span> 🎬 Videos (${videos.length})
                                 </h4>
-                                <div class="grid grid-cols-3 gap-4">
+                                <div class="grid grid-cols-3 gap-4 hide">
                                     ${videos.length > 0 ? videos.map(v => renderAssetCard(v, 'video')).join('') : '<p class="text-xs text-gray-700 italic">Trống</p>'}
                                 </div>
                             </div>
 
                             <div>
-                                <h4 class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter">
-                                    <span class="w-2 h-2 bg-orange-500 rounded-full"></span> 🖼️ Images
+                                <h4 onclick="this.nextElementSibling.classList.toggle('hide'); this.querySelector('.acc-arrow').classList.toggle('rotate-90')" class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter cursor-pointer select-none hover:text-gray-200 transition-colors">
+                                    <span class="acc-arrow inline-block transition-transform duration-200">▶</span>
+                                    <span class="w-2 h-2 bg-orange-500 rounded-full"></span> 🖼️ Images (${images.length})
                                 </h4>
-                                <div class="grid grid-cols-5 gap-3">
+                                <div class="grid grid-cols-5 gap-3 hide">
                                     ${images.length > 0 ? images.map(i => renderAssetCard(i, 'image')).join('') : '<p class="text-xs text-gray-700 italic">Trống</p>'}
                                 </div>
                             </div>
+
+                            ${langs.map(lang => {
+                                const vids = (genVideos[lang] && genVideos[lang][gid]) || [];
+                                return `<div>
+                                    <h4 class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter">
+                                        <span onclick="this.closest('h4').nextElementSibling.classList.toggle('hide'); this.classList.toggle('rotate-90')" class="acc-arrow inline-block transition-transform duration-200 cursor-pointer">▶</span>
+                                        <span onclick="this.closest('h4').nextElementSibling.classList.toggle('hide'); this.previousElementSibling.classList.toggle('rotate-90')" class="cursor-pointer hover:text-gray-200 transition-colors flex-1">✅ Video Generated [${lang.toUpperCase()}] (${vids.length})</span>
+                                        <button onclick="openFolder('${videoId}', '${lang}')" class="ml-auto text-[10px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors normal-case tracking-normal font-normal">📂 Mở thư mục</button>
+                                    </h4>
+                                    <div class="grid grid-cols-3 gap-4 hide">
+                                        ${vids.length > 0 ? vids.map(v => `
+                                            <div class="card-asset bg-gray-900 p-2 rounded-xl border border-green-800 relative">
+                                                <video controls muted loop preload="metadata" src="${v.url}" onmouseenter="this.play()" onmouseleave="this.pause()" class="w-full h-40 object-cover rounded-lg mb-2 bg-black shadow-lg"></video>
+                                                <p class="text-[10px] text-gray-500 truncate text-center">${v.name}</p>
+                                            </div>
+                                        `).join('') : '<p class="text-xs text-gray-700 italic">Chưa generate</p>'}
+                                    </div>
+                                </div>`;
+                            }).join('')}
                         </div>
                     </div>
 
+
                     <div class="col-span-3">
-    <div class="sticky top-10 space-y-3">
-        <button onclick="fetchVoice('${gid}')" 
-                class="w-full bg-purple-600 hover:bg-purple-500 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest transition-all shadow-lg active:scale-95">
-            🎙️ Lấy Voice
-        </button>
-
-        <button onclick="fetchMedia('${gid}')" 
-                class="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest transition-all shadow-lg active:scale-95">
-            🎬 Lấy Media
-        </button>
-
-        <div class="pt-6 border-t border-gray-800">
+    <div class="sticky top-[150px] space-y-3">
+        <div>
             <button onclick="saveContent('${gid}')" 
-                    class="w-full bg-gray-800 hover:bg-gray-700 py-3 rounded-xl text-[10px] font-bold uppercase text-gray-500 hover:text-white transition-all tracking-widest">
-                Lưu kịch bản
+                    class="w-full bg-yellow-500 hover:bg-yellow-400 py-4 rounded-xl text-[11px] font-black uppercase text-black transition-all tracking-widest active:scale-95">
+                💾 Lưu kịch bản
             </button>
         </div>
     </div>
@@ -330,6 +385,142 @@
                     alert("❌ Lỗi khi gọi Crawler!");
                 }
             }
+        }
+
+        async function downloadVoice() {
+            let info = batchMap[activeVideoId];
+            if (!info) {
+                try {
+                    const res = await fetch(`/api/batch-info?videoId=${activeVideoId}`);
+                    const batches = await res.json();
+                    if (batches.length) {
+                        info = batches[batches.length - 1];
+                        batchMap[activeVideoId] = info;
+                    }
+                } catch (e) {}
+            }
+            if (!info || !info.batchUuid) return alert('Chưa tạo batch cho project này!');
+            try {
+                const res = await fetch('/api/download-voice', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoId: activeVideoId, batchUuid: info.batchUuid, lang: info.lang, folderNames: info.folderNames || [] })
+                });
+                const result = await res.json();
+                if (result.total) {
+                    alert(`✅ Đã tải ${result.total} file audio!`);
+                } else {
+                    alert(result.error || '❌ Batch chưa gen xong, thử lại sau!');
+                }
+            } catch (e) { alert('❌ Lỗi: ' + e.message); }
+        }
+
+        async function createVoice() {
+            document.getElementById('voiceModal').classList.remove('hide');
+            try {
+                const [langRes, speakerRes] = await Promise.all([
+                    fetch('/api/languages'),
+                    fetch('/api/reference-speakers')
+                ]);
+                const langs = await langRes.json();
+                const speakers = await speakerRes.json();
+                document.getElementById('voiceLang').innerHTML = '<option value="">-- Chọn ngôn ngữ --</option>' + langs.map(l => `<option value="${l.code || l.uuid}">${l.name || l.code}</option>`).join('');
+                document.getElementById('voiceSpeaker').innerHTML = '<option value="">-- Chọn giọng mẫu --</option>' + speakers.map(s => `<option value="${s.uuid}">${s.speaker_name}</option>`).join('');
+            } catch (e) {
+                document.getElementById('voiceLang').innerHTML = '<option value="">Lỗi tải</option>';
+                document.getElementById('voiceSpeaker').innerHTML = '<option value="">Lỗi tải</option>';
+            }
+        }
+
+        function closeVoiceModal() {
+            document.getElementById('voiceModal').classList.add('hide');
+            document.getElementById('voiceModalBody').innerHTML = document.getElementById('voiceModalBody').dataset.original;
+        }
+
+        async function genAudio(batchUuid) {
+            try {
+                const res = await fetch('/api/update-batch-status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ batchUuid })
+                });
+                const result = await res.json();
+                alert('✅ Đã bắt đầu gen audio!');
+                closeVoiceModal();
+            } catch (e) { alert('❌ Lỗi: ' + e.message); }
+        }
+
+        async function submitCreateVoice() {
+            const lang = document.getElementById('voiceLang').value;
+            const speakerUuid = document.getElementById('voiceSpeaker').value;
+            if (!lang) return alert('Vui lòng chọn ngôn ngữ!');
+            if (!speakerUuid) return alert('Vui lòng chọn giọng mẫu!');
+            try {
+                const res = await fetch('/api/create-voice', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoId: activeVideoId, lang, speakerUuid })
+                });
+                const result = await res.json();
+                if (result.batch_uuid) {
+                    batchMap[activeVideoId] = { batchUuid: result.batch_uuid, lang, folderNames: result.folderNames || [] };
+                    await fetch('/api/save-batch-info', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ videoId: activeVideoId, batchUuid: result.batch_uuid, lang, folderNames: result.folderNames || [] })
+                    });
+                    document.getElementById('voiceModalBody').innerHTML = `
+                        <div class="text-center space-y-6">
+                            <div class="text-green-400 text-5xl">✅</div>
+                            <h3 class="text-xl font-black text-white">Tạo thành công!</h3>
+                            <p class="text-sm text-gray-400">Batch UUID: <span class="font-mono text-white">${result.batch_uuid}</span></p>
+                            <p class="text-sm text-gray-500">Bấm nút bên dưới để bắt đầu tạo audio</p>
+                            <div class="flex gap-3 justify-center pt-2">
+                                <button onclick="closeVoiceModal()" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-400 transition-all">Đóng</button>
+                                <button onclick="genAudio('${result.batch_uuid}')" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-purple-600 hover:bg-purple-500 transition-all">🎙️ Gen Audio</button>
+                            </div>
+                        </div>`;
+                } else {
+                    alert('❌ Tạo không thành công!');
+                }
+            } catch (e) { alert('❌ Tạo không thành công!'); }
+        }
+
+        async function generateMedia() {
+            let info = batchMap[activeVideoId];
+            if (!info) {
+                try {
+                    const res = await fetch(`/api/batch-info?videoId=${activeVideoId}`);
+                    const batches = await res.json();
+                    if (batches.length) {
+                        info = batches[batches.length - 1];
+                        batchMap[activeVideoId] = info;
+                    }
+                } catch (e) {}
+            }
+            if (!info || !info.lang) return alert('Chưa tạo voice cho project này!');
+            try {
+                alert('🎬 Đang generate media...');
+                const res = await fetch('/api/generate-media-video', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoId: activeVideoId, lang: info.lang })
+                });
+                const result = await res.json();
+                if (result.success) {
+                    alert(`✅ Generate xong! ${result.results.length} câu đã xử lý.`);
+                } else {
+                    alert('❌ Lỗi: ' + (result.error || 'Không rõ'));
+                }
+            } catch (e) { alert('❌ Lỗi: ' + e.message); }
+        }
+
+        async function openFolder(videoId, lang) {
+            await fetch('/api/open-folder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ videoId, lang })
+            });
         }
 
         // --- HÀM 3: CHUYÊN LẤY VOICE (Nếu sau này bạn làm) ---
