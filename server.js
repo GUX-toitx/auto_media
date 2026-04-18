@@ -4,12 +4,15 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 
+import { getLanguages, getReferenceSpeakers, generateAudios, updateBatchStatus, downloadBatchAudios } from './audio_service.js';
+import { processAll } from './video_service.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = 3000;
 
-const MEDIA_DIR = '/usr/gux/media-team';
+const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
 
 app.use(express.json()); // BẮT BUỘC PHẢI CÓ DÒNG NÀY Ở ĐÂY
 
@@ -74,6 +77,72 @@ app.post('/api/generate-media', (req, res) => {
     });
 });
 
+app.post('/api/save-batch-info', (req, res) => {
+    const { videoId, batchUuid, lang, folderNames } = req.body;
+    const filePath = path.join(MEDIA_DIR, videoId, 'batches.json');
+    const batches = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf-8')) : [];
+    batches.push({ batchUuid, lang, folderNames: folderNames || [], createdAt: new Date().toISOString() });
+    fs.writeFileSync(filePath, JSON.stringify(batches, null, 2), 'utf-8');
+    res.json({ success: true });
+});
+
+app.get('/api/batch-info', (req, res) => {
+    const { videoId } = req.query;
+    const filePath = path.join(MEDIA_DIR, videoId, 'batches.json');
+    if (!fs.existsSync(filePath)) return res.json([]);
+    res.json(JSON.parse(fs.readFileSync(filePath, 'utf-8')));
+});
+
+app.post('/api/download-voice', async (req, res) => {
+    try {
+        const { videoId, batchUuid, lang, folderNames } = req.body;
+        const outputDir = path.join(MEDIA_DIR, videoId, 'output', lang, 'audios');
+        const result = await downloadBatchAudios(batchUuid, outputDir, folderNames || []);
+        if (!result) return res.json({ error: 'Batch chưa gen xong' });
+        res.json(result);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/update-batch-status', async (req, res) => {
+    try {
+        const { batchUuid } = req.body;
+        const result = await updateBatchStatus(batchUuid);
+        res.json(result);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/generate-media-video', async (req, res) => {
+    try {
+        const { videoId, lang } = req.body;
+        const projectDir = path.join(MEDIA_DIR, videoId);
+        const results = await processAll(projectDir, lang);
+        res.json({ success: true, results });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/languages', async (req, res) => {
+    try {
+        const result = await getLanguages();
+        res.json(result.data || []);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/reference-speakers', async (req, res) => {
+    try {
+        const result = await getReferenceSpeakers();
+        res.json(result.data || []);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/create-voice', async (req, res) => {
+    try {
+        const { videoId, lang, speakerUuid } = req.body;
+        const projectDir = path.join(MEDIA_DIR, videoId);
+        const result = await generateAudios(projectDir, lang, speakerUuid);
+        res.json({ batch_uuid: result.batch_uuid, folderNames: result.folderNames });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // API: Quét thư mục
 app.get('/api/scan', (req, res) => {
     const db = {};
@@ -83,7 +152,8 @@ app.get('/api/scan', (req, res) => {
     for (const vid of projects) {
         const assetsDir = path.join(MEDIA_DIR, vid, 'assets');
         if (!fs.existsSync(assetsDir)) continue;
-        db[vid] = { contexts: {}, keywords: {}, videos: {}, images: {} };
+        db[vid] = { langs: [], contexts: {}, keywords: {}, videos: {}, images: {}, generatedVideos: {} };
+        const langSet = new Set();
 
         // Quét Video & Meta
         const vDir = path.join(assetsDir, '_raw_videos');
@@ -96,10 +166,38 @@ app.get('/api/scan', (req, res) => {
                 files.forEach(f => {
                     if (f === 'context.txt') db[vid].contexts[g] = fs.readFileSync(path.join(gPath, f), 'utf-8');
                     else if (f === 'keywords.txt') db[vid].keywords[g] = fs.readFileSync(path.join(gPath, f), 'utf-8').split(',').map(k => k.trim());
-                    else if (f.endsWith('.mp4')) db[vid].videos[g].push({ name: f, url: `/${vid}/assets/_raw_videos/${g}/${f}`, relativePath: `${vid}/assets/_raw_videos/${g}/${f}`, isSelected: f.includes('selected') });
+                    else if (f.endsWith('.context.txt') && f !== 'context.txt') langSet.add(f.replace('.context.txt', ''));
+                    else if (f.endsWith('.mp4')) db[vid].videos[g].push({ name: f, url: `/${vid}/assets/_raw_videos/${g}/${f}`, relativePath: `${vid}/assets/_raw_videos/${g}/${f}`, isSelected: f.includes('[selected]') });
                 });
             });
         }
+        db[vid].langs = langSet;
+        db[vid].audios = {};
+
+        // Quét Video Generated & Audios
+        const outDir = path.join(MEDIA_DIR, vid, 'output');
+        if (fs.existsSync(outDir)) {
+            fs.readdirSync(outDir).filter(l => fs.statSync(path.join(outDir, l)).isDirectory()).forEach(lang => {
+                langSet.add(lang);
+                const aOutDir = path.join(outDir, lang, 'audios');
+                if (fs.existsSync(aOutDir)) {
+                    if (!db[vid].audios[lang]) db[vid].audios[lang] = {};
+                    fs.readdirSync(aOutDir).filter(f => f.endsWith('.mp3')).forEach(f => {
+                        const sentenceIdx = f.replace('.mp3', '');
+                        db[vid].audios[lang][sentenceIdx] = { name: f, url: `/${vid}/output/${lang}/audios/${f}` };
+                    });
+                }
+                const vOutDir = path.join(outDir, lang, 'videos');
+                if (!fs.existsSync(vOutDir)) return;
+                if (!db[vid].generatedVideos[lang]) db[vid].generatedVideos[lang] = {};
+                fs.readdirSync(vOutDir).filter(f => f.endsWith('.mp4')).forEach(f => {
+                    const sentenceIdx = f.split('_')[0];
+                    if (!db[vid].generatedVideos[lang][sentenceIdx]) db[vid].generatedVideos[lang][sentenceIdx] = [];
+                    db[vid].generatedVideos[lang][sentenceIdx].push({ name: f, url: `/${vid}/output/${lang}/videos/${f}` });
+                });
+            });
+        }
+
         // Quét Ảnh
         const iDir = path.join(assetsDir, '_raw_images');
         if (fs.existsSync(iDir)) {
@@ -108,10 +206,19 @@ app.get('/api/scan', (req, res) => {
                 const gPath = path.join(iDir, g);
                 db[vid].images[g] = [];
                 fs.readdirSync(gPath).forEach(f => {
-                    if (f.endsWith('.jpg') || f.endsWith('.png')) db[vid].images[g].push({ name: f, url: `/${vid}/assets/_raw_images/${g}/${f}`, relativePath: `${vid}/assets/_raw_images/${g}/${f}`, isSelected: f.includes('selected') });
+                    if (f.endsWith('.jpg') || f.endsWith('.png')) db[vid].images[g].push({ name: f, url: `/${vid}/assets/_raw_images/${g}/${f}`, relativePath: `${vid}/assets/_raw_images/${g}/${f}`, isSelected: f.includes('[selected]') });
                 });
             });
         }
+    }
+    // Gộp tất cả ngôn ngữ từ mọi project
+    const allLangs = new Set();
+    for (const vid of Object.keys(db)) {
+        for (const l of db[vid].langs) allLangs.add(l);
+    }
+    const allLangsArr = [...allLangs];
+    for (const vid of Object.keys(db)) {
+        db[vid].langs = allLangsArr;
     }
     res.json(db);
 });
@@ -123,9 +230,18 @@ app.post('/api/toggle', (req, res) => {
     if (!fs.existsSync(fullPath)) return res.status(404).json({ error: '404' });
     const dir = path.dirname(fullPath);
     const oldName = path.basename(fullPath);
-    let newName = action === 'select' ? `selected_${oldName.replace('selected_', '')}` : oldName.replace('selected_', '');
+    let newName = action === 'select' ? `[selected]_${oldName.replace('[selected]_', '')}` : oldName.replace('[selected]_', '');
     fs.renameSync(fullPath, path.join(dir, newName));
     res.json({ success: true, newRelativePath: path.join(path.dirname(relativePath), newName).replace(/\\/g, '/') });
+});
+
+app.post('/api/open-folder', (req, res) => {
+    const { videoId, lang } = req.body;
+    const folderPath = path.join(MEDIA_DIR, videoId, 'output', lang, 'videos');
+    const { platform } = process;
+    const cmd = platform === 'win32' ? 'explorer' : platform === 'darwin' ? 'open' : 'xdg-open';
+    spawn(cmd, [folderPath], { detached: true });
+    res.json({ success: true });
 });
 
 app.post('/api/generate-media', (req, res) => res.json({ success: true }));
