@@ -83,17 +83,19 @@ export async function generateAudios(projectDir, lang, speakerUuid) {
     }
 
     if (!texts.length) {
-        throw new Error(`Không tìm thấy file context.txt nào trong ${videosRoot}`);
+        throw new Error(`Không tìm thấy file ${lang}.context.txt nào trong ${videosRoot}`);
     }
 
     const batchName = `${path.basename(projectDir)}_${lang}`;
 
-    console.log(`[*] Tạo batch: ${batchName}`);
-    const createRes = await createBatch(batchName, texts, lang, speakerUuid);
-    const batchUuid = createRes.data?.uuid || createRes.uuid;
-    console.log(`[*] Batch UUID: ${batchUuid}`);
-
-    return { batch_uuid: batchUuid, outputDir, folderNames };
+    try {
+        const createRes = await createBatch(batchName, texts, lang, speakerUuid);
+        const batchUuid = createRes.data?.uuid || createRes.uuid;
+        return { batch_uuid: batchUuid, outputDir, folderNames };
+    } catch (err) {
+        console.error(`[generateAudios] LỖI createBatch:`, err.message);
+        throw err;
+    }
 }
 
 export async function updateBatchStatus(batchUuid) {
@@ -105,25 +107,19 @@ export async function downloadBatchAudios(batchUuid, outputDir, folderNames = []
     const batchData = await api(`/user/batch/${batchUuid}`).then(r => r.json());
     const status = batchData.data?.status || batchData.status;
 
-    if (status !== 'OK') {
-        console.log(`[!] Batch ${batchUuid} chưa gen xong (status: ${status})`);
-        return null;
-    }
+    if (status !== 'OK') return null;
 
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
-    const sentences = batchData.data?.sentences || [];
+    const sentences = (batchData.data?.sentences || []).sort((a, b) => a.index - b.index);
 
-    console.log(`[*] Tải ${sentences.length} file audio...`);
     await Promise.all(
         sentences.map(async (s, i) => {
             const fileName = folderNames[i] || s.index;
             const savePath = path.join(outputDir, `${fileName}.mp3`);
             await downloadAudio(s.audio_url, savePath);
-            console.log(`   [+] ${fileName}.mp3`);
         })
     );
 
-    console.log(`[OK] Đã lưu ${sentences.length} audio vào ${outputDir}`);
     return { total: sentences.length, outputDir };
 }
