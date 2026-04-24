@@ -250,6 +250,7 @@
         return `
         <div class="card-asset bg-gray-900 p-2 rounded-xl border relative ${borderCls}">
             <span id="${durationId}" class="absolute top-3 right-3 bg-black/70 text-[10px] px-1.5 py-0.5 rounded font-mono text-white z-20 pointer-events-none">--:--</span>
+            <button onclick="deleteAsset(this, '${asset.relativePath}')" class="absolute top-3 left-3 bg-red-600/80 hover:bg-red-500 text-white text-[10px] w-6 h-6 rounded-full z-20 flex items-center justify-center leading-none">×</button>
             
             <video 
                 controls 
@@ -270,16 +271,32 @@
         </div>`;
     }
     
-    // Phần ảnh giữ nguyên...
+    // ảnh giữ nguyên...
     return `
     <div class="card-asset bg-gray-900 p-1.5 rounded-lg border ${borderCls}">
-        <img src="${asset.url}" class="w-full h-24 object-cover rounded mb-2 shadow-lg">
+        <div class="relative">
+            <img src="${asset.url}" class="w-full h-24 object-cover rounded mb-2 shadow-lg">
+            <button onclick="deleteAsset(this, '${asset.relativePath}')" class="absolute top-1 left-1 bg-red-600/80 hover:bg-red-500 text-white text-[10px] w-6 h-6 rounded-full flex items-center justify-center leading-none">×</button>
+        </div>
         <button onclick="toggleSelect(this, 'image', '${asset.relativePath}')" 
             class="w-full text-[9px] font-black py-1.5 rounded uppercase tracking-wider transition-colors ${btnCls}">
             ${btnText}
         </button>
     </div>`;
 }
+
+        async function deleteAsset(btn, relativePath) {
+            if (!confirm('Xóa file này?')) return;
+            try {
+                const res = await fetch('/api/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ relativePath })
+                });
+                const result = await res.json();
+                if (result.success) btn.closest('.card-asset').remove();
+            } catch (e) { alert('❌ Lỗi khi xóa!'); }
+        }
 
         async function toggleSelect(btn, type, relativePath) {
             const card = btn.closest('.card-asset');
@@ -306,12 +323,14 @@
 
         function addKeyword(e, gid) {
             if (e.key === 'Enter' && e.target.value.trim()) {
+                const kw = e.target.value.trim();
                 const container = document.getElementById(`keywords-container-${gid}`);
                 const tag = document.createElement('span');
                 tag.className = "keyword-tag";
-                tag.innerHTML = `${e.target.value} <b class="cursor-pointer text-gray-600 hover:text-red-500" onclick="this.parentElement.remove()">×</b>`;
+                tag.innerHTML = `${kw} <b class="cursor-pointer text-gray-600 hover:text-red-500" onclick="this.parentElement.remove()">×</b>`;
                 container.insertBefore(tag, e.target);
                 e.target.value = '';
+                fetchMedia(gid, [kw]);
             }
         }
 
@@ -370,21 +389,16 @@
         }
 
         // --- HÀM 2: CHUYÊN LẤY MEDIA ---
-        async function fetchMedia(groupId) {
-            // Bước 1: Phải lưu trước để file keywords.txt được cập nhật mới nhất
-            const saveOk = await saveContent(groupId, true); // silent = true để ko hiện alert "Đã lưu"
-
+        async function fetchMedia(groupId, keywords) {
+            const saveOk = await saveContent(groupId, true);
             if (saveOk) {
-                const kwNodes = document.querySelectorAll(`#keywords-container-${groupId} .keyword-tag`);
-                const keywords = Array.from(kwNodes).map(node => node.innerText.replace('×', '').trim()).filter(k => k);
-
                 try {
-                    alert('🚀 Đang bắt đầu tải thêm Media ngầm...');
                     await fetch('/api/generate-media', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ videoId: activeVideoId, groupId, keywords })
                     });
+                    console.log(`[Media] Đang tải ngầm cho keyword: ${keywords.join(', ')}`);
                 } catch (error) {
                     alert("❌ Lỗi khi gọi Crawler!");
                 }

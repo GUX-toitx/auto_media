@@ -169,6 +169,7 @@ app.get('/api/scan', (req, res) => {
                     else if (f.endsWith('.context.txt') && f !== 'context.txt') langSet.add(f.replace('.context.txt', ''));
                     else if (f.endsWith('.mp4')) db[vid].videos[g].push({ name: f, url: `/${vid}/assets/_raw_videos/${g}/${f}`, relativePath: `${vid}/assets/_raw_videos/${g}/${f}`, isSelected: f.includes('[selected]') });
                 });
+                db[vid].videos[g].sort((a, b) => parseInt(a.name.match(/\d+/)?.[0] || 0) - parseInt(b.name.match(/\d+/)?.[0] || 0));
             });
         }
         db[vid].langs = langSet;
@@ -208,6 +209,7 @@ app.get('/api/scan', (req, res) => {
                 fs.readdirSync(gPath).forEach(f => {
                     if (f.endsWith('.jpg') || f.endsWith('.png')) db[vid].images[g].push({ name: f, url: `/${vid}/assets/_raw_images/${g}/${f}`, relativePath: `${vid}/assets/_raw_images/${g}/${f}`, isSelected: f.includes('[selected]') });
                 });
+                db[vid].images[g].sort((a, b) => parseInt(a.name.match(/\d+/)?.[0] || 0) - parseInt(b.name.match(/\d+/)?.[0] || 0));
             });
         }
     }
@@ -221,6 +223,15 @@ app.get('/api/scan', (req, res) => {
         db[vid].langs = allLangsArr;
     }
     res.json(db);
+});
+
+// API: Xóa file
+app.post('/api/delete', (req, res) => {
+    const { relativePath } = req.body;
+    const fullPath = path.join(MEDIA_DIR, relativePath);
+    if (!fs.existsSync(fullPath)) return res.status(404).json({ error: '404' });
+    fs.unlinkSync(fullPath);
+    res.json({ success: true });
 });
 
 // API: Toggle đổi tên

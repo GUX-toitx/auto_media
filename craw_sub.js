@@ -328,8 +328,13 @@ async function runSingleCrawl(videoId, groupId, keywordsArray) {
     fs.writeFileSync(kwFilePath, kwString, 'utf-8');
     fs.writeFileSync(path.join(iFolder, 'keywords.txt'), kwString, 'utf-8');
 
-    for (const kw of keywordsArray) { if (await fetchAndDownloadStock(kw, 'video', vFolder, 5) >= 5) break; }
-    for (const kw of keywordsArray) { if (await fetchAndDownloadStock(kw, 'image', iFolder, 5) >= 5) break; }
+    const existingVideos = fs.readdirSync(vFolder).filter(f => f.startsWith('stock_') && f.endsWith('.mp4')).length;
+    const existingImages = fs.readdirSync(iFolder).filter(f => f.startsWith('stock_') && f.endsWith('.jpg')).length;
+    const needVideo = Math.max(1, 5 - existingVideos);
+    const needImage = Math.max(1, 5 - existingImages);
+
+    for (const kw of keywordsArray) { if (await fetchAndDownloadStock(kw, 'video', vFolder, needVideo) >= needVideo) break; }
+    for (const kw of keywordsArray) { if (await fetchAndDownloadStock(kw, 'image', iFolder, needImage) >= needImage) break; }
 
     console.log(`[SUCCESS] Đã cập nhật Keywords và thêm Media mới cho nhóm ${groupId}.`);
     process.exit(0);
