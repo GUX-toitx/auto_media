@@ -225,6 +225,26 @@ app.get('/api/scan', (req, res) => {
     res.json(db);
 });
 
+// API: Xóa toàn bộ project
+app.post('/api/delete-project', (req, res) => {
+    const { videoId } = req.body;
+    const folder = path.join(MEDIA_DIR, videoId);
+    if (!fs.existsSync(folder)) return res.status(404).json({ error: '404' });
+    fs.rmSync(folder, { recursive: true, force: true });
+    res.json({ success: true });
+});
+
+// API: Xóa tất cả file trong folder
+app.post('/api/delete-all', (req, res) => {
+    const { videoId, groupId, type } = req.body;
+    const folder = path.join(MEDIA_DIR, videoId, 'assets', type === 'video' ? '_raw_videos' : '_raw_images', groupId);
+    if (!fs.existsSync(folder)) return res.status(404).json({ error: '404' });
+    const ext = type === 'video' ? '.mp4' : ['.jpg', '.png'];
+    const files = fs.readdirSync(folder).filter(f => Array.isArray(ext) ? ext.some(e => f.endsWith(e)) : f.endsWith(ext));
+    files.forEach(f => fs.unlinkSync(path.join(folder, f)));
+    res.json({ success: true, deleted: files.length });
+});
+
 // API: Xóa file
 app.post('/api/delete', (req, res) => {
     const { relativePath } = req.body;

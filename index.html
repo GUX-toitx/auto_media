@@ -116,7 +116,16 @@
                     btn.classList.add('!bg-yellow-500', '!text-black', '!border-yellow-400', 'border-l-2');
                     renderGallery(vid);
                 };
-                sidebar.appendChild(btn);
+                const row = document.createElement('div');
+                row.className = 'flex items-center gap-1 group';
+                const delBtn = document.createElement('button');
+                delBtn.className = 'shrink-0 bg-red-600 hover:bg-red-500 text-white text-[10px] font-black px-2 py-1 rounded transition-all';
+                delBtn.innerText = 'Xóa';
+                delBtn.title = 'Xóa project';
+                delBtn.onclick = (e) => { e.stopPropagation(); deleteProject(vid, row); };
+                row.appendChild(btn);
+                row.appendChild(delBtn);
+                sidebar.appendChild(row);
                 if (i === 0) btn.click();
             });
         }
@@ -184,6 +193,7 @@
                                 <h4 onclick="this.nextElementSibling.classList.toggle('hide'); this.querySelector('.acc-arrow').classList.toggle('rotate-90')" class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter cursor-pointer select-none hover:text-gray-200 transition-colors">
                                     <span class="acc-arrow inline-block transition-transform duration-200">▶</span>
                                     <span class="w-2 h-2 bg-blue-500 rounded-full"></span> 🎬 Videos (${videos.length})
+                                    <button onclick="event.stopPropagation(); deleteAll(this, '${videoId}', '${gid}', 'video')" class="ml-auto text-[10px] px-2 py-1 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white transition-colors normal-case tracking-normal font-normal">🗑️ Xóa tất cả</button>
                                 </h4>
                                 <div class="grid grid-cols-3 gap-4 hide">
                                     ${videos.length > 0 ? videos.map(v => renderAssetCard(v, 'video')).join('') : '<p class="text-xs text-gray-700 italic">Trống</p>'}
@@ -194,6 +204,7 @@
                                 <h4 onclick="this.nextElementSibling.classList.toggle('hide'); this.querySelector('.acc-arrow').classList.toggle('rotate-90')" class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter cursor-pointer select-none hover:text-gray-200 transition-colors">
                                     <span class="acc-arrow inline-block transition-transform duration-200">▶</span>
                                     <span class="w-2 h-2 bg-orange-500 rounded-full"></span> 🖼️ Images (${images.length})
+                                    <button onclick="event.stopPropagation(); deleteAll(this, '${videoId}', '${gid}', 'image')" class="ml-auto text-[10px] px-2 py-1 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white transition-colors normal-case tracking-normal font-normal">🗑️ Xóa tất cả</button>
                                 </h4>
                                 <div class="grid grid-cols-5 gap-3 hide">
                                     ${images.length > 0 ? images.map(i => renderAssetCard(i, 'image')).join('') : '<p class="text-xs text-gray-700 italic">Trống</p>'}
@@ -285,6 +296,44 @@
     </div>`;
 }
 
+        async function deleteProject(videoId, row) {
+            if (!confirm(`Xóa toàn bộ project "${videoId}"? Hành động này không thể hoàn tác!`)) return;
+            try {
+                const res = await fetch('/api/delete-project', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoId })
+                });
+                const result = await res.json();
+                if (result.success) {
+                    delete db[videoId];
+                    row.remove();
+                    if (activeVideoId === videoId) {
+                        activeVideoId = '';
+                        document.getElementById('galleryContainer').classList.add('hide');
+                    }
+                }
+            } catch (e) { alert('❌ Lỗi khi xóa project!'); }
+        }
+
+        async function deleteAll(btn, videoId, groupId, type) {
+            if (!confirm(`Xóa tất cả ${type === 'video' ? 'video' : 'ảnh'} của nhóm ${groupId}?`)) return;
+            try {
+                const res = await fetch('/api/delete-all', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoId, groupId, type })
+                });
+                const result = await res.json();
+                if (result.success) {
+                    btn.closest('div').nextElementSibling.querySelectorAll('.card-asset').forEach(c => c.remove());
+                    const res2 = await fetch('/api/scan');
+                    db = await res2.json();
+                    renderGallery(activeVideoId);
+                }
+            } catch (e) { alert('❌ Lỗi khi xóa!'); }
+        }
+
         async function deleteAsset(btn, relativePath) {
             if (!confirm('Xóa file này?')) return;
             try {
@@ -294,7 +343,12 @@
                     body: JSON.stringify({ relativePath })
                 });
                 const result = await res.json();
-                if (result.success) btn.closest('.card-asset').remove();
+                if (result.success) {
+                    btn.closest('.card-asset').remove();
+                    const res2 = await fetch('/api/scan');
+                    db = await res2.json();
+                    renderGallery(activeVideoId);
+                }
             } catch (e) { alert('❌ Lỗi khi xóa!'); }
         }
 
@@ -336,7 +390,8 @@
                 toast.innerText = `🔍 Đang tải media cho "${kw}"...`;
                 document.body.appendChild(toast);
 
-                fetchMedia(gid, [kw]).finally(() => toast.remove());
+                const minDelay = new Promise(r => setTimeout(r, 2000));
+                Promise.all([fetchMedia(gid, [kw]), minDelay]).finally(() => toast.remove());
             }
         }
 
