@@ -7,6 +7,8 @@ import Parser from 'srt-parser-2';
 import { execSync } from 'child_process';
 import crypto from 'crypto';
 import OpenAI from 'openai';
+import sqlite3 from 'sqlite3';
+import { open } from 'sqlite';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -16,14 +18,9 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const BASE_DIR = '/usr/gux/media-team';
 const SPREADSHEET_ID = '1K596bCoqZcNx0hvZbJitwHhIYTANpgsI8KqrWsvkRSs';
 
-// OpenAI Key
-const OPENAI_KEY = process.env.OPENAI_KEY;
-
-// Storyblocks Key
+const OPENAI_KEY = process.env.OPENAI_KEY; 
 const PUBLIC_KEY = process.env.STORYBLOCKS_PUBLIC_KEY;
 const PRIVATE_KEY = process.env.STORYBLOCKS_PRIVATE_KEY;
-
-// Pexels & Pixabay Key (Lấy miễn phí từ trang chủ của họ)
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY; 
 const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY;
 
@@ -38,10 +35,53 @@ const serviceAccountAuth = new JWT({
 });
 
 // ==========================================
-// 2. HÀM TẢI STOCK (ĐA NGUỒN: STORYBLOCKS, PEXELS, PIXABAY)
+// KHỞI TẠO DATABASE SQLITE
 // ==========================================
+async function initDB() {
+    const dbPath = path.join(BASE_DIR, 'media_system.sqlite');
+    const db = await open({
+        filename: dbPath,
+        driver: sqlite3.Database
+    });
 
-// Hàm tải và lưu file vật lý vào ổ cứng (Dùng chung cho mọi nguồn)
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS Post (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS Paragraph (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            post_id INTEGER,
+            content TEXT,
+            FOREIGN KEY(post_id) REFERENCES Post(id)
+        );
+        CREATE TABLE IF NOT EXISTS Keyword (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            paragraph_id INTEGER,
+            content TEXT,
+            FOREIGN KEY(paragraph_id) REFERENCES Paragraph(id)
+        );
+        CREATE TABLE IF NOT EXISTS Sentence (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            paragraph_id INTEGER,
+            content TEXT,
+            FOREIGN KEY(paragraph_id) REFERENCES Paragraph(id)
+        );
+        CREATE TABLE IF NOT EXISTS Asset (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            paragraph_id INTEGER NULL,
+            sentence_id INTEGER NULL,
+            file_path TEXT,
+            FOREIGN KEY(paragraph_id) REFERENCES Paragraph(id),
+            FOREIGN KEY(sentence_id) REFERENCES Sentence(id)
+        );
+    `);
+    return db;
+}
+
+// ==========================================
+// 2. HÀM TẢI STOCK (ĐA NGUỒN)
+// ==========================================
 async function downloadFileHelper(url, targetDir, ext) {
     const existingFiles = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext));
     const nextIndex = existingFiles.length + 1;
@@ -60,7 +100,6 @@ async function downloadFileHelper(url, targetDir, ext) {
     return false;
 }
 
-// ---- NGUỒN 1: STORYBLOCKS ----
 function buildStoryblocksUrlV2(resource, params = {}) {
     const expires = Math.floor(Date.now() / 1000) + 3600;
     const hmacKey = PRIVATE_KEY + expires;
@@ -73,42 +112,28 @@ async function fetchFromStoryblocks(keyword, type, targetDir, neededCount) {
     let downloaded = 0;
     const resource = type === 'video' ? '/api/v2/videos/search' : '/api/v2/images/search';
     const url = buildStoryblocksUrlV2(resource, { keywords: keyword, results_per_page: neededCount * 2, sort: 'most_downloaded' });
-
     try {
         const response = await fetch(url);
         if (!response.ok) return 0;
         const data = await response.json();
-        const results = data.results || [];
-
-        for (const item of results) {
+        for (const item of (data.results || [])) {
             if (downloaded >= neededCount) break;
-            let downloadUrl = type === 'video' ? 
-                (item.preview_url || (item.preview_urls && (item.preview_urls.mp4 || Object.values(item.preview_urls)[0]))) : 
-                (item.preview_url || item.thumbnail_url);
-
-            if (downloadUrl) {
-                const ext = type === 'video' ? 'mp4' : 'jpg';
-                if (await downloadFileHelper(downloadUrl, targetDir, ext)) downloaded++;
-            }
+            let downloadUrl = type === 'video' ? (item.preview_url || (item.preview_urls && (item.preview_urls.mp4 || Object.values(item.preview_urls)[0]))) : (item.preview_url || item.thumbnail_url);
+            if (downloadUrl && await downloadFileHelper(downloadUrl, targetDir, type === 'video' ? 'mp4' : 'jpg')) downloaded++;
         }
     } catch (e) { console.log("Lỗi Storyblocks:", e.message); }
     return downloaded;
 }
 
-// ---- NGUỒN 2: PEXELS ----
 async function fetchFromPexels(keyword, type, targetDir, neededCount) {
     if (!PEXELS_API_KEY || PEXELS_API_KEY.includes('ĐIỀN_KEY')) return 0; 
     let downloaded = 0;
-    const url = type === 'video' 
-        ? `https://api.pexels.com/videos/search?query=${encodeURIComponent(keyword)}&per_page=${neededCount * 2}`
-        : `https://api.pexels.com/v1/search?query=${encodeURIComponent(keyword)}&per_page=${neededCount * 2}`;
-
+    const url = type === 'video' ? `https://api.pexels.com/videos/search?query=${encodeURIComponent(keyword)}&per_page=${neededCount * 2}` : `https://api.pexels.com/v1/search?query=${encodeURIComponent(keyword)}&per_page=${neededCount * 2}`;
     try {
         const response = await fetch(url, { headers: { Authorization: PEXELS_API_KEY } });
         if (!response.ok) return 0;
         const data = await response.json();
         const results = type === 'video' ? data.videos : data.photos;
-
         for (const item of (results || [])) {
             if (downloaded >= neededCount) break;
             let downloadUrl = null;
@@ -128,7 +153,6 @@ async function fetchFromPexels(keyword, type, targetDir, neededCount) {
     return downloaded;
 }
 
-// ---- NGUỒN 3: PIXABAY ----
 async function fetchFromPixabay(keyword, type, targetDir, neededCount) {
     if (!PIXABAY_API_KEY || PIXABAY_API_KEY.includes('ĐIỀN_KEY')) return 0;
     let downloaded = 0;
@@ -139,83 +163,47 @@ async function fetchFromPixabay(keyword, type, targetDir, neededCount) {
         const response = await fetch(url);
         if (!response.ok) return 0;
         const data = await response.json();
-
         for (const item of (data.hits || [])) {
             if (downloaded >= neededCount) break;
-            let downloadUrl = null;
-            if (type === 'video' && item.videos) {
-                downloadUrl = item.videos.large.url || item.videos.medium.url;
-            } else {
-                downloadUrl = item.largeImageURL;
-            }
-
-            if (downloadUrl) {
-                const ext = type === 'video' ? 'mp4' : 'jpg';
-                if (await downloadFileHelper(downloadUrl, targetDir, ext)) downloaded++;
-            }
+            let downloadUrl = type === 'video' && item.videos ? (item.videos.large.url || item.videos.medium.url) : item.largeImageURL;
+            if (downloadUrl && await downloadFileHelper(downloadUrl, targetDir, type === 'video' ? 'mp4' : 'jpg')) downloaded++;
         }
     } catch (e) { console.log("Lỗi Pixabay:", e.message); }
     return downloaded;
 }
 
-// ---- MASTER FETCHER: GOM TÀI NGUYÊN TỪ MỌI NGUỒN ----
 async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 5) {
     if (!keyword) return 0;
     let totalDownloaded = 0;
-    
-    // Danh sách các nguồn cung cấp
-    const providers = [
-        { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
-        { name: 'Pexels', fetcher: fetchFromPexels },
-        { name: 'Pixabay', fetcher: fetchFromPixabay }
-    ];
-
+    const providers = [{ name: 'Storyblocks', fetcher: fetchFromStoryblocks }, { name: 'Pexels', fetcher: fetchFromPexels }, { name: 'Pixabay', fetcher: fetchFromPixabay }];
     console.log(`   -> Bắt đầu tìm "${keyword}" trên 3 nguồn...`);
-
-    // Duyệt qua TỪNG nguồn, và yêu cầu TỪNG nguồn lấy đủ 5 file
     for (const provider of providers) {
         const successCount = await provider.fetcher(keyword, type, targetDir, countPerSource);
-        
-        if (successCount > 0) {
-            console.log(`      [+] ${provider.name} đóng góp ${successCount} ${type}`);
-        }
+        if (successCount > 0) console.log(`      [+] ${provider.name} đóng góp ${successCount} ${type}`);
         totalDownloaded += successCount;
     }
-
     return totalDownloaded;
 }
 
 // ==========================================
-// 3. HÀM XỬ LÝ AI (COPYWRITER, CHIA CẢNH & DỊCH)
+// 3. HÀM XỬ LÝ AI 
 // ==========================================
-
 async function enhanceContent(rawText) {
     try {
         const response = await openai.chat.completions.create({
             model: "gpt-4o-mini",
-            messages: [
-                { 
-                    role: "system", 
-                    content: `Bạn là một Biên tập viên kịch bản video (Copywriter) xuất sắc. 
-Nhiệm vụ: Viết lại (xào lại) đoạn nội dung người dùng cung cấp sao cho bay bổng, hấp dẫn, thu hút người xem nhưng vẫn giữ nguyên ý nghĩa cốt lõi. Văn phong tự nhiên, phù hợp làm lời thoại video (Voice-over).
-KHÔNG thêm các tiêu đề như "Kịch bản:", "Giọng đọc:". Chỉ trả về DUY NHẤT nội dung kịch bản đã viết lại.` 
-                },
-                { role: "user", content: rawText }
-            ],
+            messages: [{ role: "system", content: `Bạn là một Copywriter xuất sắc. Viết lại nội dung cho bay bổng, tự nhiên, phù hợp làm Voice-over. KHÔNG thêm tiêu đề, chỉ trả về nội dung.` }, { role: "user", content: rawText }],
             temperature: 0.7 
         });
         return response.choices[0].message.content.trim();
-    } catch (e) {
-        console.error("[!] Lỗi khi xào lại nội dung:", e.message);
-        return rawText; 
-    }
+    } catch (e) { return rawText; }
 }
 
 async function getGlobalTheme(fullText) {
     try {
         const response = await openai.chat.completions.create({
             model: "gpt-4o-mini",
-            messages: [{ role: "system", content: `Bạn là Video Editor và Chuyên gia tìm kiếm Stock Footage chuyên nghiệp. Nhiệm vụ: Đọc toàn bộ kịch bản và trả về DUY NHẤT 1 CỤM TỪ (2-3 từ tiếng Anh) làm CHỦ ĐỀ CHÍNH BAO QUÁT. Không dùng từ trừu tượng.` }, { role: "user", content: fullText.slice(0, 2000) }],
+            messages: [{ role: "system", content: `Bạn là Video Editor. Đọc kịch bản và trả về DUY NHẤT 1 CỤM TỪ (2-3 từ tiếng Anh) làm CHỦ ĐỀ CHÍNH. Không dùng từ trừu tượng.` }, { role: "user", content: fullText.slice(0, 2000) }],
             temperature: 0.1
         });
         return response.choices[0].message.content.replace(/[.,"'!]/g, '').trim();
@@ -226,20 +214,15 @@ function chunkTextToParagraphs(rawText, maxChars = 3000) {
     const sentences = rawText.split(/(?<=\.)/); 
     const chunks = [];
     let currentChunk = "";
-
     for (let s of sentences) {
         if ((currentChunk.length + s.length) > maxChars) {
-            chunks.push(currentChunk.trim());
-            currentChunk = s;
-        } else {
-            currentChunk += " " + s;
-        }
+            chunks.push(currentChunk.trim()); currentChunk = s;
+        } else { currentChunk += " " + s; }
     }
     if (currentChunk) chunks.push(currentChunk.trim());
     return chunks;
 }
 
-// AI tự quyết định cắt cảnh, TẠO GÓC QUAY ĐỘNG VÀ BẮT BUỘC BÁM SÁT ĐỊA DANH
 async function analyzeAndGroupScenes(textChunk, globalTheme) {
     try {
         const response = await openai.chat.completions.create({
@@ -248,61 +231,39 @@ async function analyzeAndGroupScenes(textChunk, globalTheme) {
             messages: [
                 { 
                     role: "system", 
-                    content: `Bạn là một Đạo diễn Hình ảnh (Visual Director) xuất sắc. Kịch bản có chủ đề chung là: "${globalTheme}".
+                    content: `Bạn là Đạo diễn Hình ảnh. Kịch bản có chủ đề chung là: "${globalTheme}".
 Nhiệm vụ: 
-1. Làm mịn văn bản tiếng Việt.
-2. TỰ ĐỘNG CHIA đoạn văn bản thành các "Cảnh" (Scenes) sao cho hợp lý.
+1. Làm mịn văn bản.
+2. TỰ ĐỘNG CHIA đoạn văn bản thành các "Cảnh" (Scenes/Paragraphs).
 3. Cấp cho MỖI CẢNH đúng 3 từ khóa tiếng Anh (mỗi từ khóa 3-5 từ) để tìm Video Stock.
 
-🔥 QUY TẮC 1: ĐỊA DANH LÀ ƯU TIÊN SỐ 1 (LOCATION FIRST):
-- Nếu kịch bản nhắc đến BẤT KỲ địa danh, quốc gia, hoặc khu vực nào (Ví dụ: Trung Đông, Mỹ, Biển Đỏ, Châu Á...), BẮT BUỘC phải dịch địa danh đó sang tiếng Anh (Middle East, USA, Red Sea, Asia...) và đưa vào Keywords. KHÔNG được khái quát hóa thành "geopolitical" hay "global".
-
-🔥 QUY TẮC 2: "ĐỘNG TỪ HÓA" CÙNG BỐI CẢNH (ACTION + LOCATION):
-- Tuyệt đối không dùng các từ khóa chỉ có danh từ tĩnh (như: "middle east map").
-- Keyword phải chứa ĐỘNG TỪ (V-ing) hoặc tính từ chỉ sự kiện, ghép cùng với Địa danh.
-
-HƯỚNG DẪN TẠO 3 GÓC MÁY CHO VÍ DỤ: "Bất ổn địa chính trị tại Trung Đông, dòng tiền điều chỉnh"
-- Góc 1 (Bối cảnh + Địa danh + Tình trạng): "middle east desert military conflict", "middle east city protest riot".
-- Góc 2 (Sự kiện + Vật thể): "financial graph falling sharply", "stock market screen red numbers".
-- Góc 3 (Hành động + Bối cảnh): "investors analyzing middle east map", "businessmen discussing investment strategy".
+🔥 ĐỊA DANH ƯU TIÊN SỐ 1: Nếu có địa danh (Trung Đông, Mỹ...), BẮT BUỘC dịch sang tiếng Anh và đưa vào Keyword.
+🔥 "ĐỘNG TỪ HÓA": Bắt buộc dùng V-ing hoặc tính từ sự kiện (vd: "stock market crashing", "military helicopter flying").
 
 BẮT BUỘC trả về định dạng JSON:
 {
   "scenes": [
-    { 
-      "text": "Đoạn thoại tiếng Việt đã làm mịn...", 
-      "keywords": ["keyword 1", "keyword 2", "keyword 3"] 
-    }
+    { "text": "Đoạn thoại...", "keywords": ["keyword 1", "keyword 2", "keyword 3"] }
   ]
 }` 
                 },
                 { role: "user", content: textChunk }
             ],
-            temperature: 0.5 // Giữ mức 0.5 để AI ngoan ngoãn tuân thủ luật Địa danh nhưng vẫn sáng tạo góc máy
+            temperature: 0.5
         });
-
-        const data = JSON.parse(response.choices[0].message.content);
-        return data.scenes || [];
-    } catch (e) {
-        console.error("Lỗi AI phân cảnh:", e.message);
-        return [{ text: textChunk, keywords: ["cinematic b-roll", "professional background", "slow motion footage"] }];
-    }
+        return JSON.parse(response.choices[0].message.content).scenes || [];
+    } catch (e) { return [{ text: textChunk, keywords: ["cinematic b-roll", "professional background", "slow motion footage"] }]; }
 }
 
 async function translateText(text, targetLang) {
     try {
         const response = await openai.chat.completions.create({
             model: "gpt-4o-mini",
-            messages: [
-                { role: "system", content: `You are a professional native translator. Translate the given text into the language code: '${targetLang}'. Return ONLY the translated text, preserving the original tone and context. Do NOT add quotes or explanations.` },
-                { role: "user", content: text }
-            ],
+            messages: [{ role: "system", content: `You are a translator. Translate to '${targetLang}'. Return ONLY translated text.` }, { role: "user", content: text }],
             temperature: 0.2
         });
         return response.choices[0].message.content.trim();
-    } catch (e) {
-        return text;
-    }
+    } catch (e) { return text; }
 }
 
 // ==========================================
@@ -357,15 +318,14 @@ async function processNextInQueue() {
     const crawlType = targetRow.get('Loại craw') || 'Video ID'; 
     const rawInputContent = targetRow.get('Nội dung') || '';
     
-    const rawTargetLangs = targetRow.get('Ngôn ngữ Đích') || '';
-    const targetLangs = rawTargetLangs.split(',').map(l => l.trim()).filter(l => l);
-
+    const targetLangs = (targetRow.get('Ngôn ngữ Đích') || '').split(',').map(l => l.trim()).filter(l => l);
     const targetDir = path.join(BASE_DIR, projectId);
+    
+    // --- KHỞI TẠO DB ---
+    const db = await initDB();
     
     console.log(`\n===========================================`);
     console.log(`[${new Date().toLocaleTimeString()}] >>> BẮT ĐẦU DỰ ÁN: ${projectId}`);
-    console.log(`[*] Loại Crawl: ${crawlType}`);
-    if (targetLangs.length > 0) console.log(`[+] Cần dịch sang: ${targetLangs.join(', ')}`);
     console.log(`===========================================`);
 
     targetRow.set('Trạng thái', 'PROCESSING'); 
@@ -375,10 +335,10 @@ async function processNextInQueue() {
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
         let fullRawText = "";
+        let dbPostTitle = "";
 
-        // --- RẼ NHÁNH: "VIDEO ID" HOẶC "NỘI DUNG" ---
         if (crawlType === 'Video ID') {
-            console.log("[*] Đang tải YouTube Video và Subtitle...");
+            dbPostTitle = projectId;
             execSync(`yt-dlp --cookies ./youtube.com_cookies.txt -f "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/mp4" -o "${targetDir}/original.%(ext)s" "${projectId}"`, { stdio: 'inherit' });
             execSync(`yt-dlp --cookies ./youtube.com_cookies.txt --write-sub --write-auto-subs --sub-lang ${lang} --convert-subs srt --skip-download -o "${targetDir}/original.%(ext)s" "${projectId}" --ignore-errors`, { stdio: 'inherit' });
 
@@ -388,38 +348,29 @@ async function processNextInQueue() {
             if (fs.existsSync(path.join(targetDir, 'sub.srt'))) {
                 const rawBlocks = parser.fromSrt(fs.readFileSync(path.join(targetDir, 'sub.srt'), 'utf8'));
                 fullRawText = rawBlocks.map(b => b.text.replace(/\n/g, ' ')).join(' ');
-            } else {
-                throw new Error("Không lấy được Subtitle từ YouTube.");
-            }
-        } 
-        else if (crawlType === 'Nội dung' || crawlType === 'Nội Dung') {
-            if (!rawInputContent) throw new Error("Cột 'Nội dung' trống, không có gì để xử lý.");
-            
-            console.log("[*] Đang nhờ AI Copywriter 'xào' lại kịch bản cho bay bổng...");
+            } else { throw new Error("Không lấy được Subtitle từ YouTube."); }
+        } else {
+            if (!rawInputContent) throw new Error("Cột 'Nội dung' trống.");
+            dbPostTitle = `INPUT_TEXT_${Date.now()}_${crypto.randomBytes(2).toString('hex')}`;
             fullRawText = await enhanceContent(rawInputContent);
-            
             fs.writeFileSync(path.join(targetDir, 'original_content.txt'), rawInputContent);
             fs.writeFileSync(path.join(targetDir, 'enhanced_content.txt'), fullRawText);
-            console.log("[+] Xào kịch bản thành công!");
-        } 
-        else {
-            throw new Error(`Loại craw "${crawlType}" không hợp lệ.`);
         }
 
-        // --- TIẾP TỤC LUỒNG XỬ LÝ CHUNG ---
+        // 🟢 LƯU DATABASE: Tạo Post
+        // Dùng INSERT OR IGNORE để nếu chạy lại dự án cũ thì không bị lỗi UNIQUE constraint
+        await db.run('INSERT OR IGNORE INTO Post (title) VALUES (?)', [dbPostTitle]);
+        const postRecord = await db.get('SELECT id FROM Post WHERE title = ?', [dbPostTitle]);
+        const dbPostId = postRecord.id;
+
         const globalTheme = await getGlobalTheme(fullRawText);
         const textChunks = chunkTextToParagraphs(fullRawText);
         let allScenes = [];
         
-        console.log(`[*] Đang nhờ AI phân tích và băm nhỏ kịch bản...`);
         for (const chunk of textChunks) {
-            const scenes = await analyzeAndGroupScenes(chunk, globalTheme);
-            allScenes = allScenes.concat(scenes);
+            allScenes = allScenes.concat(await analyzeAndGroupScenes(chunk, globalTheme));
         }
 
-        console.log(`[*] Kịch bản đã được AI chia thành ${allScenes.length} nhóm cảnh.`);
-
-        // 4. Tải Assets và Dịch theo từng Cảnh
         for (let i = 0; i < allScenes.length; i++) {
             const scene = allScenes[i];
             const gid = String(i + 1);
@@ -430,19 +381,15 @@ async function processNextInQueue() {
 
             const kws = scene.keywords && scene.keywords.length > 0 ? scene.keywords : ["cinematic b-roll footage"];
             
+            // LƯU CÁC FILE CONTEXT
             fs.writeFileSync(path.join(vFolder, 'keywords.txt'), kws.join(', '));
             fs.writeFileSync(path.join(iFolder, 'keywords.txt'), kws.join(', '));
-
-            // Lưu file gốc (context.txt) cho hệ thống đọc mặc định
             fs.writeFileSync(path.join(vFolder, 'context.txt'), scene.text);
             fs.writeFileSync(path.join(iFolder, 'context.txt'), scene.text);
-
-            // LƯU THÊM FILE ĐỊNH DANH NGÔN NGỮ GỐC (ví dụ: vi.context.txt)
             fs.writeFileSync(path.join(vFolder, `${lang}.context.txt`), scene.text);
             fs.writeFileSync(path.join(iFolder, `${lang}.context.txt`), scene.text);
 
             if (targetLangs.length > 0) {
-                console.log(`   - [Cảnh ${gid}] Đang dịch sang ${targetLangs.length} ngôn ngữ...`);
                 for (const targetLang of targetLangs) {
                     const translatedText = await translateText(scene.text, targetLang);
                     fs.writeFileSync(path.join(vFolder, `${targetLang}.context.txt`), translatedText);
@@ -450,10 +397,42 @@ async function processNextInQueue() {
                 }
             }
 
-            console.log(`   - [Cảnh ${gid}] Đang tải media cho: "${scene.keyword}"`);
+            // 🟢 LƯU DATABASE: Tạo Paragraph
+            const paraRes = await db.run('INSERT INTO Paragraph (post_id, content) VALUES (?, ?)', [dbPostId, scene.text]);
+            const dbParagraphId = paraRes.lastID;
+
+            // 🟢 LƯU DATABASE: Tạo Keywords
+            for (const kw of kws) {
+                await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [dbParagraphId, kw]);
+            }
+
+            // 🟢 LƯU DATABASE: Tạo Sentences (Tách câu dựa vào dấu chấm)
+            const sentences = scene.text.split(/(?<=\.)/).map(s => s.trim()).filter(Boolean);
+            for (const s of sentences) {
+                await db.run('INSERT INTO Sentence (paragraph_id, content) VALUES (?, ?)', [dbParagraphId, s]);
+            }
+
+            // TẢI MEDIA
+            console.log(`   - [Cảnh ${gid}] Đang tải media...`);
             for (const kw of kws) { if (await fetchAndDownloadStock(kw, 'video', vFolder, 5) >= 5) break; }
             for (const kw of kws) { if (await fetchAndDownloadStock(kw, 'image', iFolder, 5) >= 5) break; }
             
+            // 🟢 LƯU DATABASE: Quét lại thư mục và lưu Asset (Để Sentence_id = NULL)
+            const syncAssetsToDB = async (folderPath) => {
+                const files = fs.readdirSync(folderPath).filter(f => f.startsWith('stock_') && (f.endsWith('.mp4') || f.endsWith('.jpg')));
+                for (const file of files) {
+                    const relativePath = path.join(projectId, 'assets', folderPath.includes('_raw_videos') ? '_raw_videos' : '_raw_images', gid, file);
+                    // Kiểm tra tránh trùng lặp nếu chạy lại
+                    const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
+                    if (!exists) {
+                        await db.run('INSERT INTO Asset (paragraph_id, sentence_id, file_path) VALUES (?, NULL, ?)', [dbParagraphId, relativePath]);
+                    }
+                }
+            };
+
+            await syncAssetsToDB(vFolder);
+            await syncAssetsToDB(iFolder);
+
             await sleep(2000);
         }
 
@@ -469,10 +448,10 @@ async function processNextInQueue() {
 }
 
 // ==========================================
-// 6. KHỞI CHẠY HỆ THỐNG
+// 5. KHỞI CHẠY HỆ THỐNG
 // ==========================================
 async function startQueueManager() {
-    console.log("=== HỆ THỐNG QUẢN LÝ HÀNG ĐỢI TỰ ĐỘNG ĐÃ CHẠY ===");
+    console.log("=== HỆ THỐNG QUẢN LÝ HÀNG ĐỢI (CÓ SYNC DATABASE) ĐÃ CHẠY ===");
     while (true) {
         const hasWork = await processNextInQueue();
         if (hasWork) {
@@ -485,14 +464,5 @@ async function startQueueManager() {
     }
 }
 
-const args = process.argv.slice(2);
-const modeIndex = args.indexOf('--mode');
-
-if (modeIndex !== -1 && args[modeIndex + 1] === 'single') {
-    const vId = args[args.indexOf('--videoId') + 1];
-    const gId = args[args.indexOf('--groupId') + 1];
-    const kws = args[args.indexOf('--keywords') + 1].split(',').map(k => k.trim());
-    runSingleCrawl(vId, gId, kws);
-} else {
-    startQueueManager();
-}
+// CHẠY LẺ ĐÃ ĐƯỢC TẠM ẨN ĐỂ TẬP TRUNG CHO DB/QUEUE
+startQueueManager();
