@@ -155,7 +155,7 @@
                             <div id="keywords-container-${gid}" class="flex flex-wrap gap-2 p-4 bg-gray-900/30 rounded-xl border border-gray-800">
                                 ${currentKeywords.map(kw => `
                                     <span class="keyword-tag">
-                                        ${kw} <b class="cursor-pointer text-gray-600 hover:text-red-500 text-lg leading-none" onclick="this.parentElement.remove()">×</b>
+                                        ${kw} <b class="cursor-pointer text-gray-600 hover:text-red-500 text-lg leading-none" onclick="this.parentElement.remove(); saveContent('${gid}', true)">×</b>
                                     </span>
                                 `).join('')}
                                 <input type="text" onkeydown="addKeyword(event, '${gid}')" placeholder="+ Thêm từ khóa..." class="bg-transparent text-xs p-1 outline-none text-blue-400 w-32 border-b border-transparent focus:border-blue-500">
@@ -327,10 +327,16 @@
                 const container = document.getElementById(`keywords-container-${gid}`);
                 const tag = document.createElement('span');
                 tag.className = "keyword-tag";
-                tag.innerHTML = `${kw} <b class="cursor-pointer text-gray-600 hover:text-red-500" onclick="this.parentElement.remove()">×</b>`;
+                tag.innerHTML = `${kw} <b class="cursor-pointer text-gray-600 hover:text-red-500" onclick="this.parentElement.remove(); saveContent('${gid}', true)">×</b>`;
                 container.insertBefore(tag, e.target);
                 e.target.value = '';
-                fetchMedia(gid, [kw]);
+
+                const toast = document.createElement('div');
+                toast.className = 'fixed bottom-6 right-6 z-50 bg-blue-600 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-lg';
+                toast.innerText = `🔍 Đang tải media cho "${kw}"...`;
+                document.body.appendChild(toast);
+
+                fetchMedia(gid, [kw]).finally(() => toast.remove());
             }
         }
 
