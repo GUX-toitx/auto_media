@@ -113,7 +113,7 @@ async function fetchFromPexels(keyword, type, targetDir, neededCount) {
             if (downloaded >= neededCount) break;
             let downloadUrl = null;
             if (type === 'video') {
-                const hdVideo = item.video_files.find(v => v.quality === 'hd') || item.video_files[0];
+                const hdVideo = item.video_files.sort((a, b) => (b.width || 0) - (a.width || 0)).find(v => (v.width || 0) <= 1920) || item.video_files[0];
                 downloadUrl = hdVideo ? hdVideo.link : null;
             } else {
                 downloadUrl = item.src.large;
@@ -132,8 +132,8 @@ async function fetchFromPexels(keyword, type, targetDir, neededCount) {
 async function fetchFromPixabay(keyword, type, targetDir, neededCount) {
     if (!PIXABAY_API_KEY || PIXABAY_API_KEY.includes('ĐIỀN_KEY')) return 0;
     let downloaded = 0;
-    const mediaType = type === 'video' ? 'videos' : ''; 
-    const url = `https://pixabay.com/api/${mediaType}/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(keyword)}&per_page=${Math.max(3, neededCount * 2)}&safesearch=true`;
+    const mediaType = type === 'video' ? 'videos/' : '';
+    const url = `https://pixabay.com/api/${mediaType}?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(keyword)}&per_page=${Math.max(3, neededCount * 2)}&safesearch=true`;
 
     try {
         const response = await fetch(url);
