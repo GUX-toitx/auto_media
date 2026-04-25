@@ -14,3 +14,7 @@ sudo apt install python3-websockets -y
     node craw_sub.js
 - Luồng thứ hai chạy để lấy image và video từ keyword, phần này phần lấy keyword vẫn đang là todo
     node sync_assets.js
+
+
+1. chạy node browser.js đẻ đăng nhập vào chrome Playwright
+

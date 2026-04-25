@@ -10,6 +10,7 @@ import multer from 'multer';
 
 import { getLanguages, getReferenceSpeakers, generateAudios, updateBatchStatus, downloadBatchAudios } from './audio_service.js';
 import { processAll } from './video_service.js';
+import { generateFlowImage } from './browser.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -439,6 +440,32 @@ app.post('/api/open-folder', async (req, res) => {
     const cmd = platform === 'win32' ? 'explorer' : platform === 'darwin' ? 'open' : 'xdg-open';
     spawn(cmd, [folderPath], { detached: true });
     res.json({ success: true });
+});
+
+// API: AI Generate Image/Video (Google Flow)
+app.post('/api/ai-generate', async (req, res) => {
+    const { videoId, paragraphId, gid, keywords, type, content, count } = req.body;
+    if (!keywords?.length) return res.status(400).json({ error: 'Không có keyword' });
+
+    const subDir = type === 'video' ? '_raw_videos_ai_gen' : '_raw_images_ai_gen';
+    const targetDir = path.join(MEDIA_DIR, videoId, 'assets', subDir, gid);
+    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+    res.json({ success: true, message: `Đang tạo ${type} AI...` });
+
+    (async () => {
+        const db = await getDb();
+        const saved = await generateFlowImage(keywords.join(', '), targetDir, content || '', type, count || 4);
+        for (const fileName of saved) {
+            const relativePath = path.join(videoId, 'assets', subDir, gid, fileName);
+            const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
+            if (!exists) {
+                await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, selected, "order", file_path) VALUES (?, NULL, ?, 0, 0, ?)', [paragraphId, type, relativePath]);
+            }
+        }
+        await db.close();
+        console.log(`[AI Generate] Done ${type} for paragraph ${paragraphId}`);
+    })().catch(e => console.error('[AI Generate] Error:', e.message));
 });
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));

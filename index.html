@@ -385,6 +385,36 @@
         </div>
     </div>
 
+    <!-- AI GENERATE MODAL -->
+    <div v-if="aiModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="aiModal.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[400px] space-y-5">
+            <div class="flex justify-between items-center">
+                <h3 class="text-lg font-black text-white">✨ AI Generate {{ aiModal.type === 'video' ? 'Video' : 'Image' }}</h3>
+                <button @click="aiModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Số lượng</label>
+                <div class="flex gap-2">
+                    <button v-for="n in [1,2,3,4]" :key="n" @click="aiModal.count = n"
+                        class="flex-1 py-2.5 rounded-lg text-sm font-black transition-colors"
+                        :class="aiModal.count === n ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">x{{ n }}</button>
+                </div>
+            </div>
+            <div class="bg-gray-800/60 rounded-lg p-3 text-[11px] text-gray-400 leading-relaxed max-h-20 overflow-y-auto">
+                <span class="text-gray-600">Content:</span> {{ aiModal.content || 'Trống' }}
+            </div>
+            <div class="flex flex-wrap gap-1">
+                <span v-for="kw in aiModal.keywords" :key="kw" class="keyword-tag">{{ kw }}</span>
+            </div>
+            <div class="flex gap-3 justify-end pt-2">
+                <button @click="aiModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
+                <button @click="submitAiGenerate" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-purple-600 hover:bg-purple-500 transition-all">
+                    🚀 Tạo {{ aiModal.type === 'video' ? 'Video' : 'Ảnh' }}
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- TOAST -->
     <div v-if="toast" class="fixed bottom-6 right-6 z-50 bg-blue-600 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-lg">{{ toast }}</div>
 </div>
@@ -401,6 +431,7 @@ createApp({
         const voiceModal = ref({ open: false, lang: '', speakerUuid: '', langs: [], speakers: [], batchUuid: '' });
         const editModal = ref({ open: false, type: '', asset: null, start: 0, end: 0, duration: 0, cropX: 0, cropY: 0, cropW: 200, cropH: 200, cropReady: false, saving: false });
         const uploadModal = ref({ open: false, type: '', para: null, files: [], dragging: false, uploading: false });
+        const aiModal = ref({ open: false, type: '', para: null, gid: '', count: 4, content: '', keywords: [] });
 
         const activeProjectId = computed(() => {
             if (!activePost.value) return '';
@@ -792,6 +823,26 @@ createApp({
             voiceModal.value.open = false;
         }
 
+        function aiGenerate(para, type) {
+            const kws = para.keywords?.length ? para.keywords : [];
+            if (!kws.length) return showToast('⚠️ Chưa có keyword!');
+            const paras = activePost.value.paragraphs;
+            const gid = String(paras.findIndex(p => p.id === para.id) + 1);
+            aiModal.value = { open: true, type, para, gid, count: 4, content: para.content || '', keywords: kws };
+        }
+
+        async function submitAiGenerate() {
+            const { type, para, gid, count, content, keywords } = aiModal.value;
+            aiModal.value.open = false;
+            showToast(`🎨 Đang tạo ${count} ${type} AI qua Google Flow...`);
+            await fetch('/api/ai-generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ videoId: activeProjectId.value, paragraphId: para.id, gid, keywords, type, content, count })
+            });
+            showToast('✅ Đang tạo ngầm, reload sau vài phút!', 5000);
+        }
+
         async function downloadVoice() {
             if (!activePost.value) return;
             const res = await fetch('/api/download-voice', {
@@ -850,6 +901,9 @@ createApp({
             submitCreateVoice,
             genAudio,
             downloadVoice,
+            aiGenerate,
+            submitAiGenerate,
+            aiModal,
             uploadAsset,
             unselectAsset,
             openFolder,
