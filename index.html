@@ -91,38 +91,42 @@
     </div>
 
     <script>
-        let db = {};
-        let activeVideoId = '';
+        let posts = [];
+        let activePostId = null;
+        let activeProjectId = '';
         const batchMap = {};
+        const paraAssets = {}; // lưu videos/images theo paraId để lazy render
 
         window.onload = async () => {
             const modalBody = document.getElementById('voiceModalBody');
             modalBody.dataset.original = modalBody.innerHTML;
-            const res = await fetch('/api/scan');
-            db = await res.json();
-            renderSidebar();
+            await loadPosts();
         };
 
+        async function loadPosts() {
+            const res = await fetch('/api/posts');
+            posts = await res.json();
+            renderSidebar();
+        }
+
         function renderSidebar() {
-            const videoIds = Object.keys(db);
             const sidebar = document.getElementById('videoList');
             sidebar.innerHTML = '';
-            videoIds.forEach((vid, i) => {
+            posts.forEach((post, i) => {
                 const btn = document.createElement('button');
                 btn.className = "sidebar-btn w-full text-left p-3 rounded-lg hover:bg-gray-800 text-xs truncate transition-all text-gray-500 hover:text-white font-medium";
-                btn.innerText = "📁 " + vid;
+                btn.innerText = "\u{1F4C1} " + post.title;
                 btn.onclick = () => {
-                    document.querySelectorAll('.sidebar-btn').forEach(b => { b.classList.remove('!bg-yellow-500', '!text-black', '!border-yellow-400', 'border-l-2'); });
+                    document.querySelectorAll('.sidebar-btn').forEach(b => b.classList.remove('!bg-yellow-500', '!text-black', '!border-yellow-400', 'border-l-2'));
                     btn.classList.add('!bg-yellow-500', '!text-black', '!border-yellow-400', 'border-l-2');
-                    renderGallery(vid);
+                    renderGallery(post.id);
                 };
                 const row = document.createElement('div');
                 row.className = 'flex items-center gap-1 group';
                 const delBtn = document.createElement('button');
                 delBtn.className = 'shrink-0 bg-red-600 hover:bg-red-500 text-white text-[10px] font-black px-2 py-1 rounded transition-all';
-                delBtn.innerText = 'Xóa';
-                delBtn.title = 'Xóa project';
-                delBtn.onclick = (e) => { e.stopPropagation(); deleteProject(vid, row); };
+                delBtn.innerText = 'X\u00f3a';
+                delBtn.onclick = (e) => { e.stopPropagation(); deleteProject(post, row); };
                 row.appendChild(btn);
                 row.appendChild(delBtn);
                 sidebar.appendChild(row);
@@ -130,123 +134,90 @@
             });
         }
 
-        async function renderGallery(videoId) {
-            activeVideoId = videoId;
+        async function renderGallery(postId) {
+            activePostId = postId;
+            const res = await fetch(`/api/posts/${postId}`);
+            const data = await res.json();
+            activeProjectId = data.projectId;
             document.getElementById('galleryContainer').classList.remove('hide');
-            document.getElementById('currentVidTitle').innerText = videoId;
-            const data = db[videoId];
-            const sortedGroups = Object.keys(data.videos).sort((a, b) => parseInt(a) - parseInt(b));
+            document.getElementById('currentVidTitle').innerText = data.title;
 
             let html = '';
-            for (const gid of sortedGroups) {
-                const script = data.contexts[gid] || "";
-                const videos = data.videos[gid] || [];
-                const images = data.images[gid] || [];
-                const currentKeywords = (data.keywords && data.keywords[gid]) ? data.keywords[gid] : [];
-                const genVideos = data.generatedVideos || {};
-                const audios = data.audios || {};
-                const langs = data.langs || [];
-                const voiceExists = false; // logic check file voice ở server nếu có
+            data.paragraphs.forEach((para, i) => {
+                const gid = String(i + 1);
+                const videos = para.videos || [];
+                const images = para.images || [];
+                const langs = [...new Set([...Object.keys(para.audios || {}), ...Object.keys(para.generatedVideos || {})])];
+                paraAssets[para.id] = { videos: para.videos || [], images: para.images || [] };
 
                 html += `
                 <div class="grid grid-cols-12 gap-12">
                     <div class="col-span-9 space-y-10">
                         <div>
                             <div class="flex items-center gap-3 mb-4">
-                                <span class="bg-blue-600 text-[10px] font-black px-2 py-1 rounded">NHÓM ${gid}</span>
-                                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Kịch bản thoại</label>
+                                <span class="bg-blue-600 text-[10px] font-black px-2 py-1 rounded">NH\u00d3M ${gid}</span>
+                                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">N\u1ed9i dung g\u1ed1c (Original)</label>
                             </div>
-                            <textarea id="script-${gid}" class="w-full bg-gray-900 border border-gray-800 rounded-xl p-6 text-sm leading-relaxed focus:border-blue-500 outline-none h-32 transition-all shadow-inner">${script}</textarea>
+                            <div class="w-full bg-gray-950 border border-gray-800 rounded-xl p-4 text-xs text-gray-400 leading-relaxed max-h-32 overflow-y-auto whitespace-pre-wrap">${para.original_content || '<span class="italic text-gray-700">Ch\u01b0a c\u00f3 n\u1ed9i dung g\u1ed1c</span>'}</div>
                         </div>
-
                         <div>
-                            <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-4 block">Từ khóa tìm kiếm (Keywords)</label>
-                            <div id="keywords-container-${gid}" class="flex flex-wrap gap-2 p-4 bg-gray-900/30 rounded-xl border border-gray-800">
-                                ${currentKeywords.map(kw => `
-                                    <span class="keyword-tag">
-                                        ${kw} <b class="cursor-pointer text-gray-600 hover:text-red-500 text-lg leading-none" onclick="this.parentElement.remove(); saveContent('${gid}', true)">×</b>
-                                    </span>
-                                `).join('')}
-                                <input type="text" onkeydown="addKeyword(event, '${gid}')" placeholder="+ Thêm từ khóa..." class="bg-transparent text-xs p-1 outline-none text-blue-400 w-32 border-b border-transparent focus:border-blue-500">
+                            <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">K\u1ecbch b\u1ea3n \u0111\u00e3 l\u00e0m m\u1ecbn</label>
+                            <textarea id="script-${para.id}" class="w-full bg-gray-900 border border-gray-800 rounded-xl p-6 text-sm leading-relaxed focus:border-blue-500 outline-none h-32 transition-all shadow-inner">${para.content || ''}</textarea>
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-4 block">T\u1eeb kh\u00f3a t\u00ecm ki\u1ebfm (Keywords)</label>
+                            <div id="keywords-container-${para.id}" class="flex flex-wrap gap-2 p-4 bg-gray-900/30 rounded-xl border border-gray-800">
+                                ${(para.keywords || []).map(kw => `<span class="keyword-tag">${kw} <b class="cursor-pointer text-gray-600 hover:text-red-500 text-lg leading-none" onclick="this.parentElement.remove(); saveContent(${para.id}, true)">\u00d7</b></span>`).join('')}
+                                <input type="text" onkeydown="addKeyword(event, ${para.id})" placeholder="+ Th\u00eam t\u1eeb kh\u00f3a..." class="bg-transparent text-xs p-1 outline-none text-blue-400 w-32 border-b border-transparent focus:border-blue-500">
                             </div>
                         </div>
-
                         <div>
-                            <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3 block">Âm thanh (Voice)</label>
+                            <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3 block">\u00c2m thanh (Voice)</label>
                             ${langs.map(lang => {
-                                const audio = audios[lang] && audios[lang][gid];
-                                if (!audio) return `<div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-900 border border-gray-800 text-[11px] text-gray-500 italic mb-2"><span>[${lang.toUpperCase()}] ○ Chưa có audio</span></div>`;
-                                return `<div class="mb-2">
-                                    <div onclick="this.nextElementSibling.classList.toggle('hide'); this.querySelector('.acc-arrow').classList.toggle('rotate-90')" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-900 border border-green-800 text-[11px] text-green-400 font-bold cursor-pointer hover:border-green-600 transition-colors">
-                                        <span class="acc-arrow inline-block transition-transform duration-200">▶</span>
-                                        <span>[${lang.toUpperCase()}] ● Voice sẵn sàng</span>
-                                    </div>
-                                    <div class="hide mt-2 pl-2">
-                                        <audio controls src="${audio.url}" class="w-full h-8"></audio>
-                                    </div>
-                                </div>`;
+                                const audio = para.audios && para.audios[lang];
+                                if (!audio) return `<div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-900 border border-gray-800 text-[11px] text-gray-500 italic mb-2"><span>[${lang.toUpperCase()}] Ch\u01b0a c\u00f3 audio</span></div>`;
+                                return `<div class="mb-2"><div onclick="this.nextElementSibling.classList.toggle('hide')" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-900 border border-green-800 text-[11px] text-green-400 font-bold cursor-pointer"><span>[${lang.toUpperCase()}] Voice s\u1eb5n s\u00e0ng</span></div><div class="hide mt-2 pl-2"><audio controls src="${audio.url}" class="w-full h-8"></audio></div></div>`;
                             }).join('')}
                         </div>
-
                         <div class="space-y-8 pt-4">
                             <div>
-                                <h4 onclick="this.nextElementSibling.classList.toggle('hide'); this.querySelector('.acc-arrow').classList.toggle('rotate-90')" class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter cursor-pointer select-none hover:text-gray-200 transition-colors">
-                                    <span class="acc-arrow inline-block transition-transform duration-200">▶</span>
-                                    <span class="w-2 h-2 bg-blue-500 rounded-full"></span> 🎬 Videos (${videos.length})
-                                    <button onclick="event.stopPropagation(); deleteAll(this, '${videoId}', '${gid}', 'video')" class="ml-auto text-[10px] px-2 py-1 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white transition-colors normal-case tracking-normal font-normal">🗑️ Xóa tất cả</button>
+                                <h4 onclick="toggleAssets(this, ${para.id}, 'video')" class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter cursor-pointer select-none hover:text-gray-200">
+                                    \u25b6 <span class="w-2 h-2 bg-blue-500 rounded-full"></span> Videos (${videos.length})
+                                    <button onclick="event.stopPropagation(); deleteAll(this, '${activeProjectId}', '${gid}', 'video')" class="ml-auto text-[10px] px-2 py-1 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white normal-case tracking-normal font-normal">X\u00f3a t\u1ea5t c\u1ea3</button>
                                 </h4>
-                                <div class="grid grid-cols-3 gap-4 hide">
-                                    ${videos.length > 0 ? videos.map(v => renderAssetCard(v, 'video')).join('') : '<p class="text-xs text-gray-700 italic">Trống</p>'}
-                                </div>
+                                <div id="assets-video-${para.id}" class="grid grid-cols-3 gap-4 hide"></div>
                             </div>
-
                             <div>
-                                <h4 onclick="this.nextElementSibling.classList.toggle('hide'); this.querySelector('.acc-arrow').classList.toggle('rotate-90')" class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter cursor-pointer select-none hover:text-gray-200 transition-colors">
-                                    <span class="acc-arrow inline-block transition-transform duration-200">▶</span>
-                                    <span class="w-2 h-2 bg-orange-500 rounded-full"></span> 🖼️ Images (${images.length})
-                                    <button onclick="event.stopPropagation(); deleteAll(this, '${videoId}', '${gid}', 'image')" class="ml-auto text-[10px] px-2 py-1 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white transition-colors normal-case tracking-normal font-normal">🗑️ Xóa tất cả</button>
+                                <h4 onclick="toggleAssets(this, ${para.id}, 'image')" class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter cursor-pointer select-none hover:text-gray-200">
+                                    \u25b6 <span class="w-2 h-2 bg-orange-500 rounded-full"></span> Images (${images.length})
+                                    <button onclick="event.stopPropagation(); deleteAll(this, '${activeProjectId}', '${gid}', 'image')" class="ml-auto text-[10px] px-2 py-1 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white normal-case tracking-normal font-normal">X\u00f3a t\u1ea5t c\u1ea3</button>
                                 </h4>
-                                <div class="grid grid-cols-5 gap-3 hide">
-                                    ${images.length > 0 ? images.map(i => renderAssetCard(i, 'image')).join('') : '<p class="text-xs text-gray-700 italic">Trống</p>'}
-                                </div>
+                                <div id="assets-image-${para.id}" class="grid grid-cols-5 gap-3 hide"></div>
                             </div>
-
-                            ${langs.map(lang => {
-                                const vids = (genVideos[lang] && genVideos[lang][gid]) || [];
-                                return `<div>
-                                    <h4 class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter">
-                                        <span onclick="this.closest('h4').nextElementSibling.classList.toggle('hide'); this.classList.toggle('rotate-90')" class="acc-arrow inline-block transition-transform duration-200 cursor-pointer">▶</span>
-                                        <span onclick="this.closest('h4').nextElementSibling.classList.toggle('hide'); this.previousElementSibling.classList.toggle('rotate-90')" class="cursor-pointer hover:text-gray-200 transition-colors flex-1">✅ Video Generated [${lang.toUpperCase()}] (${vids.length})</span>
-                                        <button onclick="openFolder('${videoId}', '${lang}')" class="ml-auto text-[10px] px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors normal-case tracking-normal font-normal">📂 Mở thư mục</button>
-                                    </h4>
-                                    <div class="grid grid-cols-3 gap-4 hide">
-                                        ${vids.length > 0 ? vids.map(v => `
-                                            <div class="card-asset bg-gray-900 p-2 rounded-xl border border-green-800 relative">
-                                                <video controls muted loop preload="metadata" src="${v.url}" onmouseenter="this.play()" onmouseleave="this.pause()" class="w-full h-40 object-cover rounded-lg mb-2 bg-black shadow-lg"></video>
-                                                <p class="text-[10px] text-gray-500 truncate text-center">${v.name}</p>
-                                            </div>
-                                        `).join('') : '<p class="text-xs text-gray-700 italic">Chưa generate</p>'}
-                                    </div>
-                                </div>`;
-                            }).join('')}
                         </div>
                     </div>
-
-
                     <div class="col-span-3">
-    <div class="sticky top-[150px] space-y-3">
-        <div>
-            <button onclick="saveContent('${gid}')" 
-                    class="w-full bg-yellow-500 hover:bg-yellow-400 py-4 rounded-xl text-[11px] font-black uppercase text-black transition-all tracking-widest active:scale-95">
-                💾 Lưu kịch bản
-            </button>
-        </div>
-    </div>
-</div>
+                        <div class="sticky top-[150px]">
+                            <button onclick="saveContent(${para.id})" class="w-full bg-yellow-500 hover:bg-yellow-400 py-4 rounded-xl text-[11px] font-black uppercase text-black transition-all tracking-widest active:scale-95">L\u01b0u k\u1ecbch b\u1ea3n</button>
+                        </div>
+                    </div>
                 </div>
                 <hr class="border-gray-900/50 my-16">`;
-            }
+            });
             document.getElementById('groupList').innerHTML = html;
+        }
+
+
+        function toggleAssets(h4, paraId, type) {
+            const container = document.getElementById(`assets-${type}-${paraId}`);
+            const isHidden = container.classList.contains('hide');
+            container.classList.toggle('hide');
+            if (isHidden && container.innerHTML === '') {
+                const assets = (paraAssets[paraId] || {})[type === 'video' ? 'videos' : 'images'] || [];
+                container.innerHTML = assets.length > 0
+                    ? assets.map(a => renderAssetCard(a, type)).join('')
+                    : '<p class="text-xs text-gray-700 italic">Trống</p>';
+            }
         }
 
         function renderAssetCard(asset, type) {
@@ -296,20 +267,20 @@
     </div>`;
 }
 
-        async function deleteProject(videoId, row) {
-            if (!confirm(`Xóa toàn bộ project "${videoId}"? Hành động này không thể hoàn tác!`)) return;
+        async function deleteProject(post, row) {
+            if (!confirm(`Xóa toàn bộ project "${post.title}"? Hành động này không thể hoàn tác!`)) return;
             try {
                 const res = await fetch('/api/delete-project', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoId })
+                    body: JSON.stringify({ videoId: post.title.replace(/_[a-z]{2}$/, '') })
                 });
                 const result = await res.json();
                 if (result.success) {
-                    delete db[videoId];
+                    posts = posts.filter(p => p.id !== post.id);
                     row.remove();
-                    if (activeVideoId === videoId) {
-                        activeVideoId = '';
+                    if (activePostId === post.id) {
+                        activePostId = null;
                         document.getElementById('galleryContainer').classList.add('hide');
                     }
                 }
@@ -327,9 +298,6 @@
                 const result = await res.json();
                 if (result.success) {
                     btn.closest('div').nextElementSibling.querySelectorAll('.card-asset').forEach(c => c.remove());
-                    const res2 = await fetch('/api/scan');
-                    db = await res2.json();
-                    renderGallery(activeVideoId);
                 }
             } catch (e) { alert('❌ Lỗi khi xóa!'); }
         }
@@ -343,12 +311,7 @@
                     body: JSON.stringify({ relativePath })
                 });
                 const result = await res.json();
-                if (result.success) {
-                    btn.closest('.card-asset').remove();
-                    const res2 = await fetch('/api/scan');
-                    db = await res2.json();
-                    renderGallery(activeVideoId);
-                }
+                if (result.success) btn.closest('.card-asset').remove();
             } catch (e) { alert('❌ Lỗi khi xóa!'); }
         }
 
@@ -375,23 +338,21 @@
             } catch (error) { btn.innerHTML = 'Lỗi'; }
         }
 
-        function addKeyword(e, gid) {
+        function addKeyword(e, paraId) {
             if (e.key === 'Enter' && e.target.value.trim()) {
                 const kw = e.target.value.trim();
-                const container = document.getElementById(`keywords-container-${gid}`);
+                const container = document.getElementById(`keywords-container-${paraId}`);
                 const tag = document.createElement('span');
                 tag.className = "keyword-tag";
-                tag.innerHTML = `${kw} <b class="cursor-pointer text-gray-600 hover:text-red-500" onclick="this.parentElement.remove(); saveContent('${gid}', true)">×</b>`;
+                tag.innerHTML = `${kw} <b class="cursor-pointer text-gray-600 hover:text-red-500" onclick="this.parentElement.remove(); saveContent(${paraId}, true)">×</b>`;
                 container.insertBefore(tag, e.target);
                 e.target.value = '';
-
                 const toast = document.createElement('div');
                 toast.className = 'fixed bottom-6 right-6 z-50 bg-blue-600 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-lg';
-                toast.innerText = `🔍 Đang tải media cho "${kw}"...`;
+                toast.innerText = `Đang tải media cho "${kw}"...`;
                 document.body.appendChild(toast);
-
                 const minDelay = new Promise(r => setTimeout(r, 2000));
-                Promise.all([fetchMedia(gid, [kw]), minDelay]).finally(() => toast.remove());
+                Promise.all([fetchMedia(paraId, [kw]), minDelay]).finally(() => toast.remove());
             }
         }
 
@@ -425,57 +386,40 @@
             return `${mins}:${secs.toString().padStart(2, '0')}`;
         }
 
-        // --- HÀM 1: CHUYÊN LƯU NỘI DUNG (Kịch bản & Keywords) ---
-        async function saveContent(groupId, silent = false) {
-            const script = document.getElementById(`script-${groupId}`).value;
-            const kwNodes = document.querySelectorAll(`#keywords-container-${groupId} .keyword-tag`);
+        async function saveContent(paraId, silent = false) {
+            const script = document.getElementById(`script-${paraId}`).value;
+            const kwNodes = document.querySelectorAll(`#keywords-container-${paraId} .keyword-tag`);
             const keywords = Array.from(kwNodes).map(node => node.innerText.replace('×', '').trim()).filter(k => k);
-
             try {
                 const res = await fetch('/api/save-content', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoId: activeVideoId, groupId, script, keywords })
+                    body: JSON.stringify({ paragraphId: paraId, script, keywords })
                 });
                 const result = await res.json();
-                if (result.success && !silent) {
-                    alert('✅ Đã lưu kịch bản & từ khóa!');
-                }
+                if (result.success && !silent) alert('✅ Đã lưu kịch bản & từ khóa!');
                 return result.success;
-            } catch (error) {
-                console.error("Lỗi lưu nội dung:", error);
-                alert("❌ Lỗi khi lưu!");
-                return false;
-            }
+            } catch (error) { alert("❌ Lỗi khi lưu!"); return false; }
         }
 
-        // --- HÀM 2: CHUYÊN LẤY MEDIA ---
-        async function fetchMedia(groupId, keywords) {
-            const saveOk = await saveContent(groupId, true);
-            if (saveOk) {
-                try {
-                    await fetch('/api/generate-media', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ videoId: activeVideoId, groupId, keywords })
-                    });
-                    console.log(`[Media] Đang tải ngầm cho keyword: ${keywords.join(', ')}`);
-                } catch (error) {
-                    alert("❌ Lỗi khi gọi Crawler!");
-                }
-            }
+        async function fetchMedia(paraId, keywords) {
+            await saveContent(paraId, true);
+            try {
+                await fetch('/api/generate-media', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoId: activeProjectId, groupId: paraId, keywords })
+                });
+            } catch (error) { alert("❌ Lỗi khi gọi Crawler!"); }
         }
 
         async function downloadVoice() {
-            let info = batchMap[activeVideoId];
+            let info = batchMap[activeProjectId];
             if (!info) {
                 try {
-                    const res = await fetch(`/api/batch-info?videoId=${activeVideoId}`);
+                    const res = await fetch(`/api/batch-info?videoId=${activeProjectId}`);
                     const batches = await res.json();
-                    if (batches.length) {
-                        info = batches[batches.length - 1];
-                        batchMap[activeVideoId] = info;
-                    }
+                    if (batches.length) { info = batches[batches.length - 1]; batchMap[activeProjectId] = info; }
                 } catch (e) {}
             }
             if (!info || !info.batchUuid) return alert('Chưa tạo batch cho project này!');
@@ -483,14 +427,11 @@
                 const res = await fetch('/api/download-voice', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoId: activeVideoId, batchUuid: info.batchUuid, lang: info.lang, folderNames: info.folderNames || [] })
+                    body: JSON.stringify({ videoId: activeProjectId, batchUuid: info.batchUuid, lang: info.lang, folderNames: info.folderNames || [] })
                 });
                 const result = await res.json();
-                if (result.total) {
-                    alert(`✅ Đã tải ${result.total} file audio!`);
-                } else {
-                    alert(result.error || '❌ Batch chưa gen xong, thử lại sau!');
-                }
+                if (result.total) alert(`✅ Đã tải ${result.total} file audio!`);
+                else alert(result.error || '❌ Batch chưa gen xong, thử lại sau!');
             } catch (e) { alert('❌ Lỗi: ' + e.message); }
         }
 
@@ -538,15 +479,15 @@
                 const res = await fetch('/api/create-voice', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoId: activeVideoId, lang, speakerUuid })
+                    body: JSON.stringify({ videoId: activeProjectId, lang, speakerUuid })
                 });
                 const result = await res.json();
                 if (result.batch_uuid) {
-                    batchMap[activeVideoId] = { batchUuid: result.batch_uuid, lang, folderNames: result.folderNames || [] };
+                    batchMap[activeProjectId] = { batchUuid: result.batch_uuid, lang, folderNames: result.folderNames || [] };
                     await fetch('/api/save-batch-info', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ videoId: activeVideoId, batchUuid: result.batch_uuid, lang, folderNames: result.folderNames || [] })
+                        body: JSON.stringify({ videoId: activeProjectId, batchUuid: result.batch_uuid, lang, folderNames: result.folderNames || [] })
                     });
                     document.getElementById('voiceModalBody').innerHTML = `
                         <div class="text-center space-y-6">
@@ -566,15 +507,12 @@
         }
 
         async function generateMedia() {
-            let info = batchMap[activeVideoId];
+            let info = batchMap[activeProjectId];
             if (!info) {
                 try {
-                    const res = await fetch(`/api/batch-info?videoId=${activeVideoId}`);
+                    const res = await fetch(`/api/batch-info?videoId=${activeProjectId}`);
                     const batches = await res.json();
-                    if (batches.length) {
-                        info = batches[batches.length - 1];
-                        batchMap[activeVideoId] = info;
-                    }
+                    if (batches.length) { info = batches[batches.length - 1]; batchMap[activeProjectId] = info; }
                 } catch (e) {}
             }
             if (!info || !info.lang) return alert('Chưa tạo voice cho project này!');
@@ -583,7 +521,7 @@
                 const res = await fetch('/api/generate-media-video', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoId: activeVideoId, lang: info.lang })
+                    body: JSON.stringify({ videoId: activeProjectId, lang: info.lang })
                 });
                 const result = await res.json();
                 if (result.success) {

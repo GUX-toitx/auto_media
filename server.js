@@ -3,6 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
+import sqlite3 from 'sqlite3';
+import { open } from 'sqlite';
 
 import { getLanguages, getReferenceSpeakers, generateAudios, updateBatchStatus, downloadBatchAudios } from './audio_service.js';
 import { processAll } from './video_service.js';
@@ -16,25 +18,91 @@ const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
 
 app.use(express.json()); // BẮT BUỘC PHẢI CÓ DÒNG NÀY Ở ĐÂY
 
-// API: Lưu Kịch bản và Keywords
-app.post('/api/save-content', (req, res) => {
-    const { videoId, groupId, script, keywords } = req.body;
-    const vPath = path.join(MEDIA_DIR, videoId, 'assets', '_raw_videos', groupId);
-    const iPath = path.join(MEDIA_DIR, videoId, 'assets', '_raw_images', groupId);
+const DB_PATH = path.join(MEDIA_DIR, 'media_system.sqlite');
+const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 
+// API: Lấy danh sách posts
+app.get('/api/posts', async (req, res) => {
     try {
-        if (!fs.existsSync(vPath)) fs.mkdirSync(vPath, { recursive: true });
-        fs.writeFileSync(path.join(vPath, 'context.txt'), script || '', 'utf-8');
-        if (Array.isArray(keywords)) {
-            const kwStr = keywords.join(', ');
-            fs.writeFileSync(path.join(vPath, 'keywords.txt'), kwStr, 'utf-8');
-            if (fs.existsSync(iPath)) {
-                fs.writeFileSync(path.join(iPath, 'context.txt'), script || '', 'utf-8');
-                fs.writeFileSync(path.join(iPath, 'keywords.txt'), kwStr, 'utf-8');
+        const db = await getDb();
+        const posts = await db.all('SELECT id, title FROM Post ORDER BY id DESC');
+        await db.close();
+        res.json(posts);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API: Chi tiết 1 post: paragraphs + keywords + assets (file media quét từ thư mục)
+app.get('/api/posts/:postId', async (req, res) => {
+    try {
+        const db = await getDb();
+        const post = await db.get('SELECT id, title FROM Post WHERE id = ?', [req.params.postId]);
+        if (!post) return res.status(404).json({ error: 'Post not found' });
+
+        const paragraphs = await db.all(
+            'SELECT id, content, original_content FROM Paragraph WHERE post_id = ? ORDER BY id',
+            [post.id]
+        );
+
+        // Lấy tên thư mục gốc (bỏ suffix _en, _vi...)
+        const projectId = post.title.replace(/_[a-z]{2}$/, '');
+
+        for (let i = 0; i < paragraphs.length; i++) {
+            const para = paragraphs[i];
+            const gid = String(i + 1);
+
+            // Keywords từ DB
+            para.keywords = (await db.all(
+                'SELECT content FROM Keyword WHERE paragraph_id = ? ORDER BY id',
+                [para.id]
+            )).map(r => r.content);
+
+            // File media từ DB
+            const assets = await db.all(
+                'SELECT id, type, file_path FROM Asset WHERE paragraph_id = ? ORDER BY id',
+                [para.id]
+            );
+            para.videos = assets
+                .filter(a => a.type === 'video')
+                .map(a => ({ name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, isSelected: a.file_path.includes('[selected]') }));
+            para.images = assets
+                .filter(a => a.type === 'image')
+                .map(a => ({ name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, isSelected: a.file_path.includes('[selected]') }));
+
+            // Audios & generated videos từ thư mục output
+            para.audios = {};
+            para.generatedVideos = {};
+            const outDir = path.join(MEDIA_DIR, projectId, 'output');
+            if (fs.existsSync(outDir)) {
+                for (const lang of fs.readdirSync(outDir)) {
+                    const aFile = path.join(outDir, lang, 'audios', `${gid}.mp3`);
+                    if (fs.existsSync(aFile)) para.audios[lang] = { name: `${gid}.mp3`, url: `/${projectId}/output/${lang}/audios/${gid}.mp3` };
+                    const vOutDir = path.join(outDir, lang, 'videos');
+                    if (fs.existsSync(vOutDir)) {
+                        const genVids = fs.readdirSync(vOutDir).filter(f => f.startsWith(`${gid}_`) && f.endsWith('.mp4'));
+                        if (genVids.length) para.generatedVideos[lang] = genVids.map(f => ({ name: f, url: `/${projectId}/output/${lang}/videos/${f}` }));
+                    }
+                }
             }
         }
+
+        await db.close();
+        res.json({ ...post, projectId, paragraphs });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API: Lưu Kịch bản và Keywords -> cập nhật thẳng vào DB
+app.post('/api/save-content', async (req, res) => {
+    const { paragraphId, script, keywords } = req.body;
+    try {
+        const db = await getDb();
+        await db.run('UPDATE Paragraph SET content = ? WHERE id = ?', [script, paragraphId]);
+        await db.run('DELETE FROM Keyword WHERE paragraph_id = ?', [paragraphId]);
+        for (const kw of (keywords || [])) {
+            await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [paragraphId, kw]);
+        }
+        await db.close();
         res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: "Lỗi ghi file" }); }
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Cập nhật API lấy Media
@@ -143,115 +211,63 @@ app.post('/api/create-voice', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// API: Quét thư mục
-app.get('/api/scan', (req, res) => {
-    const db = {};
-    if (!fs.existsSync(MEDIA_DIR)) return res.json(db);
-    const projects = fs.readdirSync(MEDIA_DIR).filter(f => fs.statSync(path.join(MEDIA_DIR, f)).isDirectory());
-
-    for (const vid of projects) {
-        const assetsDir = path.join(MEDIA_DIR, vid, 'assets');
-        if (!fs.existsSync(assetsDir)) continue;
-        db[vid] = { langs: [], contexts: {}, keywords: {}, videos: {}, images: {}, generatedVideos: {} };
-        const langSet = new Set();
-
-        // Quét Video & Meta
-        const vDir = path.join(assetsDir, '_raw_videos');
-        if (fs.existsSync(vDir)) {
-            const groups = fs.readdirSync(vDir).filter(f => fs.statSync(path.join(vDir, f)).isDirectory());
-            groups.forEach(g => {
-                const gPath = path.join(vDir, g);
-                const files = fs.readdirSync(gPath);
-                db[vid].videos[g] = [];
-                files.forEach(f => {
-                    if (f === 'context.txt') db[vid].contexts[g] = fs.readFileSync(path.join(gPath, f), 'utf-8');
-                    else if (f === 'keywords.txt') db[vid].keywords[g] = fs.readFileSync(path.join(gPath, f), 'utf-8').split(',').map(k => k.trim());
-                    else if (f.endsWith('.context.txt') && f !== 'context.txt') langSet.add(f.replace('.context.txt', ''));
-                    else if (f.endsWith('.mp4')) db[vid].videos[g].push({ name: f, url: `/${vid}/assets/_raw_videos/${g}/${f}`, relativePath: `${vid}/assets/_raw_videos/${g}/${f}`, isSelected: f.includes('[selected]') });
-                });
-                db[vid].videos[g].sort((a, b) => parseInt(a.name.match(/\d+/)?.[0] || 0) - parseInt(b.name.match(/\d+/)?.[0] || 0));
-            });
-        }
-        db[vid].langs = langSet;
-        db[vid].audios = {};
-
-        // Quét Video Generated & Audios
-        const outDir = path.join(MEDIA_DIR, vid, 'output');
-        if (fs.existsSync(outDir)) {
-            fs.readdirSync(outDir).filter(l => fs.statSync(path.join(outDir, l)).isDirectory()).forEach(lang => {
-                langSet.add(lang);
-                const aOutDir = path.join(outDir, lang, 'audios');
-                if (fs.existsSync(aOutDir)) {
-                    if (!db[vid].audios[lang]) db[vid].audios[lang] = {};
-                    fs.readdirSync(aOutDir).filter(f => f.endsWith('.mp3')).forEach(f => {
-                        const sentenceIdx = f.replace('.mp3', '');
-                        db[vid].audios[lang][sentenceIdx] = { name: f, url: `/${vid}/output/${lang}/audios/${f}` };
-                    });
-                }
-                const vOutDir = path.join(outDir, lang, 'videos');
-                if (!fs.existsSync(vOutDir)) return;
-                if (!db[vid].generatedVideos[lang]) db[vid].generatedVideos[lang] = {};
-                fs.readdirSync(vOutDir).filter(f => f.endsWith('.mp4')).forEach(f => {
-                    const sentenceIdx = f.split('_')[0];
-                    if (!db[vid].generatedVideos[lang][sentenceIdx]) db[vid].generatedVideos[lang][sentenceIdx] = [];
-                    db[vid].generatedVideos[lang][sentenceIdx].push({ name: f, url: `/${vid}/output/${lang}/videos/${f}` });
-                });
-            });
-        }
-
-        // Quét Ảnh
-        const iDir = path.join(assetsDir, '_raw_images');
-        if (fs.existsSync(iDir)) {
-            const groups = fs.readdirSync(iDir).filter(f => fs.statSync(path.join(iDir, f)).isDirectory());
-            groups.forEach(g => {
-                const gPath = path.join(iDir, g);
-                db[vid].images[g] = [];
-                fs.readdirSync(gPath).forEach(f => {
-                    if (f.endsWith('.jpg') || f.endsWith('.png')) db[vid].images[g].push({ name: f, url: `/${vid}/assets/_raw_images/${g}/${f}`, relativePath: `${vid}/assets/_raw_images/${g}/${f}`, isSelected: f.includes('[selected]') });
-                });
-                db[vid].images[g].sort((a, b) => parseInt(a.name.match(/\d+/)?.[0] || 0) - parseInt(b.name.match(/\d+/)?.[0] || 0));
-            });
-        }
-    }
-    // Gộp tất cả ngôn ngữ từ mọi project
-    const allLangs = new Set();
-    for (const vid of Object.keys(db)) {
-        for (const l of db[vid].langs) allLangs.add(l);
-    }
-    const allLangsArr = [...allLangs];
-    for (const vid of Object.keys(db)) {
-        db[vid].langs = allLangsArr;
-    }
-    res.json(db);
-});
-
 // API: Xóa toàn bộ project
-app.post('/api/delete-project', (req, res) => {
+app.post('/api/delete-project', async (req, res) => {
     const { videoId } = req.body;
-    const folder = path.join(MEDIA_DIR, videoId);
-    if (!fs.existsSync(folder)) return res.status(404).json({ error: '404' });
-    fs.rmSync(folder, { recursive: true, force: true });
-    res.json({ success: true });
+    try {
+        const db = await getDb();
+        // Xóa tất cả posts có title là videoId hoặc bắt đầu bằng videoId_
+        const posts = await db.all('SELECT id FROM Post WHERE title = ? OR title LIKE ?', [videoId, `${videoId}\_%`]);
+        for (const post of posts) {
+            const paras = await db.all('SELECT id FROM Paragraph WHERE post_id = ?', [post.id]);
+            for (const para of paras) {
+                await db.run('DELETE FROM Keyword WHERE paragraph_id = ?', [para.id]);
+                await db.run('DELETE FROM Sentence WHERE paragraph_id = ?', [para.id]);
+                await db.run('DELETE FROM Asset WHERE paragraph_id = ?', [para.id]);
+            }
+            await db.run('DELETE FROM Paragraph WHERE post_id = ?', [post.id]);
+            await db.run('DELETE FROM Post WHERE id = ?', [post.id]);
+        }
+        await db.close();
+        const folder = path.join(MEDIA_DIR, videoId);
+        if (fs.existsSync(folder)) fs.rmSync(folder, { recursive: true, force: true });
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // API: Xóa tất cả file trong folder
-app.post('/api/delete-all', (req, res) => {
+app.post('/api/delete-all', async (req, res) => {
     const { videoId, groupId, type } = req.body;
-    const folder = path.join(MEDIA_DIR, videoId, 'assets', type === 'video' ? '_raw_videos' : '_raw_images', groupId);
-    if (!fs.existsSync(folder)) return res.status(404).json({ error: '404' });
-    const ext = type === 'video' ? '.mp4' : ['.jpg', '.png'];
-    const files = fs.readdirSync(folder).filter(f => Array.isArray(ext) ? ext.some(e => f.endsWith(e)) : f.endsWith(ext));
-    files.forEach(f => fs.unlinkSync(path.join(folder, f)));
-    res.json({ success: true, deleted: files.length });
+    try {
+        const db = await getDb();
+        const assets = await db.all(
+            `SELECT Asset.id, Asset.file_path FROM Asset
+             JOIN Paragraph ON Asset.paragraph_id = Paragraph.id
+             JOIN Post ON Paragraph.post_id = Post.id
+             WHERE (Post.title = ? OR Post.title LIKE ?) AND Asset.type = ? AND Asset.file_path LIKE ?`,
+            [videoId, `${videoId}\_%`, type, `%/_raw_${type === 'video' ? 'videos' : 'images'}/${groupId}/%`]
+        );
+        for (const asset of assets) {
+            await db.run('DELETE FROM Asset WHERE id = ?', [asset.id]);
+            const fullPath = path.join(MEDIA_DIR, asset.file_path);
+            if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+        }
+        await db.close();
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // API: Xóa file
-app.post('/api/delete', (req, res) => {
+app.post('/api/delete', async (req, res) => {
     const { relativePath } = req.body;
-    const fullPath = path.join(MEDIA_DIR, relativePath);
-    if (!fs.existsSync(fullPath)) return res.status(404).json({ error: '404' });
-    fs.unlinkSync(fullPath);
-    res.json({ success: true });
+    try {
+        const db = await getDb();
+        await db.run('DELETE FROM Asset WHERE file_path = ?', [relativePath]);
+        await db.close();
+        const fullPath = path.join(MEDIA_DIR, relativePath);
+        if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // API: Toggle đổi tên

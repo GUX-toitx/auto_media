@@ -53,6 +53,7 @@ async function initDB() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             post_id INTEGER,
             content TEXT,
+            original_content TEXT,
             FOREIGN KEY(post_id) REFERENCES Post(id)
         );
         CREATE TABLE IF NOT EXISTS Keyword (
@@ -71,11 +72,15 @@ async function initDB() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             paragraph_id INTEGER NULL,
             sentence_id INTEGER NULL,
+            type TEXT NOT NULL DEFAULT 'video',
             file_path TEXT,
             FOREIGN KEY(paragraph_id) REFERENCES Paragraph(id),
             FOREIGN KEY(sentence_id) REFERENCES Sentence(id)
         );
     `);
+    // migrate: thêm cột type cho DB cũ nếu chưa có
+    await db.run("ALTER TABLE Asset ADD COLUMN type TEXT NOT NULL DEFAULT 'video'").catch(() => {});
+    
     return db;
 }
 
@@ -172,27 +177,31 @@ async function fetchFromPixabay(keyword, type, targetDir, neededCount) {
     return downloaded;
 }
 
-async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 5) {
+async function fetchAndDownloadStock(keyword, type, targetDir, totalNeeded = 5) {
     if (!keyword) return 0;
     let totalDownloaded = 0;
-    const providers = [{ name: 'Storyblocks', fetcher: fetchFromStoryblocks }, { name: 'Pexels', fetcher: fetchFromPexels }, { name: 'Pixabay', fetcher: fetchFromPixabay }];
-    console.log(`   -> Bắt đầu tìm "${keyword}" trên 3 nguồn...`);
+    const providers = [{ name: 'Storyblocks', fetcher: fetchFromStoryblocks }, { name: 'Pexels', fetcher: fetchFromPexels }];
+    console.log(`   -> [${type.toUpperCase()}] Tìm "${keyword}" | Cần: ${totalNeeded}`);
     for (const provider of providers) {
-        const successCount = await provider.fetcher(keyword, type, targetDir, countPerSource);
-        if (successCount > 0) console.log(`      [+] ${provider.name} đóng góp ${successCount} ${type}`);
+        if (totalDownloaded >= totalNeeded) break;
+        const need = totalNeeded - totalDownloaded;
+        const successCount = await provider.fetcher(keyword, type, targetDir, need);
+        console.log(`      [${provider.name}] Tải được: ${successCount}/${need} ${type}`);
         totalDownloaded += successCount;
     }
+    console.log(`   -> [${type.toUpperCase()}] "${keyword}" xong: ${totalDownloaded}/${totalNeeded}`);
     return totalDownloaded;
 }
 
 // ==========================================
 // 3. HÀM XỬ LÝ AI 
 // ==========================================
-async function enhanceContent(rawText) {
+async function enhanceContent(rawText, targetLang = null) {
     try {
+        const langInstruction = targetLang ? `Viết lại bằng ngôn ngữ: ${targetLang}.` : 'Giữ nguyên ngôn ngữ gốc.';
         const response = await openai.chat.completions.create({
             model: "gpt-4o-mini",
-            messages: [{ role: "system", content: `Bạn là một Copywriter xuất sắc. Viết lại nội dung cho bay bổng, tự nhiên, phù hợp làm Voice-over. KHÔNG thêm tiêu đề, chỉ trả về nội dung.` }, { role: "user", content: rawText }],
+            messages: [{ role: "system", content: `Bạn là một Copywriter xuất sắc. Viết lại nội dung cho bay bổng, tự nhiên, phù hợp làm Voice-over. ${langInstruction} KHÔNG thêm tiêu đề, chỉ trả về nội dung.` }, { role: "user", content: rawText }],
             temperature: 0.7 
         });
         return response.choices[0].message.content.trim();
@@ -223,36 +232,44 @@ function chunkTextToParagraphs(rawText, maxChars = 3000) {
     return chunks;
 }
 
-async function analyzeAndGroupScenes(textChunk, globalTheme) {
+async function analyzeAndGroupScenes(textChunk, globalTheme, targetLang = null) {
+    const langInstruction = targetLang
+        ? `Viết "text" bằng ngôn ngữ: ${targetLang}. Viết "original_text" bằng tiếng Việt.`
+        : 'Viết cả "text" và "original_text" bằng tiếng Việt.';
     try {
         const response = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             response_format: { type: "json_object" },
             messages: [
-                { 
-                    role: "system", 
+                {
+                    role: "system",
                     content: `Bạn là Đạo diễn Hình ảnh. Kịch bản có chủ đề chung là: "${globalTheme}".
-Nhiệm vụ: 
-1. Làm mịn văn bản.
-2. TỰ ĐỘNG CHIA đoạn văn bản thành các "Cảnh" (Scenes/Paragraphs).
-3. Cấp cho MỖI CẢNH đúng 3 từ khóa tiếng Anh (mỗi từ khóa 3-5 từ) để tìm Video Stock.
+Nhiệm vụ:
+1. ĐỌC HIỂU toàn bộ nội dung, sau đó TỰ ĐỘNG CHIA thành các "Cảnh" dựa theo ngữ cảnh và ý nghĩa (mỗi cảnh 2-4 câu liên quan).
+2. Làm mịn từng cảnh cho tự nhiên, phù hợp Voice-over.
+3. ${langInstruction}
+4. Cấp cho MỖI CẢNH đúng 3 từ khóa tiếng Anh (3-5 từ/khóa) để tìm Video Stock.
 
 🔥 ĐỊA DANH ƯU TIÊN SỐ 1: Nếu có địa danh (Trung Đông, Mỹ...), BẮT BUỘC dịch sang tiếng Anh và đưa vào Keyword.
-🔥 "ĐỘNG TỪ HÓA": Bắt buộc dùng V-ing hoặc tính từ sự kiện (vd: "stock market crashing", "military helicopter flying").
+🔥 "ĐỘNG TỪ HÓA": Dùng V-ing hoặc tính từ sự kiện (vd: "stock market crashing", "military helicopter flying").
 
-BẮT BUỘC trả về định dạng JSON:
+BẮT BUỘC trả về JSON:
 {
   "scenes": [
-    { "text": "Đoạn thoại...", "keywords": ["keyword 1", "keyword 2", "keyword 3"] }
+    {
+      "original_text": "Đoạn đã làm mịn bằng tiếng Việt...",
+      "text": "Đoạn đã làm mịn theo ngôn ngữ đích...",
+      "keywords": ["keyword 1", "keyword 2", "keyword 3"]
+    }
   ]
-}` 
+}`
                 },
                 { role: "user", content: textChunk }
             ],
             temperature: 0.5
         });
         return JSON.parse(response.choices[0].message.content).scenes || [];
-    } catch (e) { return [{ text: textChunk, keywords: ["cinematic b-roll", "professional background", "slow motion footage"] }]; }
+    } catch (e) { return [{ original_text: textChunk, text: textChunk, keywords: ["cinematic b-roll", "professional background", "slow motion footage"] }]; }
 }
 
 async function translateText(text, targetLang) {
@@ -294,8 +311,8 @@ async function runSingleCrawl(videoId, groupId, keywordsArray) {
     const needVideo = Math.max(1, 5 - existingVideos);
     const needImage = Math.max(1, 5 - existingImages);
 
-    for (const kw of keywordsArray) { if (await fetchAndDownloadStock(kw, 'video', vFolder, needVideo) >= needVideo) break; }
-    for (const kw of keywordsArray) { if (await fetchAndDownloadStock(kw, 'image', iFolder, needImage) >= needImage) break; }
+    for (const kw of keywordsArray) { await fetchAndDownloadStock(kw, 'video', vFolder, needVideo); }
+    for (const kw of keywordsArray) { await fetchAndDownloadStock(kw, 'image', iFolder, needImage); }
 
     console.log(`[SUCCESS] Đã cập nhật Keywords và thêm Media mới cho nhóm ${groupId}.`);
     process.exit(0);
@@ -352,88 +369,92 @@ async function processNextInQueue() {
         } else {
             if (!rawInputContent) throw new Error("Cột 'Nội dung' trống.");
             dbPostTitle = `INPUT_TEXT_${Date.now()}_${crypto.randomBytes(2).toString('hex')}`;
-            fullRawText = await enhanceContent(rawInputContent);
+            fullRawText = rawInputContent;
             fs.writeFileSync(path.join(targetDir, 'original_content.txt'), rawInputContent);
-            fs.writeFileSync(path.join(targetDir, 'enhanced_content.txt'), fullRawText);
         }
-
-        // 🟢 LƯU DATABASE: Tạo Post
-        // Dùng INSERT OR IGNORE để nếu chạy lại dự án cũ thì không bị lỗi UNIQUE constraint
-        await db.run('INSERT OR IGNORE INTO Post (title) VALUES (?)', [dbPostTitle]);
-        const postRecord = await db.get('SELECT id FROM Post WHERE title = ?', [dbPostTitle]);
-        const dbPostId = postRecord.id;
 
         const globalTheme = await getGlobalTheme(fullRawText);
         const textChunks = chunkTextToParagraphs(fullRawText);
-        let allScenes = [];
-        
-        for (const chunk of textChunks) {
-            allScenes = allScenes.concat(await analyzeAndGroupScenes(chunk, globalTheme));
-        }
 
-        for (let i = 0; i < allScenes.length; i++) {
-            const scene = allScenes[i];
-            const gid = String(i + 1);
-            
-            const vFolder = path.join(targetDir, 'assets', '_raw_videos', gid);
-            const iFolder = path.join(targetDir, 'assets', '_raw_images', gid);
-            [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+        // Xử lý từng ngôn ngữ đích (hoặc ngôn ngữ gốc nếu không có ngôn ngữ đích)
+        const langsToProcess = targetLangs.length > 0 ? targetLangs : [null];
 
-            const kws = scene.keywords && scene.keywords.length > 0 ? scene.keywords : ["cinematic b-roll footage"];
-            
-            // LƯU CÁC FILE CONTEXT
-            fs.writeFileSync(path.join(vFolder, 'keywords.txt'), kws.join(', '));
-            fs.writeFileSync(path.join(iFolder, 'keywords.txt'), kws.join(', '));
-            fs.writeFileSync(path.join(vFolder, 'context.txt'), scene.text);
-            fs.writeFileSync(path.join(iFolder, 'context.txt'), scene.text);
-            fs.writeFileSync(path.join(vFolder, `${lang}.context.txt`), scene.text);
-            fs.writeFileSync(path.join(iFolder, `${lang}.context.txt`), scene.text);
+        for (const processLang of langsToProcess) {
+            const postTitle = processLang ? `${dbPostTitle}_${processLang}` : dbPostTitle;
+            console.log(`\n   [LANG] Xử lý ngôn ngữ: ${processLang || lang}`);
 
-            if (targetLangs.length > 0) {
-                for (const targetLang of targetLangs) {
-                    const translatedText = await translateText(scene.text, targetLang);
-                    fs.writeFileSync(path.join(vFolder, `${targetLang}.context.txt`), translatedText);
-                    fs.writeFileSync(path.join(iFolder, `${targetLang}.context.txt`), translatedText);
+            // 🟢 LƯU DATABASE: Tạo Post riêng cho từng ngôn ngữ
+            await db.run('INSERT OR IGNORE INTO Post (title) VALUES (?)', [postTitle]);
+            const postRecord = await db.get('SELECT id FROM Post WHERE title = ?', [postTitle]);
+            const dbPostId = postRecord.id;
+
+            let allScenes = [];
+            for (const chunk of textChunks) {
+                allScenes = allScenes.concat(await analyzeAndGroupScenes(chunk, globalTheme, processLang));
+            }
+
+            for (let i = 0; i < allScenes.length; i++) {
+                const scene = allScenes[i];
+                const gid = String(i + 1);
+
+                const vFolder = path.join(targetDir, 'assets', '_raw_videos', gid);
+                const iFolder = path.join(targetDir, 'assets', '_raw_images', gid);
+                [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+
+                const kws = scene.keywords && scene.keywords.length > 0 ? scene.keywords : ["cinematic b-roll footage"];
+
+                // LƯU CÁC FILE CONTEXT
+                const ctxLang = processLang || lang;
+                fs.writeFileSync(path.join(vFolder, 'keywords.txt'), kws.join(', '));
+                fs.writeFileSync(path.join(iFolder, 'keywords.txt'), kws.join(', '));
+                fs.writeFileSync(path.join(vFolder, `${ctxLang}.context.txt`), scene.text);
+                fs.writeFileSync(path.join(iFolder, `${ctxLang}.context.txt`), scene.text);
+                // context.txt luôn là nội dung gốc
+                if (!processLang) {
+                    fs.writeFileSync(path.join(vFolder, 'context.txt'), scene.text);
+                    fs.writeFileSync(path.join(iFolder, 'context.txt'), scene.text);
+                    fs.writeFileSync(path.join(vFolder, 'original_content.txt'), fullRawText);
+                    fs.writeFileSync(path.join(iFolder, 'original_content.txt'), fullRawText);
                 }
-            }
 
-            // 🟢 LƯU DATABASE: Tạo Paragraph
-            const paraRes = await db.run('INSERT INTO Paragraph (post_id, content) VALUES (?, ?)', [dbPostId, scene.text]);
-            const dbParagraphId = paraRes.lastID;
+                // 🟢 LƯU DATABASE: Tạo Paragraph với original_content
+                const paraRes = await db.run(
+                    'INSERT INTO Paragraph (post_id, content, original_content) VALUES (?, ?, ?)',
+                    [dbPostId, scene.text, scene.original_text || scene.text]
+                );
+                const dbParagraphId = paraRes.lastID;
 
-            // 🟢 LƯU DATABASE: Tạo Keywords
-            for (const kw of kws) {
-                await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [dbParagraphId, kw]);
-            }
-
-            // 🟢 LƯU DATABASE: Tạo Sentences (Tách câu dựa vào dấu chấm)
-            const sentences = scene.text.split(/(?<=\.)/).map(s => s.trim()).filter(Boolean);
-            for (const s of sentences) {
-                await db.run('INSERT INTO Sentence (paragraph_id, content) VALUES (?, ?)', [dbParagraphId, s]);
-            }
-
-            // TẢI MEDIA
-            console.log(`   - [Cảnh ${gid}] Đang tải media...`);
-            for (const kw of kws) { if (await fetchAndDownloadStock(kw, 'video', vFolder, 5) >= 5) break; }
-            for (const kw of kws) { if (await fetchAndDownloadStock(kw, 'image', iFolder, 5) >= 5) break; }
-            
-            // 🟢 LƯU DATABASE: Quét lại thư mục và lưu Asset (Để Sentence_id = NULL)
-            const syncAssetsToDB = async (folderPath) => {
-                const files = fs.readdirSync(folderPath).filter(f => f.startsWith('stock_') && (f.endsWith('.mp4') || f.endsWith('.jpg')));
-                for (const file of files) {
-                    const relativePath = path.join(projectId, 'assets', folderPath.includes('_raw_videos') ? '_raw_videos' : '_raw_images', gid, file);
-                    // Kiểm tra tránh trùng lặp nếu chạy lại
-                    const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
-                    if (!exists) {
-                        await db.run('INSERT INTO Asset (paragraph_id, sentence_id, file_path) VALUES (?, NULL, ?)', [dbParagraphId, relativePath]);
-                    }
+                for (const kw of kws) {
+                    await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [dbParagraphId, kw]);
                 }
-            };
 
-            await syncAssetsToDB(vFolder);
-            await syncAssetsToDB(iFolder);
+                const sentences = scene.text.split(/(?<=\.)/).map(s => s.trim()).filter(Boolean);
+                for (const s of sentences) {
+                    await db.run('INSERT INTO Sentence (paragraph_id, content) VALUES (?, ?)', [dbParagraphId, s]);
+                }
 
-            await sleep(2000);
+                // Chỉ tải media 1 lần (theo ngôn ngữ đầu tiên)
+                if (processLang === langsToProcess[0]) {
+                    console.log(`   - [Cảnh ${gid}] Đang tải media...`);
+                    for (const kw of kws) { await fetchAndDownloadStock(kw, 'video', vFolder, 5); }
+                    for (const kw of kws) { await fetchAndDownloadStock(kw, 'image', iFolder, 5); }
+
+                    const syncAssetsToDB = async (folderPath, assetType) => {
+                        const files = fs.readdirSync(folderPath).filter(f => f.startsWith('stock_') && (f.endsWith('.mp4') || f.endsWith('.jpg')));
+                        for (const file of files) {
+                            const relativePath = path.join(projectId, 'assets', folderPath.includes('_raw_videos') ? '_raw_videos' : '_raw_images', gid, file);
+                            const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
+                            if (!exists) {
+                                await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [dbParagraphId, assetType, relativePath]);
+                            }
+                        }
+                    };
+                    await syncAssetsToDB(vFolder, 'video');
+                    await syncAssetsToDB(iFolder, 'image');
+                }
+
+                await sleep(2000);
+            }
         }
 
         targetRow.set('Trạng thái', 'DONE');
