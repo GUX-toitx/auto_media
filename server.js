@@ -119,10 +119,10 @@ app.post('/api/generate-media', (req, res) => {
     // Chạy file craw_sub.js như một tiến trình riêng
     // Chúng ta truyền thêm các tham số để script biết chỉ crawl cho 1 nhóm cụ thể
     const pythonProcess = spawn('node', [
-        'craw_sub.js', 
-        '--mode', 'single', 
-        '--videoId', videoId, 
-        '--groupId', groupId, 
+        'craw_sub.js',
+        '--mode', 'single',
+        '--videoId', videoId,
+        '--paragraphId', String(groupId),
         '--keywords', keywords.join(',')
     ]);
 
@@ -291,7 +291,6 @@ app.post('/api/open-folder', (req, res) => {
     res.json({ success: true });
 });
 
-app.post('/api/generate-media', (req, res) => res.json({ success: true }));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.use(express.static(MEDIA_DIR, {
     setHeaders: (res, path) => {

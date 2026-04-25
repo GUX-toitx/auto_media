@@ -115,6 +115,8 @@ function buildStoryblocksUrlV2(resource, params = {}) {
 
 async function fetchFromStoryblocks(keyword, type, targetDir, neededCount) {
     let downloaded = 0;
+    const ext = type === 'video' ? 'mp4' : 'jpg';
+    const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const resource = type === 'video' ? '/api/v2/videos/search' : '/api/v2/images/search';
     const url = buildStoryblocksUrlV2(resource, { keywords: keyword, results_per_page: neededCount * 2, sort: 'most_downloaded' });
     try {
@@ -124,15 +126,23 @@ async function fetchFromStoryblocks(keyword, type, targetDir, neededCount) {
         for (const item of (data.results || [])) {
             if (downloaded >= neededCount) break;
             let downloadUrl = type === 'video' ? (item.preview_url || (item.preview_urls && (item.preview_urls.mp4 || Object.values(item.preview_urls)[0]))) : (item.preview_url || item.thumbnail_url);
-            if (downloadUrl && await downloadFileHelper(downloadUrl, targetDir, type === 'video' ? 'mp4' : 'jpg')) downloaded++;
+            if (downloadUrl) {
+                const savePath = path.join(targetDir, `stock_${existing + downloaded + 1}.${ext}`);
+                try {
+                    const res = await fetch(downloadUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+                    if (res.ok) { fs.writeFileSync(savePath, Buffer.from(await res.arrayBuffer())); downloaded++; }
+                } catch (e) { console.error('Lỗi tải Storyblocks:', e.message); }
+            }
         }
-    } catch (e) { console.log("Lỗi Storyblocks:", e.message); }
+    } catch (e) { console.log('Lỗi Storyblocks:', e.message); }
     return downloaded;
 }
 
 async function fetchFromPexels(keyword, type, targetDir, neededCount) {
-    if (!PEXELS_API_KEY || PEXELS_API_KEY.includes('ĐIỀN_KEY')) return 0; 
+    if (!PEXELS_API_KEY || PEXELS_API_KEY.includes('ĐIỀN_KEY')) return 0;
     let downloaded = 0;
+    const ext = type === 'video' ? 'mp4' : 'jpg';
+    const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const url = type === 'video' ? `https://api.pexels.com/videos/search?query=${encodeURIComponent(keyword)}&per_page=${neededCount * 2}` : `https://api.pexels.com/v1/search?query=${encodeURIComponent(keyword)}&per_page=${neededCount * 2}`;
     try {
         const response = await fetch(url, { headers: { Authorization: PEXELS_API_KEY } });
@@ -148,13 +158,15 @@ async function fetchFromPexels(keyword, type, targetDir, neededCount) {
             } else {
                 downloadUrl = item.src.large;
             }
-
             if (downloadUrl) {
-                const ext = type === 'video' ? 'mp4' : 'jpg';
-                if (await downloadFileHelper(downloadUrl, targetDir, ext)) downloaded++;
+                const savePath = path.join(targetDir, `stock_${existing + downloaded + 1}.${ext}`);
+                try {
+                    const res = await fetch(downloadUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+                    if (res.ok) { fs.writeFileSync(savePath, Buffer.from(await res.arrayBuffer())); downloaded++; }
+                } catch (e) { console.error('Lỗi tải Pexels:', e.message); }
             }
         }
-    } catch (e) { console.log("Lỗi Pexels:", e.message); }
+    } catch (e) { console.log('Lỗi Pexels:', e.message); }
     return downloaded;
 }
 
@@ -177,19 +189,17 @@ async function fetchFromPixabay(keyword, type, targetDir, neededCount) {
     return downloaded;
 }
 
-async function fetchAndDownloadStock(keyword, type, targetDir, totalNeeded = 5) {
+async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 5) {
     if (!keyword) return 0;
     let totalDownloaded = 0;
     const providers = [{ name: 'Storyblocks', fetcher: fetchFromStoryblocks }, { name: 'Pexels', fetcher: fetchFromPexels }];
-    console.log(`   -> [${type.toUpperCase()}] Tìm "${keyword}" | Cần: ${totalNeeded}`);
+    console.log(`   -> [${type.toUpperCase()}] Tìm "${keyword}" | Mỗi nguồn: ${countPerSource}`);
     for (const provider of providers) {
-        if (totalDownloaded >= totalNeeded) break;
-        const need = totalNeeded - totalDownloaded;
-        const successCount = await provider.fetcher(keyword, type, targetDir, need);
-        console.log(`      [${provider.name}] Tải được: ${successCount}/${need} ${type}`);
-        totalDownloaded += successCount;
+        const got = await provider.fetcher(keyword, type, targetDir, countPerSource);
+        console.log(`      [${provider.name}] Tải được: ${got}/${countPerSource} ${type}`);
+        totalDownloaded += got;
     }
-    console.log(`   -> [${type.toUpperCase()}] "${keyword}" xong: ${totalDownloaded}/${totalNeeded}`);
+    console.log(`   -> [${type.toUpperCase()}] "${keyword}" xong: ${totalDownloaded} ${type}`);
     return totalDownloaded;
 }
 
@@ -286,35 +296,46 @@ async function translateText(text, targetLang) {
 // ==========================================
 // 4. CHẾ ĐỘ CHẠY LẺ (SINGLE MODE) TỪ DASHBOARD
 // ==========================================
-async function runSingleCrawl(videoId, groupId, keywordsArray) {
-    console.log(`\n[SINGLE MODE - APPEND] Đang xử lý: ${videoId} | Nhóm: ${groupId}`);
-    const vFolder = path.join(BASE_DIR, videoId, 'assets', '_raw_videos', groupId);
-    const iFolder = path.join(BASE_DIR, videoId, 'assets', '_raw_images', groupId);
+async function runSingleCrawl(videoId, paragraphId, keywordsArray) {
+    console.log(`\n[SINGLE MODE] Project: ${videoId} | Paragraph: ${paragraphId} | Keywords: ${keywordsArray.join(', ')}`);
+    const db = await initDB();
 
+    // Lấy vị trí paragraph trong post để xác định gid (thứ tự trong post)
+    const para = await db.get('SELECT id, post_id FROM Paragraph WHERE id = ?', [paragraphId]);
+    if (!para) { console.error('[SINGLE MODE] Không tìm thấy paragraph'); process.exit(1); }
+
+    const paras = await db.all('SELECT id FROM Paragraph WHERE post_id = ? ORDER BY id', [para.post_id]);
+    const gid = String(paras.findIndex(p => p.id === para.id) + 1);
+
+    const vFolder = path.join(BASE_DIR, videoId, 'assets', '_raw_videos', gid);
+    const iFolder = path.join(BASE_DIR, videoId, 'assets', '_raw_images', gid);
     [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 
-    const kwFilePath = path.join(vFolder, 'keywords.txt');
-    let finalKeywords = [...keywordsArray]; 
-
-    if (fs.existsSync(kwFilePath)) {
-        const oldKwRaw = fs.readFileSync(kwFilePath, 'utf-8');
-        const oldKeywords = oldKwRaw.split(',').map(k => k.trim()).filter(k => k);
-        finalKeywords = [...new Set([...oldKeywords, ...keywordsArray])];
+    // Lưu keyword mới vào DB
+    for (const kw of keywordsArray) {
+        const exists = await db.get('SELECT id FROM Keyword WHERE paragraph_id = ? AND content = ?', [paragraphId, kw]);
+        if (!exists) await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [paragraphId, kw]);
     }
 
-    const kwString = finalKeywords.join(', ');
-    fs.writeFileSync(kwFilePath, kwString, 'utf-8');
-    fs.writeFileSync(path.join(iFolder, 'keywords.txt'), kwString, 'utf-8');
+    // Tải media
+    for (const kw of keywordsArray) { await fetchAndDownloadStock(kw, 'video', vFolder, 5); }
+    for (const kw of keywordsArray) { await fetchAndDownloadStock(kw, 'image', iFolder, 5); }
 
-    const existingVideos = fs.readdirSync(vFolder).filter(f => f.startsWith('stock_') && f.endsWith('.mp4')).length;
-    const existingImages = fs.readdirSync(iFolder).filter(f => f.startsWith('stock_') && f.endsWith('.jpg')).length;
-    const needVideo = Math.max(1, 5 - existingVideos);
-    const needImage = Math.max(1, 5 - existingImages);
+    // Sync asset mới vào DB
+    const syncAssets = async (folderPath, assetType) => {
+        const ext = assetType === 'video' ? '.mp4' : '.jpg';
+        const files = fs.readdirSync(folderPath).filter(f => f.startsWith('stock_') && f.endsWith(ext));
+        for (const file of files) {
+            const relativePath = path.join(videoId, 'assets', assetType === 'video' ? '_raw_videos' : '_raw_images', gid, file);
+            const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
+            if (!exists) await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [paragraphId, assetType, relativePath]);
+        }
+    };
+    await syncAssets(vFolder, 'video');
+    await syncAssets(iFolder, 'image');
 
-    for (const kw of keywordsArray) { await fetchAndDownloadStock(kw, 'video', vFolder, needVideo); }
-    for (const kw of keywordsArray) { await fetchAndDownloadStock(kw, 'image', iFolder, needImage); }
-
-    console.log(`[SUCCESS] Đã cập nhật Keywords và thêm Media mới cho nhóm ${groupId}.`);
+    await db.close();
+    console.log(`[SUCCESS] Xong paragraph ${paragraphId}.`);
     process.exit(0);
 }
 
@@ -485,5 +506,13 @@ async function startQueueManager() {
     }
 }
 
-// CHẠY LẺ ĐÃ ĐƯỢC TẠM ẨN ĐỂ TẬP TRUNG CHO DB/QUEUE
-startQueueManager();
+// KHỞI CHẠY
+const args = process.argv.slice(2);
+if (args.includes('--mode') && args[args.indexOf('--mode') + 1] === 'single') {
+    const videoId = args[args.indexOf('--videoId') + 1];
+    const paragraphId = parseInt(args[args.indexOf('--paragraphId') + 1]);
+    const keywords = args[args.indexOf('--keywords') + 1].split(',').map(k => k.trim()).filter(k => k);
+    runSingleCrawl(videoId, paragraphId, keywords);
+} else {
+    startQueueManager();
+}

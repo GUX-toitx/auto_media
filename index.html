@@ -1,554 +1,385 @@
 <!DOCTYPE html>
 <html lang="vi">
-
 <head>
     <meta charset="UTF-8">
-    <title>Media Editor Dashboard Pro</title>
+    <title>Media Editor Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <style>
-        ::-webkit-scrollbar {
-            width: 6px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: #111827;
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: #374151;
-            border-radius: 10px;
-        }
-
-        .hide {
-            display: none !important;
-        }
-
-        .keyword-tag {
-            background: #1e293b;
-            color: #94a3b8;
-            padding: 4px 10px;
-            border-radius: 6px;
-            font-size: 11px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            border: 1px solid #334155;
-            font-family: monospace;
-        }
-
-        .card-asset {
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #111827; }
+        ::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
+        .keyword-tag { background:#1e293b; color:#94a3b8; padding:4px 10px; border-radius:6px; font-size:11px; display:flex; align-items:center; gap:6px; border:1px solid #334155; font-family:monospace; }
+        .card-asset { transition: all 0.3s cubic-bezier(0.4,0,0.2,1); }
     </style>
 </head>
-
 <body class="bg-gray-950 text-gray-100 font-sans h-screen flex overflow-hidden">
+<div id="app" class="flex w-full h-full overflow-hidden">
 
+    <!-- SIDEBAR -->
     <aside class="w-64 bg-gray-900 border-r border-gray-800 flex flex-col h-full shrink-0">
-        <div class="p-6 border-b border-gray-800 font-bold text-blue-500 tracking-widest text-sm text-center">📂 DỰ ÁN
-            MEDIA</div>
-        <div id="videoList" class="flex-1 overflow-y-auto p-4 space-y-1"></div>
+        <div class="p-6 border-b border-gray-800 font-bold text-blue-500 tracking-widest text-sm text-center">📂 DỰ ÁN MEDIA</div>
+        <div class="flex-1 overflow-y-auto p-4 space-y-1">
+            <div v-for="post in posts" :key="post.id" class="flex items-center gap-1">
+                <button @click="selectPost(post)"
+                    :class="['sidebar-btn w-full text-left p-3 rounded-lg hover:bg-gray-800 text-xs truncate transition-all font-medium',
+                        activePostId === post.id ? '!bg-yellow-500 !text-black border-l-2 !border-yellow-400' : 'text-gray-500 hover:text-white']">
+                    📁 {{ post.title }}
+                </button>
+                <button @click="deleteProject(post)" class="shrink-0 bg-red-600 hover:bg-red-500 text-white text-[10px] font-black px-2 py-1 rounded transition-all">Xóa</button>
+            </div>
+        </div>
     </aside>
 
+    <!-- MAIN -->
     <main class="flex-1 overflow-y-auto px-5 bg-black/20">
-        <div id="galleryContainer" class="px-[30px] mx-auto hide">
+        <div v-if="activePost" class="px-[30px] mx-auto">
             <header class="fixed top-0 left-64 right-0 z-30 bg-black/80 backdrop-blur border-b border-gray-800 pb-8 pt-8 flex justify-between items-end px-5">
                 <div>
-                    <p class="text-blue-500 font-mono text-[10px] mb-2 uppercase tracking-[0.3em]">Workspace / Project
-                    </p>
-                    <h2 class="text-4xl font-black text-white" id="currentVidTitle"></h2>
+                    <p class="text-blue-500 font-mono text-[10px] mb-2 uppercase tracking-[0.3em]">Workspace / Project</p>
+                    <h2 class="text-4xl font-black text-white">{{ activePost.title }}</h2>
                 </div>
                 <div class="flex gap-3">
-                    <button onclick="createVoice()" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
-                    <button onclick="downloadVoice()" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice</button>
-                    <button onclick="generateMedia()" class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎬 Generate Media</button>
+                    <button @click="createVoice" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
+                    <button @click="downloadVoice" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice</button>
+                    <button @click="generateMedia" class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎬 Generate Media</button>
                 </div>
             </header>
-            <div id="groupList" class="space-y-24 mt-[150px]"></div>
+
+            <div class="space-y-24 mt-[150px]">
+                <div v-for="(para, i) in activePost.paragraphs" :key="para.id">
+                    <div class="grid grid-cols-12 gap-12">
+                        <div class="col-span-9 space-y-10">
+
+                            <!-- Original -->
+                            <div>
+                                <div class="flex items-center gap-3 mb-4">
+                                    <span class="bg-blue-600 text-[10px] font-black px-2 py-1 rounded">NHÓM {{ i + 1 }}</span>
+                                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Nội dung gốc (Original)</label>
+                                </div>
+                                <div class="w-full bg-gray-950 border border-gray-800 rounded-xl p-4 text-xs text-gray-400 leading-relaxed max-h-32 overflow-y-auto whitespace-pre-wrap">
+                                    <span v-if="para.original_content">{{ para.original_content }}</span>
+                                    <span v-else class="italic text-gray-700">Chưa có nội dung gốc</span>
+                                </div>
+                            </div>
+
+                            <!-- Script -->
+                            <div>
+                                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Kịch bản đã làm mịn</label>
+                                <textarea v-model="para.content" class="w-full bg-gray-900 border border-gray-800 rounded-xl p-6 text-sm leading-relaxed focus:border-blue-500 outline-none h-32 transition-all shadow-inner"></textarea>
+                            </div>
+
+                            <!-- Keywords -->
+                            <div>
+                                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-4 block">Từ khóa tìm kiếm</label>
+                                <div class="flex flex-wrap gap-2 p-4 bg-gray-900/30 rounded-xl border border-gray-800">
+                                    <span v-for="(kw, ki) in para.keywords" :key="ki" class="keyword-tag">
+                                        {{ kw }}
+                                        <b class="cursor-pointer text-gray-600 hover:text-red-500 text-lg leading-none" @click="removeKeyword(para, ki)">×</b>
+                                    </span>
+                                    <input type="text" @keydown.enter="addKeyword($event, para)"
+                                        placeholder="+ Thêm từ khóa..."
+                                        class="bg-transparent text-xs p-1 outline-none text-blue-400 w-32 border-b border-transparent focus:border-blue-500">
+                                </div>
+                            </div>
+
+                            <!-- Audio -->
+                            <div v-if="Object.keys(para.audios || {}).length">
+                                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3 block">Âm thanh (Voice)</label>
+                                <div v-for="(audio, lang) in para.audios" :key="lang" class="mb-2">
+                                    <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-900 border border-green-800 text-[11px] text-green-400 font-bold cursor-pointer"
+                                        @click="audio._open = !audio._open">
+                                        [{{ lang.toUpperCase() }}] ● Voice sẵn sàng
+                                    </div>
+                                    <div v-if="audio._open" class="mt-2 pl-2">
+                                        <audio controls :src="audio.url" class="w-full h-8"></audio>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Videos -->
+                            <div>
+                                <h4 @click="toggleSection(para, 'videoOpen')"
+                                    class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter cursor-pointer select-none hover:text-gray-200">
+                                    {{ para.videoOpen ? '▼' : '▶' }}
+                                    <span class="w-2 h-2 bg-blue-500 rounded-full"></span> Videos ({{ (para.videos || []).length }})
+                                    <button @click.stop="deleteAll(para, i+1, 'video')" class="ml-auto text-[10px] px-2 py-1 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white normal-case tracking-normal font-normal">🗑️ Xóa tất cả</button>
+                                </h4>
+                                <div v-if="para.videoOpen" class="grid grid-cols-3 gap-4">
+                                    <div v-if="!(para.videos || []).length" class="text-xs text-gray-700 italic">Trống</div>
+                                    <div v-for="v in (para.videos || [])" :key="v.relativePath" class="card-asset bg-gray-900 p-2 rounded-xl border relative"
+                                        :class="v.isSelected ? 'border-green-500 ring-2 ring-green-500/20' : 'border-gray-800 hover:border-gray-600'">
+                                        <button @click="deleteAsset(v, para)" class="absolute top-3 left-3 bg-red-600/80 hover:bg-red-500 text-white text-[10px] w-6 h-6 rounded-full z-20 flex items-center justify-center">×</button>
+                                        <video controls muted loop preload="metadata" :src="v.url"
+                                            @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()"
+                                            class="w-full h-40 object-cover rounded-lg mb-2 bg-black shadow-lg"></video>
+                                        <button @click="toggleSelect(v, para)" class="w-full text-[10px] font-black py-2 rounded-lg uppercase tracking-wider transition-colors"
+                                            :class="v.isSelected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">
+                                            {{ v.isSelected ? 'Đã chọn' : 'Chọn' }}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Images -->
+                            <div>
+                                <h4 @click="toggleSection(para, 'imageOpen')"
+                                    class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter cursor-pointer select-none hover:text-gray-200">
+                                    {{ para.imageOpen ? '▼' : '▶' }}
+                                    <span class="w-2 h-2 bg-orange-500 rounded-full"></span> Images ({{ (para.images || []).length }})
+                                    <button @click.stop="deleteAll(para, i+1, 'image')" class="ml-auto text-[10px] px-2 py-1 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white normal-case tracking-normal font-normal">🗑️ Xóa tất cả</button>
+                                </h4>
+                                <div v-if="para.imageOpen" class="grid grid-cols-5 gap-3">
+                                    <div v-if="!(para.images || []).length" class="text-xs text-gray-700 italic">Trống</div>
+                                    <div v-for="img in (para.images || [])" :key="img.relativePath" class="card-asset bg-gray-900 p-1.5 rounded-lg border"
+                                        :class="img.isSelected ? 'border-green-500 ring-2 ring-green-500/20' : 'border-gray-800 hover:border-gray-600'">
+                                        <div class="relative">
+                                            <img :src="img.url" class="w-full h-24 object-cover rounded mb-2 shadow-lg">
+                                            <button @click="deleteAsset(img, para)" class="absolute top-1 left-1 bg-red-600/80 hover:bg-red-500 text-white text-[10px] w-6 h-6 rounded-full flex items-center justify-center">×</button>
+                                        </div>
+                                        <button @click="toggleSelect(img, para)" class="w-full text-[9px] font-black py-1.5 rounded uppercase tracking-wider transition-colors"
+                                            :class="img.isSelected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">
+                                            {{ img.isSelected ? 'Đã chọn' : 'Chọn' }}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+
+                        <!-- Sidebar actions -->
+                        <div class="col-span-3">
+                            <div class="sticky top-[150px]">
+                                <button @click="saveContent(para)" class="w-full bg-yellow-500 hover:bg-yellow-400 py-4 rounded-xl text-[11px] font-black uppercase text-black transition-all tracking-widest active:scale-95">💾 Lưu kịch bản</button>
+                            </div>
+                        </div>
+                    </div>
+                    <hr class="border-gray-900/50 my-16">
+                </div>
+            </div>
         </div>
     </main>
 
-    <div id="voiceModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hide">
-        <div id="voiceModalBody" class="bg-gray-900 border border-gray-700 rounded-2xl p-8 w-[420px] space-y-6">
-            <h3 class="text-xl font-black text-white">🎙️ Tạo Voice</h3>
-            <div>
-                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Ngôn ngữ</label>
-                <select id="voiceLang" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
-                    <option value="">Đang tải...</option>
-                </select>
-            </div>
-            <div>
-                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Giọng mẫu</label>
-                <select id="voiceSpeaker" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
-                    <option value="">Đang tải...</option>
-                </select>
-            </div>
-            <div class="flex gap-3 justify-end pt-2">
-                <button onclick="closeVoiceModal()" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-400 transition-all">Huỷ</button>
-                <button onclick="submitCreateVoice()" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-purple-600 hover:bg-purple-500 transition-all">Tạo</button>
-            </div>
+    <!-- VOICE MODAL -->
+    <div v-if="voiceModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-8 w-[420px] space-y-6">
+            <template v-if="!voiceModal.batchUuid">
+                <h3 class="text-xl font-black text-white">🎙️ Tạo Voice</h3>
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Ngôn ngữ</label>
+                    <select v-model="voiceModal.lang" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
+                        <option value="">-- Chọn ngôn ngữ --</option>
+                        <option v-for="l in voiceModal.langs" :key="l.code || l.uuid" :value="l.code || l.uuid">{{ l.name || l.code }}</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Giọng mẫu</label>
+                    <select v-model="voiceModal.speakerUuid" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
+                        <option value="">-- Chọn giọng mẫu --</option>
+                        <option v-for="s in voiceModal.speakers" :key="s.uuid" :value="s.uuid">{{ s.speaker_name }}</option>
+                    </select>
+                </div>
+                <div class="flex gap-3 justify-end pt-2">
+                    <button @click="voiceModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
+                    <button @click="submitCreateVoice" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-purple-600 hover:bg-purple-500">Tạo</button>
+                </div>
+            </template>
+            <template v-else>
+                <div class="text-center space-y-6">
+                    <div class="text-green-400 text-5xl">✅</div>
+                    <h3 class="text-xl font-black text-white">Tạo thành công!</h3>
+                    <p class="text-sm text-gray-400">Batch UUID: <span class="font-mono text-white">{{ voiceModal.batchUuid }}</span></p>
+                    <div class="flex gap-3 justify-center pt-2">
+                        <button @click="voiceModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Đóng</button>
+                        <button @click="genAudio" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-purple-600 hover:bg-purple-500">🎙️ Gen Audio</button>
+                    </div>
+                </div>
+            </template>
         </div>
     </div>
 
-    <script>
-        let posts = [];
-        let activePostId = null;
-        let activeProjectId = '';
-        const batchMap = {};
-        const paraAssets = {}; // lưu videos/images theo paraId để lazy render
+    <!-- TOAST -->
+    <div v-if="toast" class="fixed bottom-6 right-6 z-50 bg-blue-600 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-lg">{{ toast }}</div>
+</div>
 
-        window.onload = async () => {
-            const modalBody = document.getElementById('voiceModalBody');
-            modalBody.dataset.original = modalBody.innerHTML;
-            await loadPosts();
-        };
+<script>
+const { createApp, ref, computed } = Vue;
+
+createApp({
+    setup() {
+        const posts = ref([]);
+        const activePostId = ref(null);
+        const activePost = ref(null);
+        const batchMap = ref({});
+        const toast = ref('');
+        const voiceModal = ref({ open: false, lang: '', speakerUuid: '', langs: [], speakers: [], batchUuid: '' });
+
+        const activeProjectId = computed(() => {
+            if (!activePost.value) return '';
+            return activePost.value.projectId;
+        });
+
+        function showToast(msg, ms = 3000) {
+            toast.value = msg;
+            setTimeout(() => toast.value = '', ms);
+        }
 
         async function loadPosts() {
             const res = await fetch('/api/posts');
-            posts = await res.json();
-            renderSidebar();
+            posts.value = await res.json();
+            if (posts.value.length) selectPost(posts.value[0]);
         }
 
-        function renderSidebar() {
-            const sidebar = document.getElementById('videoList');
-            sidebar.innerHTML = '';
-            posts.forEach((post, i) => {
-                const btn = document.createElement('button');
-                btn.className = "sidebar-btn w-full text-left p-3 rounded-lg hover:bg-gray-800 text-xs truncate transition-all text-gray-500 hover:text-white font-medium";
-                btn.innerText = "\u{1F4C1} " + post.title;
-                btn.onclick = () => {
-                    document.querySelectorAll('.sidebar-btn').forEach(b => b.classList.remove('!bg-yellow-500', '!text-black', '!border-yellow-400', 'border-l-2'));
-                    btn.classList.add('!bg-yellow-500', '!text-black', '!border-yellow-400', 'border-l-2');
-                    renderGallery(post.id);
-                };
-                const row = document.createElement('div');
-                row.className = 'flex items-center gap-1 group';
-                const delBtn = document.createElement('button');
-                delBtn.className = 'shrink-0 bg-red-600 hover:bg-red-500 text-white text-[10px] font-black px-2 py-1 rounded transition-all';
-                delBtn.innerText = 'X\u00f3a';
-                delBtn.onclick = (e) => { e.stopPropagation(); deleteProject(post, row); };
-                row.appendChild(btn);
-                row.appendChild(delBtn);
-                sidebar.appendChild(row);
-                if (i === 0) btn.click();
-            });
-        }
-
-        async function renderGallery(postId) {
-            activePostId = postId;
-            const res = await fetch(`/api/posts/${postId}`);
+        async function selectPost(post) {
+            activePostId.value = post.id;
+            const res = await fetch(`/api/posts/${post.id}`);
             const data = await res.json();
-            activeProjectId = data.projectId;
-            document.getElementById('galleryContainer').classList.remove('hide');
-            document.getElementById('currentVidTitle').innerText = data.title;
+            // thêm reactive state cho từng paragraph
+            data.paragraphs = data.paragraphs.map(p => ({
+                ...p,
+                keywords: p.keywords || [],
+                videos: p.videos || [],
+                images: p.images || [],
+                audios: p.audios || {},
+                videoOpen: false,
+                imageOpen: false,
+            }));
+            activePost.value = data;
+        }
 
-            let html = '';
-            data.paragraphs.forEach((para, i) => {
-                const gid = String(i + 1);
-                const videos = para.videos || [];
-                const images = para.images || [];
-                const langs = [...new Set([...Object.keys(para.audios || {}), ...Object.keys(para.generatedVideos || {})])];
-                paraAssets[para.id] = { videos: para.videos || [], images: para.images || [] };
+        async function deleteProject(post) {
+            if (!confirm(`Xóa project "${post.title}"?`)) return;
+            const res = await fetch('/api/delete-project', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoId: post.title.replace(/_[a-z]{2}$/, '') }) });
+            const r = await res.json();
+            if (r.success) {
+                posts.value = posts.value.filter(p => p.id !== post.id);
+                if (activePostId.value === post.id) { activePostId.value = null; activePost.value = null; }
+            }
+        }
 
-                html += `
-                <div class="grid grid-cols-12 gap-12">
-                    <div class="col-span-9 space-y-10">
-                        <div>
-                            <div class="flex items-center gap-3 mb-4">
-                                <span class="bg-blue-600 text-[10px] font-black px-2 py-1 rounded">NH\u00d3M ${gid}</span>
-                                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">N\u1ed9i dung g\u1ed1c (Original)</label>
-                            </div>
-                            <div class="w-full bg-gray-950 border border-gray-800 rounded-xl p-4 text-xs text-gray-400 leading-relaxed max-h-32 overflow-y-auto whitespace-pre-wrap">${para.original_content || '<span class="italic text-gray-700">Ch\u01b0a c\u00f3 n\u1ed9i dung g\u1ed1c</span>'}</div>
-                        </div>
-                        <div>
-                            <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">K\u1ecbch b\u1ea3n \u0111\u00e3 l\u00e0m m\u1ecbn</label>
-                            <textarea id="script-${para.id}" class="w-full bg-gray-900 border border-gray-800 rounded-xl p-6 text-sm leading-relaxed focus:border-blue-500 outline-none h-32 transition-all shadow-inner">${para.content || ''}</textarea>
-                        </div>
-                        <div>
-                            <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-4 block">T\u1eeb kh\u00f3a t\u00ecm ki\u1ebfm (Keywords)</label>
-                            <div id="keywords-container-${para.id}" class="flex flex-wrap gap-2 p-4 bg-gray-900/30 rounded-xl border border-gray-800">
-                                ${(para.keywords || []).map(kw => `<span class="keyword-tag">${kw} <b class="cursor-pointer text-gray-600 hover:text-red-500 text-lg leading-none" onclick="this.parentElement.remove(); saveContent(${para.id}, true)">\u00d7</b></span>`).join('')}
-                                <input type="text" onkeydown="addKeyword(event, ${para.id})" placeholder="+ Th\u00eam t\u1eeb kh\u00f3a..." class="bg-transparent text-xs p-1 outline-none text-blue-400 w-32 border-b border-transparent focus:border-blue-500">
-                            </div>
-                        </div>
-                        <div>
-                            <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3 block">\u00c2m thanh (Voice)</label>
-                            ${langs.map(lang => {
-                                const audio = para.audios && para.audios[lang];
-                                if (!audio) return `<div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-900 border border-gray-800 text-[11px] text-gray-500 italic mb-2"><span>[${lang.toUpperCase()}] Ch\u01b0a c\u00f3 audio</span></div>`;
-                                return `<div class="mb-2"><div onclick="this.nextElementSibling.classList.toggle('hide')" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-900 border border-green-800 text-[11px] text-green-400 font-bold cursor-pointer"><span>[${lang.toUpperCase()}] Voice s\u1eb5n s\u00e0ng</span></div><div class="hide mt-2 pl-2"><audio controls src="${audio.url}" class="w-full h-8"></audio></div></div>`;
-                            }).join('')}
-                        </div>
-                        <div class="space-y-8 pt-4">
-                            <div>
-                                <h4 onclick="toggleAssets(this, ${para.id}, 'video')" class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter cursor-pointer select-none hover:text-gray-200">
-                                    \u25b6 <span class="w-2 h-2 bg-blue-500 rounded-full"></span> Videos (${videos.length})
-                                    <button onclick="event.stopPropagation(); deleteAll(this, '${activeProjectId}', '${gid}', 'video')" class="ml-auto text-[10px] px-2 py-1 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white normal-case tracking-normal font-normal">X\u00f3a t\u1ea5t c\u1ea3</button>
-                                </h4>
-                                <div id="assets-video-${para.id}" class="grid grid-cols-3 gap-4 hide"></div>
-                            </div>
-                            <div>
-                                <h4 onclick="toggleAssets(this, ${para.id}, 'image')" class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter cursor-pointer select-none hover:text-gray-200">
-                                    \u25b6 <span class="w-2 h-2 bg-orange-500 rounded-full"></span> Images (${images.length})
-                                    <button onclick="event.stopPropagation(); deleteAll(this, '${activeProjectId}', '${gid}', 'image')" class="ml-auto text-[10px] px-2 py-1 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white normal-case tracking-normal font-normal">X\u00f3a t\u1ea5t c\u1ea3</button>
-                                </h4>
-                                <div id="assets-image-${para.id}" class="grid grid-cols-5 gap-3 hide"></div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-span-3">
-                        <div class="sticky top-[150px]">
-                            <button onclick="saveContent(${para.id})" class="w-full bg-yellow-500 hover:bg-yellow-400 py-4 rounded-xl text-[11px] font-black uppercase text-black transition-all tracking-widest active:scale-95">L\u01b0u k\u1ecbch b\u1ea3n</button>
-                        </div>
-                    </div>
-                </div>
-                <hr class="border-gray-900/50 my-16">`;
+        function toggleSection(para, key) { para[key] = !para[key]; }
+
+        function removeKeyword(para, ki) { para.keywords.splice(ki, 1); }
+
+        async function addKeyword(e, para) {
+            const kw = e.target.value.trim();
+            if (!kw) return;
+            e.target.value = '';
+            para.keywords.push(kw);
+            showToast(`Đang tải media cho "${kw}"...`);
+            await fetchMedia(para, [kw]);
+            // reload para assets
+            const res = await fetch(`/api/posts/${activePostId.value}`);
+            const data = await res.json();
+            const updated = data.paragraphs.find(p => p.id === para.id);
+            if (updated) { para.videos = updated.videos || []; para.images = updated.images || []; }
+            showToast('✅ Đã tải xong!');
+        }
+
+        async function saveContent(para, silent = false) {
+            const res = await fetch('/api/save-content', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paragraphId: para.id, script: para.content, keywords: para.keywords })
             });
-            document.getElementById('groupList').innerHTML = html;
+            const r = await res.json();
+            if (r.success && !silent) showToast('✅ Đã lưu!');
+            return r.success;
         }
 
-
-        function toggleAssets(h4, paraId, type) {
-            const container = document.getElementById(`assets-${type}-${paraId}`);
-            const isHidden = container.classList.contains('hide');
-            container.classList.toggle('hide');
-            if (isHidden && container.innerHTML === '') {
-                const assets = (paraAssets[paraId] || {})[type === 'video' ? 'videos' : 'images'] || [];
-                container.innerHTML = assets.length > 0
-                    ? assets.map(a => renderAssetCard(a, type)).join('')
-                    : '<p class="text-xs text-gray-700 italic">Trống</p>';
-            }
+        async function fetchMedia(para, keywords) {
+            await saveContent(para, true);
+            await fetch('/api/generate-media', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ videoId: activeProjectId.value, groupId: para.id, keywords })
+            });
         }
 
-        function renderAssetCard(asset, type) {
-    const isSelected = asset.isSelected;
-    const borderCls = isSelected ? 'border-green-500 ring-2 ring-green-500/20' : 'border-gray-800 hover:border-gray-600';
-    const btnCls = isSelected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600';
-    const btnText = isSelected ? 'Đã chọn' : 'Chọn';
-
-    if (type === 'video') {
-        const durationId = `dur-${Math.random().toString(36).substr(2, 9)}`;
-        
-        return `
-        <div class="card-asset bg-gray-900 p-2 rounded-xl border relative ${borderCls}">
-            <span id="${durationId}" class="absolute top-3 right-3 bg-black/70 text-[10px] px-1.5 py-0.5 rounded font-mono text-white z-20 pointer-events-none">--:--</span>
-            <button onclick="deleteAsset(this, '${asset.relativePath}')" class="absolute top-3 left-3 bg-red-600/80 hover:bg-red-500 text-white text-[10px] w-6 h-6 rounded-full z-20 flex items-center justify-center leading-none">×</button>
-            
-            <video 
-                controls 
-                muted 
-                loop 
-                preload="metadata"
-                src="${asset.url}"
-                onmouseenter="this.play()" 
-                onmouseleave="this.pause()" 
-                onloadedmetadata="updateDuration(this, '${durationId}')"
-                class="w-full h-40 object-cover rounded-lg mb-2 bg-black shadow-lg focus:outline-none transition-transform duration-300 hover:scale-[1.01]">
-            </video>
-            
-            <button onclick="toggleSelect(this, 'video', '${asset.relativePath}')" 
-                class="w-full text-[10px] font-black py-2 rounded-lg uppercase tracking-wider transition-colors ${btnCls}">
-                ${btnText}
-            </button>
-        </div>`;
-    }
-    
-    // ảnh giữ nguyên...
-    return `
-    <div class="card-asset bg-gray-900 p-1.5 rounded-lg border ${borderCls}">
-        <div class="relative">
-            <img src="${asset.url}" class="w-full h-24 object-cover rounded mb-2 shadow-lg">
-            <button onclick="deleteAsset(this, '${asset.relativePath}')" class="absolute top-1 left-1 bg-red-600/80 hover:bg-red-500 text-white text-[10px] w-6 h-6 rounded-full flex items-center justify-center leading-none">×</button>
-        </div>
-        <button onclick="toggleSelect(this, 'image', '${asset.relativePath}')" 
-            class="w-full text-[9px] font-black py-1.5 rounded uppercase tracking-wider transition-colors ${btnCls}">
-            ${btnText}
-        </button>
-    </div>`;
-}
-
-        async function deleteProject(post, row) {
-            if (!confirm(`Xóa toàn bộ project "${post.title}"? Hành động này không thể hoàn tác!`)) return;
-            try {
-                const res = await fetch('/api/delete-project', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoId: post.title.replace(/_[a-z]{2}$/, '') })
-                });
-                const result = await res.json();
-                if (result.success) {
-                    posts = posts.filter(p => p.id !== post.id);
-                    row.remove();
-                    if (activePostId === post.id) {
-                        activePostId = null;
-                        document.getElementById('galleryContainer').classList.add('hide');
-                    }
-                }
-            } catch (e) { alert('❌ Lỗi khi xóa project!'); }
-        }
-
-        async function deleteAll(btn, videoId, groupId, type) {
-            if (!confirm(`Xóa tất cả ${type === 'video' ? 'video' : 'ảnh'} của nhóm ${groupId}?`)) return;
-            try {
-                const res = await fetch('/api/delete-all', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoId, groupId, type })
-                });
-                const result = await res.json();
-                if (result.success) {
-                    btn.closest('div').nextElementSibling.querySelectorAll('.card-asset').forEach(c => c.remove());
-                }
-            } catch (e) { alert('❌ Lỗi khi xóa!'); }
-        }
-
-        async function deleteAsset(btn, relativePath) {
+        async function deleteAsset(asset, para) {
             if (!confirm('Xóa file này?')) return;
-            try {
-                const res = await fetch('/api/delete', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ relativePath })
-                });
-                const result = await res.json();
-                if (result.success) btn.closest('.card-asset').remove();
-            } catch (e) { alert('❌ Lỗi khi xóa!'); }
-        }
-
-        async function toggleSelect(btn, type, relativePath) {
-            const card = btn.closest('.card-asset');
-            const isSelected = btn.classList.contains('bg-green-600');
-            const action = isSelected ? 'unselect' : 'select';
-            btn.innerHTML = '...';
-            try {
-                const response = await fetch('/api/toggle', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ relativePath, action })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    btn.setAttribute('onclick', `toggleSelect(this, '${type}', '${result.newRelativePath}')`);
-                    btn.classList.toggle('bg-green-600');
-                    btn.classList.toggle('bg-gray-800');
-                    btn.innerHTML = action === 'select' ? 'Đã chọn' : 'Chọn';
-                    card.classList.toggle('border-green-500');
-                    card.classList.toggle('ring-2');
-                }
-            } catch (error) { btn.innerHTML = 'Lỗi'; }
-        }
-
-        function addKeyword(e, paraId) {
-            if (e.key === 'Enter' && e.target.value.trim()) {
-                const kw = e.target.value.trim();
-                const container = document.getElementById(`keywords-container-${paraId}`);
-                const tag = document.createElement('span');
-                tag.className = "keyword-tag";
-                tag.innerHTML = `${kw} <b class="cursor-pointer text-gray-600 hover:text-red-500" onclick="this.parentElement.remove(); saveContent(${paraId}, true)">×</b>`;
-                container.insertBefore(tag, e.target);
-                e.target.value = '';
-                const toast = document.createElement('div');
-                toast.className = 'fixed bottom-6 right-6 z-50 bg-blue-600 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-lg';
-                toast.innerText = `Đang tải media cho "${kw}"...`;
-                document.body.appendChild(toast);
-                const minDelay = new Promise(r => setTimeout(r, 2000));
-                Promise.all([fetchMedia(paraId, [kw]), minDelay]).finally(() => toast.remove());
+            const res = await fetch('/api/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath }) });
+            const r = await res.json();
+            if (r.success) {
+                para.videos = para.videos.filter(v => v.relativePath !== asset.relativePath);
+                para.images = para.images.filter(v => v.relativePath !== asset.relativePath);
             }
         }
 
-        function updateDuration(videoElem, badgeId) {
-            const badge = document.getElementById(badgeId);
-            if (!badge) return;
+        async function deleteAll(para, gid, type) {
+            if (!confirm(`Xóa tất cả ${type === 'video' ? 'video' : 'ảnh'}?`)) return;
+            const res = await fetch('/api/delete-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoId: activeProjectId.value, groupId: String(gid), type }) });
+            const r = await res.json();
+            if (r.success) { if (type === 'video') para.videos = []; else para.images = []; }
+        }
 
-            // Hàm thực hiện cập nhật
-            const setTime = () => {
-                if (videoElem.duration && videoElem.duration !== Infinity) {
-                    badge.innerText = formatTime(videoElem.duration);
-                    if (videoElem.duration < 2) {
-                        badge.classList.replace('bg-black/70', 'bg-red-600/80');
-                    }
-                }
-            };
-
-            // Nếu đã có sẵn duration (do cache), chạy luôn
-            if (videoElem.readyState >= 1) {
-                setTime();
-            } else {
-                // Nếu chưa có, đợi sự kiện loadedmetadata
-                videoElem.onloadedmetadata = setTime;
+        async function toggleSelect(asset, para) {
+            const action = asset.isSelected ? 'unselect' : 'select';
+            const res = await fetch('/api/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath, action }) });
+            const r = await res.json();
+            if (r.success) {
+                asset.isSelected = !asset.isSelected;
+                asset.relativePath = r.newRelativePath;
+                asset.url = '/' + r.newRelativePath;
             }
-        }
-
-        function formatTime(seconds) {
-            if (!seconds || isNaN(seconds)) return "0:00";
-            const mins = Math.floor(seconds / 60);
-            const secs = Math.floor(seconds % 60);
-            return `${mins}:${secs.toString().padStart(2, '0')}`;
-        }
-
-        async function saveContent(paraId, silent = false) {
-            const script = document.getElementById(`script-${paraId}`).value;
-            const kwNodes = document.querySelectorAll(`#keywords-container-${paraId} .keyword-tag`);
-            const keywords = Array.from(kwNodes).map(node => node.innerText.replace('×', '').trim()).filter(k => k);
-            try {
-                const res = await fetch('/api/save-content', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ paragraphId: paraId, script, keywords })
-                });
-                const result = await res.json();
-                if (result.success && !silent) alert('✅ Đã lưu kịch bản & từ khóa!');
-                return result.success;
-            } catch (error) { alert("❌ Lỗi khi lưu!"); return false; }
-        }
-
-        async function fetchMedia(paraId, keywords) {
-            await saveContent(paraId, true);
-            try {
-                await fetch('/api/generate-media', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoId: activeProjectId, groupId: paraId, keywords })
-                });
-            } catch (error) { alert("❌ Lỗi khi gọi Crawler!"); }
-        }
-
-        async function downloadVoice() {
-            let info = batchMap[activeProjectId];
-            if (!info) {
-                try {
-                    const res = await fetch(`/api/batch-info?videoId=${activeProjectId}`);
-                    const batches = await res.json();
-                    if (batches.length) { info = batches[batches.length - 1]; batchMap[activeProjectId] = info; }
-                } catch (e) {}
-            }
-            if (!info || !info.batchUuid) return alert('Chưa tạo batch cho project này!');
-            try {
-                const res = await fetch('/api/download-voice', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoId: activeProjectId, batchUuid: info.batchUuid, lang: info.lang, folderNames: info.folderNames || [] })
-                });
-                const result = await res.json();
-                if (result.total) alert(`✅ Đã tải ${result.total} file audio!`);
-                else alert(result.error || '❌ Batch chưa gen xong, thử lại sau!');
-            } catch (e) { alert('❌ Lỗi: ' + e.message); }
         }
 
         async function createVoice() {
-            document.getElementById('voiceModal').classList.remove('hide');
-            try {
-                const [langRes, speakerRes] = await Promise.all([
-                    fetch('/api/languages'),
-                    fetch('/api/reference-speakers')
-                ]);
-                const langs = await langRes.json();
-                const speakers = await speakerRes.json();
-                document.getElementById('voiceLang').innerHTML = '<option value="">-- Chọn ngôn ngữ --</option>' + langs.map(l => `<option value="${l.code || l.uuid}">${l.name || l.code}</option>`).join('');
-                document.getElementById('voiceSpeaker').innerHTML = '<option value="">-- Chọn giọng mẫu --</option>' + speakers.map(s => `<option value="${s.uuid}">${s.speaker_name}</option>`).join('');
-            } catch (e) {
-                document.getElementById('voiceLang').innerHTML = '<option value="">Lỗi tải</option>';
-                document.getElementById('voiceSpeaker').innerHTML = '<option value="">Lỗi tải</option>';
-            }
-        }
-
-        function closeVoiceModal() {
-            document.getElementById('voiceModal').classList.add('hide');
-            document.getElementById('voiceModalBody').innerHTML = document.getElementById('voiceModalBody').dataset.original;
-        }
-
-        async function genAudio(batchUuid) {
-            try {
-                const res = await fetch('/api/update-batch-status', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ batchUuid })
-                });
-                const result = await res.json();
-                alert('✅ Đã bắt đầu gen audio!');
-                closeVoiceModal();
-            } catch (e) { alert('❌ Lỗi: ' + e.message); }
+            voiceModal.value = { open: true, lang: '', speakerUuid: '', langs: [], speakers: [], batchUuid: '' };
+            const [lr, sr] = await Promise.all([fetch('/api/languages'), fetch('/api/reference-speakers')]);
+            voiceModal.value.langs = await lr.json();
+            voiceModal.value.speakers = await sr.json();
         }
 
         async function submitCreateVoice() {
-            const lang = document.getElementById('voiceLang').value;
-            const speakerUuid = document.getElementById('voiceSpeaker').value;
-            if (!lang) return alert('Vui lòng chọn ngôn ngữ!');
-            if (!speakerUuid) return alert('Vui lòng chọn giọng mẫu!');
-            try {
-                const res = await fetch('/api/create-voice', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoId: activeProjectId, lang, speakerUuid })
-                });
-                const result = await res.json();
-                if (result.batch_uuid) {
-                    batchMap[activeProjectId] = { batchUuid: result.batch_uuid, lang, folderNames: result.folderNames || [] };
-                    await fetch('/api/save-batch-info', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ videoId: activeProjectId, batchUuid: result.batch_uuid, lang, folderNames: result.folderNames || [] })
-                    });
-                    document.getElementById('voiceModalBody').innerHTML = `
-                        <div class="text-center space-y-6">
-                            <div class="text-green-400 text-5xl">✅</div>
-                            <h3 class="text-xl font-black text-white">Tạo thành công!</h3>
-                            <p class="text-sm text-gray-400">Batch UUID: <span class="font-mono text-white">${result.batch_uuid}</span></p>
-                            <p class="text-sm text-gray-500">Bấm nút bên dưới để bắt đầu tạo audio</p>
-                            <div class="flex gap-3 justify-center pt-2">
-                                <button onclick="closeVoiceModal()" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-400 transition-all">Đóng</button>
-                                <button onclick="genAudio('${result.batch_uuid}')" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-purple-600 hover:bg-purple-500 transition-all">🎙️ Gen Audio</button>
-                            </div>
-                        </div>`;
-                } else {
-                    alert('❌ Tạo không thành công!');
-                }
-            } catch (e) { alert('❌ Tạo không thành công!'); }
+            const { lang, speakerUuid } = voiceModal.value;
+            if (!lang || !speakerUuid) return alert('Vui lòng chọn đủ!');
+            const res = await fetch('/api/create-voice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoId: activeProjectId.value, lang, speakerUuid }) });
+            const r = await res.json();
+            if (r.batch_uuid) {
+                batchMap.value[activeProjectId.value] = { batchUuid: r.batch_uuid, lang, folderNames: r.folderNames || [] };
+                await fetch('/api/save-batch-info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoId: activeProjectId.value, batchUuid: r.batch_uuid, lang, folderNames: r.folderNames || [] }) });
+                voiceModal.value.batchUuid = r.batch_uuid;
+            } else alert('❌ Tạo không thành công!');
+        }
+
+        async function genAudio() {
+            await fetch('/api/update-batch-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ batchUuid: voiceModal.value.batchUuid }) });
+            showToast('✅ Đã bắt đầu gen audio!');
+            voiceModal.value.open = false;
+        }
+
+        async function downloadVoice() {
+            let info = batchMap.value[activeProjectId.value];
+            if (!info) {
+                const res = await fetch(`/api/batch-info?videoId=${activeProjectId.value}`);
+                const batches = await res.json();
+                if (batches.length) { info = batches[batches.length - 1]; batchMap.value[activeProjectId.value] = info; }
+            }
+            if (!info?.batchUuid) return alert('Chưa tạo batch!');
+            const res = await fetch('/api/download-voice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoId: activeProjectId.value, batchUuid: info.batchUuid, lang: info.lang, folderNames: info.folderNames || [] }) });
+            const r = await res.json();
+            if (r.total) showToast(`✅ Đã tải ${r.total} file audio!`);
+            else alert(r.error || '❌ Batch chưa gen xong!');
         }
 
         async function generateMedia() {
-            let info = batchMap[activeProjectId];
+            let info = batchMap.value[activeProjectId.value];
             if (!info) {
-                try {
-                    const res = await fetch(`/api/batch-info?videoId=${activeProjectId}`);
-                    const batches = await res.json();
-                    if (batches.length) { info = batches[batches.length - 1]; batchMap[activeProjectId] = info; }
-                } catch (e) {}
+                const res = await fetch(`/api/batch-info?videoId=${activeProjectId.value}`);
+                const batches = await res.json();
+                if (batches.length) { info = batches[batches.length - 1]; batchMap.value[activeProjectId.value] = info; }
             }
-            if (!info || !info.lang) return alert('Chưa tạo voice cho project này!');
-            try {
-                alert('🎬 Đang generate media...');
-                const res = await fetch('/api/generate-media-video', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoId: activeProjectId, lang: info.lang })
-                });
-                const result = await res.json();
-                if (result.success) {
-                    alert(`✅ Generate xong! ${result.results.length} câu đã xử lý.`);
-                } else {
-                    alert('❌ Lỗi: ' + (result.error || 'Không rõ'));
-                }
-            } catch (e) { alert('❌ Lỗi: ' + e.message); }
+            if (!info?.lang) return alert('Chưa tạo voice!');
+            const res = await fetch('/api/generate-media-video', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoId: activeProjectId.value, lang: info.lang }) });
+            const r = await res.json();
+            if (r.success) showToast(`✅ Generate xong ${r.results.length} câu!`);
+            else alert('❌ ' + (r.error || 'Lỗi'));
         }
 
-        async function openFolder(videoId, lang) {
-            await fetch('/api/open-folder', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ videoId, lang })
-            });
-        }
+        loadPosts();
 
-        // --- HÀM 3: CHUYÊN LẤY VOICE (Nếu sau này bạn làm) ---
-        async function fetchVoice(groupId) {
-            const saveOk = await saveContent(groupId, true);
-            if (saveOk) {
-                alert('🎙️ Đang bắt đầu tạo Voice...');
-                // Gọi API lấy voice của bạn ở đây
-            }
-        }
-    </script>
+        return { posts, activePostId, activePost, activeProjectId, voiceModal, toast, selectPost, deleteProject, toggleSection, removeKeyword, addKeyword, saveContent, fetchMedia, deleteAsset, deleteAll, toggleSelect, createVoice, submitCreateVoice, genAudio, downloadVoice, generateMedia };
+    }
+}).mount('#app');
+</script>
 </body>
-
 </html>
