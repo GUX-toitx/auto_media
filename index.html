@@ -46,119 +46,197 @@
                 </div>
             </header>
 
-            <div class="space-y-24 mt-[150px]">
-                <div v-for="(para, i) in activePost.paragraphs" :key="para.id">
-                    <div class="grid grid-cols-12 gap-12">
-                        <div class="col-span-9 space-y-10">
+            <div class="space-y-4 mt-[120px]">
+                <div v-for="(para, i) in activePost.paragraphs" :key="para.id" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
 
-                            <!-- Original -->
-                            <div>
-                                <div class="flex items-center gap-3 mb-4">
-                                    <span class="bg-blue-600 text-[10px] font-black px-2 py-1 rounded">NHÓM {{ i + 1 }}</span>
-                                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Nội dung gốc (Original)</label>
-                                </div>
-                                <div class="w-full bg-gray-950 border border-gray-800 rounded-xl p-4 text-xs text-gray-400 leading-relaxed max-h-32 overflow-y-auto whitespace-pre-wrap">
-                                    <span v-if="para.original_content">{{ para.original_content }}</span>
-                                    <span v-else class="italic text-gray-700">Chưa có nội dung gốc</span>
-                                </div>
+                    <!-- Row 1: badge + content -->
+                    <div class="flex items-start gap-2">
+                        <span class="bg-blue-600 text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 mt-0.5">#{{ i + 1 }}</span>
+                        <div class="grid grid-cols-2 gap-2 flex-1">
+                            <div class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed h-20 overflow-y-auto whitespace-pre-wrap">
+                                <span v-if="para.original_content">{{ para.original_content }}</span>
+                                <span v-else class="italic text-gray-700">Chưa có</span>
                             </div>
-
-                            <!-- Script -->
-                            <div>
-                                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Kịch bản đã làm mịn</label>
-                                <textarea v-model="para.content" class="w-full bg-gray-900 border border-gray-800 rounded-xl p-6 text-sm leading-relaxed focus:border-blue-500 outline-none h-32 transition-all shadow-inner"></textarea>
-                            </div>
-
-                            <!-- Keywords -->
-                            <div>
-                                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-4 block">Từ khóa tìm kiếm</label>
-                                <div class="flex flex-wrap gap-2 p-4 bg-gray-900/30 rounded-xl border border-gray-800">
-                                    <span v-for="(kw, ki) in para.keywords" :key="ki" class="keyword-tag">
-                                        {{ kw }}
-                                        <b class="cursor-pointer text-gray-600 hover:text-red-500 text-lg leading-none" @click="removeKeyword(para, ki)">×</b>
-                                    </span>
-                                    <input type="text" @keydown.enter="addKeyword($event, para)"
-                                        placeholder="+ Thêm từ khóa..."
-                                        class="bg-transparent text-xs p-1 outline-none text-blue-400 w-32 border-b border-transparent focus:border-blue-500">
-                                </div>
-                            </div>
-
-                            <!-- Audio -->
-                            <div v-if="Object.keys(para.audios || {}).length">
-                                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3 block">Âm thanh (Voice)</label>
-                                <div v-for="(audio, lang) in para.audios" :key="lang" class="mb-2">
-                                    <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-900 border border-green-800 text-[11px] text-green-400 font-bold cursor-pointer"
-                                        @click="audio._open = !audio._open">
-                                        [{{ lang.toUpperCase() }}] ● Voice sẵn sàng
-                                    </div>
-                                    <div v-if="audio._open" class="mt-2 pl-2">
-                                        <audio controls :src="audio.url" class="w-full h-8"></audio>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Videos -->
-                            <div>
-                                <h4 @click="toggleSection(para, 'videoOpen')"
-                                    class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter cursor-pointer select-none hover:text-gray-200">
-                                    {{ para.videoOpen ? '▼' : '▶' }}
-                                    <span class="w-2 h-2 bg-blue-500 rounded-full"></span> Videos ({{ (para.videos || []).length }})
-                                    <button @click.stop="deleteAll(para, i+1, 'video')" class="ml-auto text-[10px] px-2 py-1 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white normal-case tracking-normal font-normal">🗑️ Xóa tất cả</button>
-                                </h4>
-                                <div v-if="para.videoOpen" class="grid grid-cols-3 gap-4">
-                                    <div v-if="!(para.videos || []).length" class="text-xs text-gray-700 italic">Trống</div>
-                                    <div v-for="v in (para.videos || [])" :key="v.relativePath" class="card-asset bg-gray-900 p-2 rounded-xl border relative"
-                                        :class="v.isSelected ? 'border-green-500 ring-2 ring-green-500/20' : 'border-gray-800 hover:border-gray-600'">
-                                        <button @click="deleteAsset(v, para)" class="absolute top-3 left-3 bg-red-600/80 hover:bg-red-500 text-white text-[10px] w-6 h-6 rounded-full z-20 flex items-center justify-center">×</button>
-                                        <video controls muted loop preload="metadata" :src="v.url"
-                                            @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()"
-                                            class="w-full h-40 object-cover rounded-lg mb-2 bg-black shadow-lg"></video>
-                                        <button @click="toggleSelect(v, para)" class="w-full text-[10px] font-black py-2 rounded-lg uppercase tracking-wider transition-colors"
-                                            :class="v.isSelected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">
-                                            {{ v.isSelected ? 'Đã chọn' : 'Chọn' }}
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Images -->
-                            <div>
-                                <h4 @click="toggleSection(para, 'imageOpen')"
-                                    class="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-tighter cursor-pointer select-none hover:text-gray-200">
-                                    {{ para.imageOpen ? '▼' : '▶' }}
-                                    <span class="w-2 h-2 bg-orange-500 rounded-full"></span> Images ({{ (para.images || []).length }})
-                                    <button @click.stop="deleteAll(para, i+1, 'image')" class="ml-auto text-[10px] px-2 py-1 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white normal-case tracking-normal font-normal">🗑️ Xóa tất cả</button>
-                                </h4>
-                                <div v-if="para.imageOpen" class="grid grid-cols-5 gap-3">
-                                    <div v-if="!(para.images || []).length" class="text-xs text-gray-700 italic">Trống</div>
-                                    <div v-for="img in (para.images || [])" :key="img.relativePath" class="card-asset bg-gray-900 p-1.5 rounded-lg border"
-                                        :class="img.isSelected ? 'border-green-500 ring-2 ring-green-500/20' : 'border-gray-800 hover:border-gray-600'">
-                                        <div class="relative">
-                                            <img :src="img.url" class="w-full h-24 object-cover rounded mb-2 shadow-lg">
-                                            <button @click="deleteAsset(img, para)" class="absolute top-1 left-1 bg-red-600/80 hover:bg-red-500 text-white text-[10px] w-6 h-6 rounded-full flex items-center justify-center">×</button>
-                                        </div>
-                                        <button @click="toggleSelect(img, para)" class="w-full text-[9px] font-black py-1.5 rounded uppercase tracking-wider transition-colors"
-                                            :class="img.isSelected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">
-                                            {{ img.isSelected ? 'Đã chọn' : 'Chọn' }}
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-
+                            <textarea v-model="para.content" @blur="saveContent(para, true)"
+                                class="bg-gray-900 border border-gray-800 rounded-lg p-2 text-[11px] leading-relaxed focus:border-blue-500 outline-none h-20 resize-none transition-all"></textarea>
                         </div>
+                    </div>
 
-                        <!-- Sidebar actions -->
-                        <div class="col-span-3">
-                            <div class="sticky top-[150px]">
-                                <button @click="saveContent(para)" class="w-full bg-yellow-500 hover:bg-yellow-400 py-4 rounded-xl text-[11px] font-black uppercase text-black transition-all tracking-widest active:scale-95">💾 Lưu kịch bản</button>
+                    <!-- Row 2: keywords -->
+                    <div class="flex flex-wrap gap-1 px-1">
+                        <span v-for="(kw, ki) in para.keywords" :key="ki" class="keyword-tag">
+                            {{ kw }}<b class="cursor-pointer text-gray-600 hover:text-red-500 ml-1" @click="removeKeyword(para, ki)">×</b>
+                        </span>
+                        <input type="text" @keydown.enter="addKeyword($event, para)" placeholder="+ keyword"
+                            class="bg-transparent text-[11px] p-0.5 outline-none text-blue-400 w-24 border-b border-transparent focus:border-blue-500">
+                    </div>
+
+                    <!-- Row 3: audio (nếu có) -->
+                    <div v-if="Object.keys(para.audios || {}).length" class="flex flex-wrap gap-1 px-1">
+                        <div v-for="(audio, lang) in para.audios" :key="lang">
+                            <div class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-900 border border-green-800 text-[10px] text-green-400 font-bold cursor-pointer"
+                                @click="audio._open = !audio._open">[{{ lang.toUpperCase() }}] ● Voice</div>
+                            <div v-if="audio._open" class="mt-1"><audio controls :src="audio.url" class="h-7"></audio></div>
+                        </div>
+                    </div>
+
+                    <!-- Row 4: Videos -->
+                    <div>
+                        <div class="flex items-center gap-1.5 text-[10px] font-black text-gray-500 select-none py-1">
+                            <span @click="toggleSection(para, 'videoOpen')" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
+                                {{ para.videoOpen ? '▼' : '▶' }}
+                                <span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
+                                Videos ({{ (para.videos || []).length }})
+                            </span>
+                            <button @click="deleteAll(para, i+1, 'video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white">Xóa tất cả</button>
+                        </div>
+                        <div v-if="para.videoOpen" class="grid grid-cols-4 gap-2 mt-1">
+                            <div v-if="!(para.videos || []).length" class="text-[10px] text-gray-700 italic">Trống</div>
+                            <div v-for="v in (para.videos || [])" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
+                                :class="v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
+                                <button @click="deleteAsset(v, para)" class="absolute top-1 left-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
+                                <video muted loop preload="metadata" :src="v.url"
+                                    @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()"
+                                    class="w-full h-24 object-cover rounded mb-1 bg-black"></video>
+                                <div class="flex gap-1">
+                                    <button @click="toggleSelect(v, para)" class="flex-1 text-[9px] font-black py-1 rounded uppercase transition-colors"
+                                        :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
+                                    <button @click="openEdit(v, 'video')" :disabled="!v.selected"
+                                        class="text-[9px] font-black py-1 px-2 rounded transition-colors"
+                                        :class="v.selected ? 'bg-yellow-500 hover:bg-yellow-400 text-black' : 'bg-gray-800 text-gray-700 cursor-not-allowed'">Edit</button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                    <hr class="border-gray-900/50 my-16">
+
+                    <!-- Row 5: Images -->
+                    <div>
+                        <div class="flex items-center gap-1.5 text-[10px] font-black text-gray-500 select-none py-1">
+                            <span @click="toggleSection(para, 'imageOpen')" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
+                                {{ para.imageOpen ? '▼' : '▶' }}
+                                <span class="w-1.5 h-1.5 bg-orange-500 rounded-full"></span>
+                                Images ({{ (para.images || []).length }})
+                            </span>
+                            <button @click="deleteAll(para, i+1, 'image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white">Xóa tất cả</button>
+                        </div>
+                        <div v-if="para.imageOpen" class="grid grid-cols-6 gap-2 mt-1">
+                            <div v-if="!(para.images || []).length" class="text-[10px] text-gray-700 italic">Trống</div>
+                            <div v-for="img in (para.images || [])" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border"
+                                :class="img.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
+                                <div class="relative">
+                                    <img :src="img.url" class="w-full h-16 object-cover rounded mb-1">
+                                    <button @click="deleteAsset(img, para)" class="absolute top-0.5 left-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
+                                </div>
+                                <div class="flex gap-1">
+                                    <button @click="toggleSelect(img, para)" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
+                                        :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
+                                    <button @click="openEdit(img, 'image')" :disabled="!img.selected"
+                                        class="text-[9px] font-black py-0.5 px-1.5 rounded transition-colors"
+                                        :class="img.selected ? 'bg-yellow-500 hover:bg-yellow-400 text-black' : 'bg-gray-800 text-gray-700 cursor-not-allowed'">Edit</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
             </div>
         </div>
     </main>
+
+    <!-- EDIT MODAL -->
+    <div v-if="editModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 space-y-4" style="width:800px;max-height:90vh;overflow-y:auto">
+            <div class="flex justify-between items-center">
+                <h3 class="text-lg font-black text-white">{{ editModal.type === 'video' ? '✂️ Trim Video' : '✂️ Crop Ảnh' }}</h3>
+                <button @click="editModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+
+            <!-- VIDEO TRIM -->
+            <template v-if="editModal.type === 'video'">
+                <video :ref="el => editVideoRef = el" :src="editModal.asset.url" controls class="w-full rounded-lg bg-black" style="max-height:320px"
+                    @loadedmetadata="onVideoLoaded" @timeupdate="onVideoTimeUpdate"></video>
+
+                <!-- Timeline -->
+                <div class="relative h-12 bg-gray-800 rounded-lg overflow-hidden cursor-pointer" :ref="el => timelineRef = el"
+                    @click="seekVideo($event)">
+                    <!-- vùng được chọn -->
+                    <div class="absolute top-0 bottom-0 bg-yellow-500/30 border-x-2 border-yellow-400"
+                        :style="{ left: (editModal.start / editModal.duration * 100) + '%', width: ((editModal.end - editModal.start) / editModal.duration * 100) + '%' }"></div>
+                    <!-- playhead -->
+                    <div class="absolute top-0 bottom-0 w-0.5 bg-white"
+                        :style="{ left: (editModal.currentTime / editModal.duration * 100) + '%' }"></div>
+                    <!-- handle start -->
+                    <div class="absolute top-0 bottom-0 w-3 bg-yellow-400 cursor-ew-resize flex items-center justify-center"
+                        :style="{ left: 'calc(' + (editModal.start / editModal.duration * 100) + '% - 6px)' }"
+                        @mousedown.stop="startTrimDrag($event, 'start')">
+                        <span class="text-black text-[8px] font-black select-none">◀</span>
+                    </div>
+                    <!-- handle end -->
+                    <div class="absolute top-0 bottom-0 w-3 bg-yellow-400 cursor-ew-resize flex items-center justify-center"
+                        :style="{ left: 'calc(' + (editModal.end / editModal.duration * 100) + '% - 6px)' }"
+                        @mousedown.stop="startTrimDrag($event, 'end')">
+                        <span class="text-black text-[8px] font-black select-none">▶</span>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-between text-xs text-gray-400">
+                    <span>{{ fmtTime(editModal.start) }} → {{ fmtTime(editModal.end) }}</span>
+                    <span class="text-yellow-400 font-bold">{{ fmtTime(editModal.end - editModal.start) }} / {{ fmtTime(editModal.duration) }}</span>
+                </div>
+            </template>
+
+            <!-- IMAGE CROP -->
+            <template v-else>
+                <!-- Preset tỷ lệ -->
+                <div class="flex gap-2 flex-wrap">
+                    <span class="text-[10px] text-gray-500 uppercase tracking-widest self-center">Tỷ lệ:</span>
+                    <button v-for="r in cropRatios" :key="r.label" @click="setCropRatio(r)"
+                        class="px-3 py-1 rounded text-[10px] font-bold uppercase transition-colors"
+                        :class="editModal.ratio === r.label ? 'bg-yellow-500 text-black' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">
+                        {{ r.label }}
+                    </button>
+                </div>
+
+                <!-- Canvas crop -->
+                <div class="relative bg-black rounded-lg overflow-hidden" ref="cropContainerRef" style="max-height:400px">
+                    <img :src="editModal.asset.url" ref="editImgRef" @load="onImgLoaded"
+                        class="w-full object-contain select-none edit-img-el" style="max-height:400px;display:block">
+                    <!-- overlay tối 4 phía -->
+                    <template v-if="editModal.cropReady">
+                        <div class="absolute inset-0 bg-black/50 pointer-events-none"></div>
+                        <!-- vùng sáng crop -->
+                        <div class="absolute border-2 border-yellow-400 cursor-move"
+                            style="box-shadow:0 0 0 9999px rgba(0,0,0,0.5)"
+                            :style="{ left: editModal.cropX + 'px', top: editModal.cropY + 'px', width: editModal.cropW + 'px', height: editModal.cropH + 'px' }"
+                            @mousedown="startCropDrag($event)">
+                            <!-- grid lines -->
+                            <div class="absolute inset-0 pointer-events-none" style="background:repeating-linear-gradient(0deg,transparent,transparent 33%,rgba(255,255,255,0.15) 33%,rgba(255,255,255,0.15) 34%),repeating-linear-gradient(90deg,transparent,transparent 33%,rgba(255,255,255,0.15) 33%,rgba(255,255,255,0.15) 34%)"></div>
+                            <!-- resize handles 4 góc -->
+                            <div class="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-yellow-400 cursor-nw-resize" @mousedown.stop="startCropResize($event,'nw')"></div>
+                            <div class="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-yellow-400 cursor-ne-resize" @mousedown.stop="startCropResize($event,'ne')"></div>
+                            <div class="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-yellow-400 cursor-sw-resize" @mousedown.stop="startCropResize($event,'sw')"></div>
+                            <div class="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-yellow-400 cursor-se-resize" @mousedown.stop="startCropResize($event,'se')"></div>
+                        </div>
+                    </template>
+                </div>
+
+                <div class="grid grid-cols-4 gap-2 text-xs text-gray-400">
+                    <div>W: <span class="text-white font-bold">{{ Math.round(editModal.cropW * editModal.scaleX) }}px</span></div>
+                    <div>H: <span class="text-white font-bold">{{ Math.round(editModal.cropH * editModal.scaleY) }}px</span></div>
+                    <div>X: <span class="text-white font-bold">{{ Math.round(editModal.cropX * editModal.scaleX) }}px</span></div>
+                    <div>Y: <span class="text-white font-bold">{{ Math.round(editModal.cropY * editModal.scaleY) }}px</span></div>
+                </div>
+            </template>
+
+            <div class="flex gap-3 justify-end pt-2">
+                <button @click="editModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
+                <button @click="submitEdit" :disabled="editModal.saving"
+                    class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-yellow-500 hover:bg-yellow-400 text-black transition-all">
+                    {{ editModal.saving ? 'Đang xử lý...' : '✅ Lưu' }}
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- VOICE MODAL -->
     <div v-if="voiceModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
@@ -213,6 +291,7 @@ createApp({
         const batchMap = ref({});
         const toast = ref('');
         const voiceModal = ref({ open: false, lang: '', speakerUuid: '', langs: [], speakers: [], batchUuid: '' });
+        const editModal = ref({ open: false, type: '', asset: null, start: 0, end: 0, duration: 0, cropX: 0, cropY: 0, cropW: 200, cropH: 200, cropReady: false, saving: false });
 
         const activeProjectId = computed(() => {
             if (!activePost.value) return '';
@@ -259,7 +338,7 @@ createApp({
 
         function toggleSection(para, key) { para[key] = !para[key]; }
 
-        function removeKeyword(para, ki) { para.keywords.splice(ki, 1); }
+        function removeKeyword(para, ki) { para.keywords.splice(ki, 1); saveContent(para, true); }
 
         async function addKeyword(e, para) {
             const kw = e.target.value.trim();
@@ -312,14 +391,157 @@ createApp({
         }
 
         async function toggleSelect(asset, para) {
-            const action = asset.isSelected ? 'unselect' : 'select';
+            const action = asset.selected ? 'unselect' : 'select';
             const res = await fetch('/api/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath, action }) });
             const r = await res.json();
-            if (r.success) {
-                asset.isSelected = !asset.isSelected;
-                asset.relativePath = r.newRelativePath;
-                asset.url = '/' + r.newRelativePath;
-            }
+            if (r.success) asset.selected = !asset.selected;
+        }
+
+        const cropRatios = [
+            { label: '16:9', w: 16, h: 9 }, { label: '9:16', w: 9, h: 16 },
+            { label: '1:1', w: 1, h: 1 }, { label: '4:3', w: 4, h: 3 },
+            { label: '3:4', w: 3, h: 4 }, { label: 'Free', w: 0, h: 0 }
+        ];
+
+        function fmtTime(s) {
+            if (!s || isNaN(s)) return '0:00';
+            const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+            return m + ':' + String(sec).padStart(2, '0');
+        }
+
+        function openEdit(asset, type) {
+            editModal.value = {
+                open: true, type, asset,
+                start: 0, end: 0, duration: 0, currentTime: 0,
+                cropX: 0, cropY: 0, cropW: 0, cropH: 0,
+                scaleX: 1, scaleY: 1, cropReady: false,
+                ratio: '16:9', saving: false
+            };
+        }
+
+        const editVideoRef = ref(null);
+        const timelineRef = ref(null);
+
+        function onVideoLoaded(e) {
+            editModal.value.duration = e.target.duration;
+            editModal.value.end = e.target.duration;
+        }
+
+        function onVideoTimeUpdate(e) { editModal.value.currentTime = e.target.currentTime; }
+
+        function getTimeFromEvent(ev) {
+            const el = timelineRef.value;
+            if (!el) return 0;
+            const rect = el.getBoundingClientRect();
+            return Math.max(0, Math.min(editModal.value.duration, ((ev.clientX - rect.left) / rect.width) * editModal.value.duration));
+        }
+
+        function seekVideo(e) {
+            const t = getTimeFromEvent(e);
+            if (editVideoRef.value) editVideoRef.value.currentTime = t;
+        }
+
+        function startTrimDrag(e, handle) {
+            const move = (ev) => {
+                const t = getTimeFromEvent(ev);
+                if (handle === 'start') {
+                    editModal.value.start = Math.min(t, editModal.value.end - 0.1);
+                    if (editVideoRef.value) editVideoRef.value.currentTime = editModal.value.start;
+                } else {
+                    editModal.value.end = Math.max(t, editModal.value.start + 0.1);
+                    if (editVideoRef.value) editVideoRef.value.currentTime = editModal.value.end;
+                }
+            };
+            const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+            document.addEventListener('mousemove', move);
+            document.addEventListener('mouseup', up);
+        }
+
+        function onImgLoaded(e) {
+            const img = e.target;
+            editModal.value.scaleX = img.naturalWidth / img.clientWidth;
+            editModal.value.scaleY = img.naturalHeight / img.clientHeight;
+            // init crop theo ratio 16:9 căn giữa
+            const containerW = img.clientWidth;
+            const containerH = img.clientHeight;
+            const ratio = editModal.value.ratio !== 'Free' ? cropRatios.find(r => r.label === editModal.value.ratio) : null;
+            let w = containerW * 0.8, h = ratio ? w * ratio.h / ratio.w : containerH * 0.8;
+            if (h > containerH * 0.9) { h = containerH * 0.9; w = ratio ? h * ratio.w / ratio.h : w; }
+            editModal.value.cropW = Math.round(w);
+            editModal.value.cropH = Math.round(h);
+            editModal.value.cropX = Math.round((containerW - w) / 2);
+            editModal.value.cropY = Math.round((containerH - h) / 2);
+            editModal.value.cropReady = true;
+        }
+
+        function setCropRatio(r) {
+            editModal.value.ratio = r.label;
+            if (r.w === 0) return; // Free
+            const img = document.querySelector('.edit-img-el');
+            if (!img) return;
+            const containerW = img.clientWidth;
+            const containerH = img.clientHeight;
+            let w = editModal.value.cropW, h = w * r.h / r.w;
+            if (h > containerH) { h = containerH * 0.9; w = h * r.w / r.h; }
+            editModal.value.cropW = Math.round(w);
+            editModal.value.cropH = Math.round(h);
+        }
+
+        function startCropDrag(e) {
+            const startX = e.clientX - editModal.value.cropX;
+            const startY = e.clientY - editModal.value.cropY;
+            const img = document.querySelector('.edit-img-el');
+            const maxX = img ? img.clientWidth - editModal.value.cropW : 9999;
+            const maxY = img ? img.clientHeight - editModal.value.cropH : 9999;
+            const move = (ev) => {
+                editModal.value.cropX = Math.max(0, Math.min(maxX, ev.clientX - startX));
+                editModal.value.cropY = Math.max(0, Math.min(maxY, ev.clientY - startY));
+            };
+            const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+            document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+        }
+
+        function startCropResize(e, corner) {
+            const startX = e.clientX, startY = e.clientY;
+            const origX = editModal.value.cropX, origY = editModal.value.cropY;
+            const origW = editModal.value.cropW, origH = editModal.value.cropH;
+            const ratio = editModal.value.ratio !== 'Free' ? cropRatios.find(r => r.label === editModal.value.ratio) : null;
+            const img = document.querySelector('.edit-img-el');
+            const move = (ev) => {
+                const dx = ev.clientX - startX, dy = ev.clientY - startY;
+                let newW = origW, newH = origH, newX = origX, newY = origY;
+                if (corner === 'se') { newW = Math.max(50, origW + dx); newH = ratio ? newW * ratio.h / ratio.w : Math.max(50, origH + dy); }
+                else if (corner === 'sw') { newW = Math.max(50, origW - dx); newH = ratio ? newW * ratio.h / ratio.w : Math.max(50, origH + dy); newX = origX + origW - newW; }
+                else if (corner === 'ne') { newW = Math.max(50, origW + dx); newH = ratio ? newW * ratio.h / ratio.w : Math.max(50, origH - dy); newY = origY + origH - newH; }
+                else if (corner === 'nw') { newW = Math.max(50, origW - dx); newH = ratio ? newW * ratio.h / ratio.w : Math.max(50, origH - dy); newX = origX + origW - newW; newY = origY + origH - newH; }
+                if (img) { newX = Math.max(0, Math.min(img.clientWidth - newW, newX)); newY = Math.max(0, Math.min(img.clientHeight - newH, newY)); }
+                editModal.value.cropX = Math.round(newX); editModal.value.cropY = Math.round(newY);
+                editModal.value.cropW = Math.round(newW); editModal.value.cropH = Math.round(newH);
+            };
+            const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+            document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+        }
+
+        async function submitEdit() {
+            editModal.value.saving = true;
+            const { type, asset, start, end, cropX, cropY, cropW, cropH, scaleX, scaleY } = editModal.value;
+            try {
+                let res;
+                if (type === 'video') {
+                    res = await fetch('/api/trim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath, start, end }) });
+                } else {
+                    res = await fetch('/api/crop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath, x: Math.round(cropX * scaleX), y: Math.round(cropY * scaleY), width: Math.round(cropW * scaleX), height: Math.round(cropH * scaleY) }) });
+                }
+                const r = await res.json();
+                if (r.success) {
+                    showToast('✅ Đã lưu!');
+                    editModal.value.open = false;
+                    // Force reload bằng timestamp để bust cache browser, áp dụng cho cả video và ảnh
+                    const baseUrl = asset.url.split('?')[0];
+                    asset.url = baseUrl + '?t=' + Date.now();
+                } else alert('❌ ' + r.error);
+            } catch(e) { alert('❌ ' + e.message); }
+            editModal.value.saving = false;
         }
 
         async function createVoice() {
@@ -377,7 +599,7 @@ createApp({
 
         loadPosts();
 
-        return { posts, activePostId, activePost, activeProjectId, voiceModal, toast, selectPost, deleteProject, toggleSection, removeKeyword, addKeyword, saveContent, fetchMedia, deleteAsset, deleteAll, toggleSelect, createVoice, submitCreateVoice, genAudio, downloadVoice, generateMedia };
+        return { posts, activePostId, activePost, activeProjectId, voiceModal, editModal, toast, cropRatios, fmtTime, editVideoRef, timelineRef, selectPost, deleteProject, toggleSection, removeKeyword, addKeyword, saveContent, fetchMedia, deleteAsset, deleteAll, toggleSelect, openEdit, onVideoLoaded, onVideoTimeUpdate, seekVideo, startTrimDrag, onImgLoaded, setCropRatio, startCropDrag, startCropResize, submitEdit, createVoice, submitCreateVoice, genAudio, downloadVoice, generateMedia };
     }
 }).mount('#app');
 </script>

@@ -58,15 +58,15 @@ app.get('/api/posts/:postId', async (req, res) => {
 
             // File media từ DB
             const assets = await db.all(
-                'SELECT id, type, file_path FROM Asset WHERE paragraph_id = ? ORDER BY id',
+                'SELECT id, type, selected, file_path FROM Asset WHERE paragraph_id = ? ORDER BY id',
                 [para.id]
             );
             para.videos = assets
                 .filter(a => a.type === 'video')
-                .map(a => ({ name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, isSelected: a.file_path.includes('[selected]') }));
+                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected }));
             para.images = assets
                 .filter(a => a.type === 'image')
-                .map(a => ({ name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, isSelected: a.file_path.includes('[selected]') }));
+                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected }));
 
             // Audios & generated videos từ thư mục output
             para.audios = {};
@@ -271,15 +271,51 @@ app.post('/api/delete', async (req, res) => {
 });
 
 // API: Toggle đổi tên
-app.post('/api/toggle', (req, res) => {
+app.post('/api/toggle', async (req, res) => {
     const { relativePath, action } = req.body;
+    try {
+        const db = await getDb();
+        const selected = action === 'select' ? 1 : 0;
+        await db.run('UPDATE Asset SET selected = ? WHERE file_path = ?', [selected, relativePath]);
+        await db.close();
+        res.json({ success: true, selected });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/crop', async (req, res) => {
+    const { relativePath, x, y, width, height } = req.body;
     const fullPath = path.join(MEDIA_DIR, relativePath);
     if (!fs.existsSync(fullPath)) return res.status(404).json({ error: '404' });
-    const dir = path.dirname(fullPath);
-    const oldName = path.basename(fullPath);
-    let newName = action === 'select' ? `[selected]_${oldName.replace('[selected]_', '')}` : oldName.replace('[selected]_', '');
-    fs.renameSync(fullPath, path.join(dir, newName));
-    res.json({ success: true, newRelativePath: path.join(path.dirname(relativePath), newName).replace(/\\/g, '/') });
+    const ext = path.extname(fullPath);
+    const outPath = fullPath.replace(ext, `_cropped${ext}`);
+    try {
+        const { execSync } = await import('child_process');
+        execSync(`ffmpeg -i "${fullPath}" -vf "crop=${width}:${height}:${x}:${y}" -y "${outPath}"`);
+        const newRelativePath = relativePath.replace(ext, `_cropped${ext}`);
+        const db = await getDb();
+        const asset = await db.get('SELECT id, paragraph_id, type FROM Asset WHERE file_path = ?', [relativePath]);
+        if (asset) await db.run('INSERT OR IGNORE INTO Asset (paragraph_id, type, selected, file_path) VALUES (?, ?, 0, ?)', [asset.paragraph_id, asset.type, newRelativePath]);
+        await db.close();
+        res.json({ success: true, newRelativePath });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/trim', async (req, res) => {
+    const { relativePath, start, end } = req.body;
+    const fullPath = path.join(MEDIA_DIR, relativePath);
+    if (!fs.existsSync(fullPath)) return res.status(404).json({ error: '404' });
+    const ext = path.extname(fullPath);
+    const tmpPath = fullPath.replace(ext, `_tmp${ext}`);
+    try {
+        const { execSync } = await import('child_process');
+        const duration = end - start;
+        execSync(`ffmpeg -ss ${start} -t ${duration} -i "${fullPath}" -c copy -y "${tmpPath}"`);
+        fs.renameSync(tmpPath, fullPath);
+        res.json({ success: true });
+    } catch (e) {
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+        res.status(500).json({ error: e.message });
+    }
 });
 
 app.post('/api/open-folder', (req, res) => {

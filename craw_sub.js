@@ -73,13 +73,14 @@ async function initDB() {
             paragraph_id INTEGER NULL,
             sentence_id INTEGER NULL,
             type TEXT NOT NULL DEFAULT 'video',
+            selected INTEGER NOT NULL DEFAULT 0,
             file_path TEXT,
             FOREIGN KEY(paragraph_id) REFERENCES Paragraph(id),
             FOREIGN KEY(sentence_id) REFERENCES Sentence(id)
         );
     `);
-    // migrate: thêm cột type cho DB cũ nếu chưa có
     await db.run("ALTER TABLE Asset ADD COLUMN type TEXT NOT NULL DEFAULT 'video'").catch(() => {});
+    await db.run("ALTER TABLE Asset ADD COLUMN selected INTEGER NOT NULL DEFAULT 0").catch(() => {});
     
     return db;
 }
