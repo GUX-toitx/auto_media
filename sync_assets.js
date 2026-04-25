@@ -3,9 +3,10 @@ import path from 'path';
 import crypto from 'crypto';
 import { execSync } from 'child_process';
 import parser from 'subtitles-parser';
+import 'dotenv/config';
 
 // --- CẤU HÌNH ---
-const BASE_DIR = '/usr/gux/media-team';
+const BASE_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
 const PUBLIC_KEY = 'test_9cb0c8fde8b26045c96741419208b3375aaa29be8a7cb53bdcdd014c9cf';
 const PRIVATE_KEY = 'test_642f2b19c5e574d3f189f28b78a1d1c802f0802ab385be61ed6c6a5bafc';
 

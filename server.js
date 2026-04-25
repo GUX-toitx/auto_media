@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
@@ -5,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
+import multer from 'multer';
 
 import { getLanguages, getReferenceSpeakers, generateAudios, updateBatchStatus, downloadBatchAudios } from './audio_service.js';
 import { processAll } from './video_service.js';
@@ -15,10 +17,11 @@ const app = express();
 const PORT = 3000;
 
 const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
+const DB_DIR = process.env.DB_DIR || '/usr/gux/media-team';
 
 app.use(express.json()); // BẮT BUỘC PHẢI CÓ DÒNG NÀY Ở ĐÂY
 
-const DB_PATH = path.join(MEDIA_DIR, 'media_system.sqlite');
+const DB_PATH = path.join(DB_DIR, 'media_system.sqlite');
 const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 
 // API: Lấy danh sách posts
@@ -39,7 +42,7 @@ app.get('/api/posts/:postId', async (req, res) => {
         if (!post) return res.status(404).json({ error: 'Post not found' });
 
         const paragraphs = await db.all(
-            'SELECT id, content, original_content FROM Paragraph WHERE post_id = ? ORDER BY id',
+            'SELECT id, content, original_content, audio FROM Paragraph WHERE post_id = ? ORDER BY id',
             [post.id]
         );
 
@@ -58,15 +61,15 @@ app.get('/api/posts/:postId', async (req, res) => {
 
             // File media từ DB
             const assets = await db.all(
-                'SELECT id, type, selected, file_path FROM Asset WHERE paragraph_id = ? ORDER BY id',
+                'SELECT id, type, selected, "order", file_path FROM Asset WHERE paragraph_id = ? ORDER BY id',
                 [para.id]
             );
             para.videos = assets
                 .filter(a => a.type === 'video')
-                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected }));
+                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0 }));
             para.images = assets
                 .filter(a => a.type === 'image')
-                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected }));
+                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0 }));
 
             // Audios & generated videos từ thư mục output
             para.audios = {};
@@ -145,28 +148,58 @@ app.post('/api/generate-media', (req, res) => {
     });
 });
 
-app.post('/api/save-batch-info', (req, res) => {
-    const { videoId, batchUuid, lang, folderNames } = req.body;
-    const filePath = path.join(MEDIA_DIR, videoId, 'batches.json');
-    const batches = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf-8')) : [];
-    batches.push({ batchUuid, lang, folderNames: folderNames || [], createdAt: new Date().toISOString() });
-    fs.writeFileSync(filePath, JSON.stringify(batches, null, 2), 'utf-8');
-    res.json({ success: true });
-});
-
-app.get('/api/batch-info', (req, res) => {
-    const { videoId } = req.query;
-    const filePath = path.join(MEDIA_DIR, videoId, 'batches.json');
-    if (!fs.existsSync(filePath)) return res.json([]);
-    res.json(JSON.parse(fs.readFileSync(filePath, 'utf-8')));
-});
 
 app.post('/api/download-voice', async (req, res) => {
     try {
-        const { videoId, batchUuid, lang, folderNames } = req.body;
-        const outputDir = path.join(MEDIA_DIR, videoId, 'output', lang, 'audios');
-        const result = await downloadBatchAudios(batchUuid, outputDir, folderNames || []);
-        if (!result) return res.json({ error: 'Batch chưa gen xong' });
+        const { videoId, postId } = req.body;
+        const db = await getDb();
+
+        const post = await db.get('SELECT title, audio_uuid FROM Post WHERE id = ?', [postId]);
+        if (!post?.audio_uuid) { await db.close(); return res.json({ error: 'Chưa tạo voice!' }); }
+
+        const lang = post.title.match(/_([a-z]{2})$/)?.[1] || 'unknown';
+
+        const paragraphs = await db.all(
+            'SELECT id, "order" FROM Paragraph WHERE post_id = ? ORDER BY "order"', [postId]
+        );
+        const folderNames = paragraphs.map(p => String(p.order));
+        const paragraphIds = paragraphs.map(p => p.id);
+
+        // 1. Tải audio
+        const baseDir = path.join(MEDIA_DIR, videoId, lang, 'audios');
+        const result = await downloadBatchAudios(post.audio_uuid, baseDir, folderNames, paragraphIds);
+        if (!result) { await db.close(); return res.json({ error: 'Batch chưa gen xong' }); }
+
+        for (const r of result.results) {
+            if (r.paragraphId) {
+                await db.run('UPDATE Paragraph SET audio = ? WHERE id = ?', [r.relativePath, r.paragraphId]);
+            }
+        }
+
+        // 2. Copy selected assets vào folder theo lang
+        // Xóa sạch folder assets cũ trước khi copy mới
+        const assetsDir = path.join(MEDIA_DIR, videoId, lang, 'assets');
+        if (fs.existsSync(assetsDir)) fs.rmSync(assetsDir, { recursive: true, force: true });
+
+        for (const para of paragraphs) {
+            const assets = await db.all(
+                'SELECT type, file_path, "order" FROM Asset WHERE paragraph_id = ? AND selected = 1 ORDER BY "order"',
+                [para.id]
+            );
+            for (const asset of assets) {
+                const subDir = asset.type === 'video' ? '_raw_videos' : '_raw_images';
+                const targetDir = path.join(MEDIA_DIR, videoId, lang, 'assets', subDir, String(para.order));
+                if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+                const srcPath = path.join(MEDIA_DIR, asset.file_path);
+                if (fs.existsSync(srcPath)) {
+                    const destPath = path.join(targetDir, `${asset.order}_${path.basename(asset.file_path)}`);
+                    fs.copyFileSync(srcPath, destPath);
+                }
+            }
+        }
+
+        await db.close();
         res.json(result);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -204,10 +237,16 @@ app.get('/api/reference-speakers', async (req, res) => {
 
 app.post('/api/create-voice', async (req, res) => {
     try {
-        const { videoId, lang, speakerUuid } = req.body;
+        const { videoId, postId, lang, speakerUuid } = req.body;
         const projectDir = path.join(MEDIA_DIR, videoId);
-        const result = await generateAudios(projectDir, lang, speakerUuid);
-        res.json({ batch_uuid: result.batch_uuid, folderNames: result.folderNames });
+        const result = await generateAudios(projectDir, postId, lang, speakerUuid);
+
+        // Lưu batchUuid vào bảng Post
+        const db = await getDb();
+        await db.run('UPDATE Post SET audio_uuid = ? WHERE id = ?', [result.batch_uuid, postId]);
+        await db.close();
+
+        res.json({ batch_uuid: result.batch_uuid, folderNames: result.folderNames, paragraphIds: result.paragraphIds });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -271,14 +310,83 @@ app.post('/api/delete', async (req, res) => {
 });
 
 // API: Toggle đổi tên
+app.post('/api/unselect-asset', async (req, res) => {
+    const { videoId, relativePath, order, gid, type } = req.body;
+    try {
+        const db = await getDb();
+        const asset = await db.get('SELECT paragraph_id FROM Asset WHERE file_path = ?', [relativePath]);
+        if (asset) {
+            // Bỏ selected và reset order
+            await db.run('UPDATE Asset SET selected = 0, "order" = 0 WHERE file_path = ?', [relativePath]);
+            // Giảm order các asset cùng type có order lớn hơn
+            await db.run(
+                'UPDATE Asset SET "order" = "order" - 1 WHERE paragraph_id = ? AND type = ? AND selected = 1 AND "order" > ?',
+                [asset.paragraph_id, type, order]
+            );
+        }
+        await db.close();
+
+        // Xóa file đã tải trong folder lang
+        const post = await (await getDb()).get('SELECT title FROM Post WHERE id = (SELECT post_id FROM Paragraph WHERE id = ?)', [asset?.paragraph_id]);
+        if (post) {
+            const lang = post.title.match(/_([a-z]{2})$/)?.[1] || 'unknown';
+            const subDir = type === 'video' ? '_raw_videos' : '_raw_images';
+            const targetDir = path.join(MEDIA_DIR, videoId, lang, 'assets', subDir, gid);
+            if (fs.existsSync(targetDir)) {
+                const files = fs.readdirSync(targetDir).filter(f => f.includes(path.basename(relativePath)));
+                files.forEach(f => fs.unlinkSync(path.join(targetDir, f)));
+            }
+        }
+
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/toggle', async (req, res) => {
-    const { relativePath, action } = req.body;
+    const { relativePath, action, order } = req.body;
     try {
         const db = await getDb();
         const selected = action === 'select' ? 1 : 0;
-        await db.run('UPDATE Asset SET selected = ? WHERE file_path = ?', [selected, relativePath]);
+
+        if (action === 'unselect') {
+            const asset = await db.get('SELECT paragraph_id, "order" FROM Asset WHERE file_path = ?', [relativePath]);
+            if (asset) {
+                await db.run(
+                    'UPDATE Asset SET "order" = "order" - 1 WHERE paragraph_id = ? AND selected = 1 AND "order" > ?',
+                    [asset.paragraph_id, asset.order]
+                );
+            }
+        }
+
+        await db.run('UPDATE Asset SET selected = ?, "order" = ? WHERE file_path = ?', [selected, order || 0, relativePath]);
         await db.close();
         res.json({ success: true, selected });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+const upload = multer({ dest: path.join(MEDIA_DIR, '_tmp_uploads') });
+
+app.post('/api/upload', upload.array('files'), async (req, res) => {
+    try {
+        const { videoId, groupId, paragraphId, type } = req.body;
+        const targetDir = path.join(MEDIA_DIR, videoId, 'assets', type === 'video' ? '_raw_videos' : '_raw_images', groupId);
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+        const db = await getDb();
+        for (const file of req.files) {
+            const ext = path.extname(file.originalname);
+            const fileName = `upload_${Date.now()}_${Math.random().toString(36).slice(2, 6)}${ext}`;
+            const destPath = path.join(targetDir, fileName);
+            fs.renameSync(file.path, destPath);
+
+            const relativePath = path.relative(MEDIA_DIR, destPath);
+            await db.run(
+                'INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)',
+                [paragraphId, type, relativePath]
+            );
+        }
+        await db.close();
+        res.json({ success: true, count: req.files.length });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -318,9 +426,15 @@ app.post('/api/trim', async (req, res) => {
     }
 });
 
-app.post('/api/open-folder', (req, res) => {
-    const { videoId, lang } = req.body;
-    const folderPath = path.join(MEDIA_DIR, videoId, 'output', lang, 'videos');
+app.post('/api/open-folder', async (req, res) => {
+    const { videoId, postId, gid, type } = req.body;
+    const db = await getDb();
+    const post = await db.get('SELECT title FROM Post WHERE id = ?', [postId]);
+    await db.close();
+    const lang = post?.title?.match(/_([a-z]{2})$/)?.[1] || 'unknown';
+    const subDir = type === 'video' ? '_raw_videos' : '_raw_images';
+    const folderPath = path.join(MEDIA_DIR, videoId, lang, 'assets', subDir, gid);
+    if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
     const { platform } = process;
     const cmd = platform === 'win32' ? 'explorer' : platform === 'darwin' ? 'open' : 'xdg-open';
     spawn(cmd, [folderPath], { detached: true });

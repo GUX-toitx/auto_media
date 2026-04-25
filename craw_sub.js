@@ -15,7 +15,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // ==========================================
 // 1. CẤU HÌNH API KEYS VÀ ĐƯỜNG DẪN
 // ==========================================
-const BASE_DIR = '/usr/gux/media-team';
+const BASE_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
 const SPREADSHEET_ID = '1K596bCoqZcNx0hvZbJitwHhIYTANpgsI8KqrWsvkRSs';
 
 const OPENAI_KEY = process.env.OPENAI_KEY; 
@@ -26,7 +26,7 @@ const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY;
 
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
 const parser = new Parser();
-const creds = JSON.parse(fs.readFileSync('./khai-dev-eb5089179f46.json', 'utf8'));
+const creds = JSON.parse(fs.readFileSync('./google_sheet.json', 'utf8'));
 
 const serviceAccountAuth = new JWT({
     email: creds.client_email,
@@ -38,7 +38,8 @@ const serviceAccountAuth = new JWT({
 // KHỞI TẠO DATABASE SQLITE
 // ==========================================
 async function initDB() {
-    const dbPath = path.join(BASE_DIR, 'media_system.sqlite');
+    const DB_DIR = process.env.DB_DIR || path.join(BASE_DIR, 'db');
+    const dbPath = path.join(DB_DIR, 'media_system.sqlite');
     const db = await open({
         filename: dbPath,
         driver: sqlite3.Database
@@ -47,13 +48,16 @@ async function initDB() {
     await db.exec(`
         CREATE TABLE IF NOT EXISTS Post (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT UNIQUE
+            title TEXT UNIQUE,
+            audio_uuid TEXT
         );
         CREATE TABLE IF NOT EXISTS Paragraph (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             post_id INTEGER,
             content TEXT,
             original_content TEXT,
+            audio TEXT,
+            "order" INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY(post_id) REFERENCES Post(id)
         );
         CREATE TABLE IF NOT EXISTS Keyword (
@@ -74,6 +78,7 @@ async function initDB() {
             sentence_id INTEGER NULL,
             type TEXT NOT NULL DEFAULT 'video',
             selected INTEGER NOT NULL DEFAULT 0,
+            "order" INTEGER NOT NULL DEFAULT 0,
             file_path TEXT,
             FOREIGN KEY(paragraph_id) REFERENCES Paragraph(id),
             FOREIGN KEY(sentence_id) REFERENCES Sentence(id)
@@ -81,6 +86,10 @@ async function initDB() {
     `);
     await db.run("ALTER TABLE Asset ADD COLUMN type TEXT NOT NULL DEFAULT 'video'").catch(() => {});
     await db.run("ALTER TABLE Asset ADD COLUMN selected INTEGER NOT NULL DEFAULT 0").catch(() => {});
+    await db.run("ALTER TABLE Paragraph ADD COLUMN audio TEXT").catch(() => {});
+    await db.run('ALTER TABLE Paragraph ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0').catch(() => {});
+    await db.run('ALTER TABLE Asset ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0').catch(() => {});
+    await db.run("ALTER TABLE Post ADD COLUMN audio_uuid TEXT").catch(() => {});
     
     return db;
 }
@@ -440,9 +449,12 @@ async function processNextInQueue() {
                 }
 
                 // 🟢 LƯU DATABASE: Tạo Paragraph với original_content
+                const maxOrder = await db.get(
+                    'SELECT COALESCE(MAX("order"), 0) as max FROM Paragraph WHERE post_id = ?', [dbPostId]
+                );
                 const paraRes = await db.run(
-                    'INSERT INTO Paragraph (post_id, content, original_content) VALUES (?, ?, ?)',
-                    [dbPostId, scene.text, scene.original_text || scene.text]
+                    'INSERT INTO Paragraph (post_id, content, original_content, "order") VALUES (?, ?, ?, ?)',
+                    [dbPostId, scene.text, scene.original_text || scene.text, maxOrder.max + 1]
                 );
                 const dbParagraphId = paraRes.lastID;
 

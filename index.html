@@ -43,8 +43,7 @@
                 </div>
                 <div class="flex gap-3">
                     <button @click="createVoice" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
-                    <button @click="downloadVoice" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice</button>
-                    <button @click="generateMedia" class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎬 Generate Media</button>
+                    <button @click="downloadVoice" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice & Media Selected</button>
                 </div>
             </header>
 
@@ -82,15 +81,25 @@
                         </div>
                     </div>
 
-                    <!-- Row 4: Videos -->
+                    <!-- Row 4: Audio -->
+                    <div v-if="para.audio" class="flex items-center gap-2 px-1 py-1 bg-gray-800/40 rounded-lg">
+                        <span class="text-[10px] font-black text-green-400">🎵 Audio</span>
+                        <audio controls :src="'/' + para.audio" class="h-7 flex-1" preload="metadata"></audio>
+                    </div>
+
+                    <!-- Row 5: Videos -->
                     <div>
-                        <div class="flex items-center gap-1.5 text-[10px] font-black text-gray-500 select-none py-1">
+                        <div class="flex items-center text-[10px] font-black text-gray-500 select-none py-1">
                             <span @click="toggleSection(para, 'videoOpen')" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
                                 {{ para.videoOpen ? '▼' : '▶' }}
                                 <span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
                                 Videos ({{ (para.videos || []).length }})
                             </span>
-                            <button @click="deleteAll(para, i+1, 'video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white">Xóa tất cả</button>
+                            <button @click="deleteAll(para, i+1, 'video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
+                            <div class="ml-auto flex gap-1.5">
+                                <button @click="aiGenerate(para, 'video')" class="text-[9px] px-2.5 py-1 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white font-black tracking-wide transition-all active:scale-95">✨ AI Generate</button>
+                                <button @click="uploadAsset(para, i+1, 'video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95">📤 Upload</button>
+                            </div>
                         </div>
                         <div v-if="para.videoOpen" class="grid grid-cols-4 gap-2 mt-1">
                             <div v-if="!(para.videos || []).length" class="text-[10px] text-gray-700 italic">Trống</div>
@@ -101,7 +110,8 @@
                                     @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()"
                                     class="w-full h-24 object-cover rounded mb-1 bg-black"></video>
                                 <div class="flex gap-1">
-                                    <button @click="toggleSelect(v, para)" class="flex-1 text-[9px] font-black py-1 rounded uppercase transition-colors"
+                                    <span v-if="v.selected" class="text-[9px] font-black py-1 px-2 rounded bg-blue-600 text-white min-w-[24px] text-center">#{{ v.order }}</span>
+                                    <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-1 rounded uppercase transition-colors"
                                         :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
                                     <button @click="openEdit(v, 'video')" :disabled="!v.selected"
                                         class="text-[9px] font-black py-1 px-2 rounded transition-colors"
@@ -113,13 +123,17 @@
 
                     <!-- Row 5: Images -->
                     <div>
-                        <div class="flex items-center gap-1.5 text-[10px] font-black text-gray-500 select-none py-1">
+                        <div class="flex items-center text-[10px] font-black text-gray-500 select-none py-1">
                             <span @click="toggleSection(para, 'imageOpen')" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
                                 {{ para.imageOpen ? '▼' : '▶' }}
                                 <span class="w-1.5 h-1.5 bg-orange-500 rounded-full"></span>
                                 Images ({{ (para.images || []).length }})
                             </span>
-                            <button @click="deleteAll(para, i+1, 'image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white">Xóa tất cả</button>
+                            <button @click="deleteAll(para, i+1, 'image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
+                            <div class="ml-auto flex gap-1.5">
+                                <button @click="aiGenerate(para, 'image')" class="text-[9px] px-2.5 py-1 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white font-black tracking-wide transition-all active:scale-95">✨ AI Generate</button>
+                                <button @click="uploadAsset(para, i+1, 'image')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95">📤 Upload</button>
+                            </div>
                         </div>
                         <div v-if="para.imageOpen" class="grid grid-cols-6 gap-2 mt-1">
                             <div v-if="!(para.images || []).length" class="text-[10px] text-gray-700 italic">Trống</div>
@@ -130,7 +144,8 @@
                                     <button @click="deleteAsset(img, para)" class="absolute top-0.5 left-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
                                 </div>
                                 <div class="flex gap-1">
-                                    <button @click="toggleSelect(img, para)" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
+                                    <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white min-w-[20px] text-center">#{{ img.order }}</span>
+                                    <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
                                         :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
                                     <button @click="openEdit(img, 'image')" :disabled="!img.selected"
                                         class="text-[9px] font-black py-0.5 px-1.5 rounded transition-colors"
@@ -140,13 +155,60 @@
                         </div>
                     </div>
 
-                </div>
+                    <!-- Row 8: Video Selected -->
+                    <div>
+                        <div class="flex items-center text-[10px] font-black text-gray-500 select-none py-1">
+                            <span @click="toggleSection(para, 'videoSelectedOpen')" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
+                                {{ para.videoSelectedOpen ? '▼' : '▶' }}
+                                <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                                Video Selected ({{ (para.videos || []).filter(v => v.selected).length }})
+                            </span>
+                            <button @click="openFolder(i+1, 'video')" class="ml-auto text-[9px] px-2 py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black font-bold transition-all">📂 Open Folder</button>
+                        </div>
+                        <div v-if="para.videoSelectedOpen" class="grid grid-cols-4 gap-2 mt-1">
+                            <div v-if="!(para.videos || []).filter(v => v.selected).length" class="text-[10px] text-gray-700 italic">Chưa chọn video nào</div>
+                            <div v-for="v in (para.videos || []).filter(v => v.selected).sort((a,b) => a.order - b.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                <button @click="unselectAsset(v, para, i+1, 'video')" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
+                                <video muted loop preload="metadata" :src="v.url"
+                                    @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()"
+                                    class="w-full h-24 object-cover rounded mb-1 bg-black"></video>
+                                <div class="flex items-center justify-between px-1">
+                                    <span class="text-[9px] font-black text-green-400">#{{ v.order }}</span>
+                                    <span class="text-[9px] text-gray-500 truncate ml-1">{{ v.name }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Row 9: Image Selected -->
+                    <div>
+                        <div class="flex items-center text-[10px] font-black text-gray-500 select-none py-1">
+                            <span @click="toggleSection(para, 'imageSelectedOpen')" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
+                                {{ para.imageSelectedOpen ? '▼' : '▶' }}
+                                <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                                Image Selected ({{ (para.images || []).filter(i => i.selected).length }})
+                            </span>
+                            <button @click="openFolder(i+1, 'image')" class="ml-auto text-[9px] px-2 py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black font-bold transition-all">📂 Open Folder</button>
+                        </div>
+                        <div v-if="para.imageSelectedOpen" class="grid grid-cols-6 gap-2 mt-1">
+                            <div v-if="!(para.images || []).filter(i => i.selected).length" class="text-[10px] text-gray-700 italic">Chưa chọn ảnh nào</div>
+                            <div v-for="img in (para.images || []).filter(i => i.selected).sort((a,b) => a.order - b.order)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                <button @click="unselectAsset(img, para, i+1, 'image')" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
+                                <img :src="img.url" class="w-full h-16 object-cover rounded mb-1">
+                                <div class="flex items-center justify-between px-1">
+                                    <span class="text-[9px] font-black text-green-400">#{{ img.order }}</span>
+                                    <span class="text-[9px] text-gray-500 truncate ml-1">{{ img.name }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
             </div>
         </div>
     </main>
 
     <!-- EDIT MODAL -->
-    <div v-if="editModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+    <div v-if="editModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="editModal.open = false">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 space-y-4" style="width:800px;max-height:90vh;overflow-y:auto">
             <div class="flex justify-between items-center">
                 <h3 class="text-lg font-black text-white">{{ editModal.type === 'video' ? '✂️ Trim Video' : '✂️ Crop Ảnh' }}</h3>
@@ -184,6 +246,11 @@
                 <div class="flex items-center justify-between text-xs text-gray-400">
                     <span>{{ fmtTime(editModal.start) }} → {{ fmtTime(editModal.end) }}</span>
                     <span class="text-yellow-400 font-bold">{{ fmtTime(editModal.end - editModal.start) }} / {{ fmtTime(editModal.duration) }}</span>
+                </div>
+                <div class="flex items-center gap-3 bg-gray-800/60 rounded-xl px-4 py-3 border border-gray-700">
+                    <span class="text-sm font-black text-gray-300">📎 Thứ tự</span>
+                    <input type="number" v-model.number="editModal.order" min="0"
+                        class="w-16 bg-gray-900 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white text-center outline-none focus:border-yellow-500 font-bold">
                 </div>
             </template>
 
@@ -228,6 +295,11 @@
                     <div>X: <span class="text-white font-bold">{{ Math.round(editModal.cropX * editModal.scaleX) }}px</span></div>
                     <div>Y: <span class="text-white font-bold">{{ Math.round(editModal.cropY * editModal.scaleY) }}px</span></div>
                 </div>
+                <div class="flex items-center gap-3 bg-gray-800/60 rounded-xl px-4 py-3 border border-gray-700">
+                    <span class="text-sm font-black text-gray-300">📎 Thứ tự</span>
+                    <input type="number" v-model.number="editModal.order" min="0"
+                        class="w-16 bg-gray-900 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white text-center outline-none focus:border-yellow-500 font-bold">
+                </div>
             </template>
 
             <div class="flex gap-3 justify-end pt-2">
@@ -235,6 +307,41 @@
                 <button @click="submitEdit" :disabled="editModal.saving"
                     class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-yellow-500 hover:bg-yellow-400 text-black transition-all">
                     {{ editModal.saving ? 'Đang xử lý...' : '✅ Lưu' }}
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- UPLOAD MODAL -->
+    <div v-if="uploadModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="uploadModal.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[500px] space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-lg font-black text-white">📤 Upload {{ uploadModal.type === 'video' ? 'Videos' : 'Images' }}</h3>
+                <button @click="uploadModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+            <div class="border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer"
+                :class="uploadModal.dragging ? 'border-yellow-400 bg-yellow-500/10' : 'border-gray-700 hover:border-gray-500'"
+                @dragover.prevent="uploadModal.dragging = true"
+                @dragleave.prevent="uploadModal.dragging = false"
+                @drop.prevent="onDropFiles($event)"
+                @click="$refs.uploadInput.click()">
+                <div class="text-4xl mb-3">{{ uploadModal.dragging ? '📥' : '📁' }}</div>
+                <p class="text-sm text-gray-400">Kéo thả file vào đây hoặc <span class="text-blue-400 font-bold">nhấn để chọn</span></p>
+                <p class="text-[10px] text-gray-600 mt-1">{{ uploadModal.type === 'video' ? 'MP4, MOV, AVI' : 'JPG, PNG, WEBP' }}</p>
+                <input ref="uploadInput" type="file" multiple :accept="uploadModal.type === 'video' ? 'video/*' : 'image/*'" class="hidden" @change="onSelectFiles($event)">
+            </div>
+            <div v-if="uploadModal.files.length" class="space-y-1 max-h-40 overflow-y-auto">
+                <div v-for="(f, fi) in uploadModal.files" :key="fi" class="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2 text-[11px]">
+                    <span class="text-gray-300 truncate flex-1">{{ f.name }}</span>
+                    <span class="text-gray-600 shrink-0 ml-2">{{ (f.size / 1024 / 1024).toFixed(1) }}MB</span>
+                    <button @click="uploadModal.files.splice(fi, 1)" class="text-red-500 hover:text-red-400 ml-2 font-bold">×</button>
+                </div>
+            </div>
+            <div class="flex gap-3 justify-end pt-2">
+                <button @click="uploadModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
+                <button @click="submitUpload" :disabled="!uploadModal.files.length || uploadModal.uploading"
+                    class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-blue-600 hover:bg-blue-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                    {{ uploadModal.uploading ? 'Đang tải...' : `🚀 Tải lên (${uploadModal.files.length})` }}
                 </button>
             </div>
         </div>
@@ -290,10 +397,10 @@ createApp({
         const posts = ref([]);
         const activePostId = ref(null);
         const activePost = ref(null);
-        const batchMap = ref({});
         const toast = ref('');
         const voiceModal = ref({ open: false, lang: '', speakerUuid: '', langs: [], speakers: [], batchUuid: '' });
         const editModal = ref({ open: false, type: '', asset: null, start: 0, end: 0, duration: 0, cropX: 0, cropY: 0, cropW: 200, cropH: 200, cropReady: false, saving: false });
+        const uploadModal = ref({ open: false, type: '', para: null, files: [], dragging: false, uploading: false });
 
         const activeProjectId = computed(() => {
             if (!activePost.value) return '';
@@ -324,6 +431,8 @@ createApp({
                 audios: p.audios || {},
                 videoOpen: false,
                 imageOpen: false,
+                videoSelectedOpen: false,
+                imageSelectedOpen: false,
             }));
             activePost.value = data;
         }
@@ -392,11 +501,103 @@ createApp({
             if (r.success) { if (type === 'video') para.videos = []; else para.images = []; }
         }
 
-        async function toggleSelect(asset, para) {
+        async function toggleSelect(asset, para, type) {
             const action = asset.selected ? 'unselect' : 'select';
-            const res = await fetch('/api/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath, action }) });
+            const sameType = type === 'video' ? (para.videos || []) : (para.images || []);
+            let order = 0;
+            if (action === 'select') {
+                const maxOrder = sameType.filter(a => a.selected).reduce((max, a) => Math.max(max, a.order || 0), 0);
+                order = maxOrder + 1;
+            }
+            const res = await fetch('/api/toggle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ relativePath: asset.relativePath, action, order })
+            });
             const r = await res.json();
-            if (r.success) asset.selected = !asset.selected;
+            if (r.success) {
+                asset.selected = !asset.selected;
+                if (action === 'select') {
+                    asset.order = order;
+                } else {
+                    const removedOrder = asset.order;
+                    asset.order = 0;
+                    sameType
+                        .filter(a => a.selected && a.order > removedOrder)
+                        .forEach(a => a.order--);
+                }
+            }
+        }
+
+        async function openFolder(gid, type) {
+            await fetch('/api/open-folder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ videoId: activeProjectId.value, postId: activePostId.value, gid: String(gid), type })
+            });
+        }
+
+        async function unselectAsset(asset, para, gid, type) {
+            if (!confirm('Bỏ chọn và xóa file đã tải?')) return;
+            const res = await fetch('/api/unselect-asset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    videoId: activeProjectId.value,
+                    relativePath: asset.relativePath,
+                    order: asset.order,
+                    gid: String(gid),
+                    type
+                })
+            });
+            const r = await res.json();
+            if (r.success) {
+                const removedOrder = asset.order;
+                asset.selected = false;
+                asset.order = 0;
+                const sameType = type === 'video' ? (para.videos || []) : (para.images || []);
+                sameType.filter(a => a.selected && a.order > removedOrder).forEach(a => a.order--);
+            }
+        }
+
+        function uploadAsset(para, gid, type) {
+            uploadModal.value = { open: true, type, para, gid: String(gid), files: [], dragging: false, uploading: false };
+        }
+
+        function onDropFiles(e) {
+            uploadModal.value.dragging = false;
+            const files = [...e.dataTransfer.files];
+            uploadModal.value.files.push(...files);
+        }
+
+        function onSelectFiles(e) {
+            uploadModal.value.files.push(...e.target.files);
+            e.target.value = '';
+        }
+
+        async function submitUpload() {
+            const { type, para, gid, files } = uploadModal.value;
+            if (!files.length) return;
+            uploadModal.value.uploading = true;
+            const form = new FormData();
+            form.append('videoId', activeProjectId.value);
+            form.append('groupId', gid);
+            form.append('paragraphId', String(para.id));
+            form.append('type', type);
+            files.forEach(f => form.append('files', f));
+            try {
+                const res = await fetch('/api/upload', { method: 'POST', body: form });
+                const r = await res.json();
+                if (r.success) {
+                    showToast(`✅ Đã tải ${files.length} file!`);
+                    uploadModal.value.open = false;
+                    const postRes = await fetch(`/api/posts/${activePostId.value}`);
+                    const data = await postRes.json();
+                    const updated = data.paragraphs.find(p => p.id === para.id);
+                    if (updated) { para.videos = updated.videos || []; para.images = updated.images || []; }
+                } else alert('❌ ' + r.error);
+            } catch (e) { alert('❌ ' + e.message); }
+            uploadModal.value.uploading = false;
         }
 
         const cropRatios = [
@@ -415,6 +616,7 @@ createApp({
             editModal.value = {
                 open: true, type, asset,
                 start: 0, end: 0, duration: 0, currentTime: 0,
+                order: asset.order || 0,
                 cropX: 0, cropY: 0, cropW: 0, cropH: 0,
                 scaleX: 1, scaleY: 1, cropReady: false,
                 ratio: '16:9', saving: false
@@ -547,22 +749,41 @@ createApp({
         }
 
         async function createVoice() {
-            voiceModal.value = { open: true, lang: '', speakerUuid: '', langs: [], speakers: [], batchUuid: '' };
-            const [lr, sr] = await Promise.all([fetch('/api/languages'), fetch('/api/reference-speakers')]);
+            voiceModal.value = {
+                open: true,
+                postId: activePostId.value,
+                lang: activePost.value?.title?.match(/_([a-z]{2})$/)?.[1] || 'en',
+                speakerUuid: '',
+                langs: [],
+                speakers: [],
+                batchUuid: ''
+            };
+
+            const [lr, sr] = await Promise.all([
+                fetch('/api/languages'),
+                fetch('/api/reference-speakers')
+            ]);
+
             voiceModal.value.langs = await lr.json();
             voiceModal.value.speakers = await sr.json();
         }
 
         async function submitCreateVoice() {
-            const { lang, speakerUuid } = voiceModal.value;
+            const { lang, speakerUuid, postId } = voiceModal.value;
             if (!lang || !speakerUuid) return alert('Vui lòng chọn đủ!');
-            const res = await fetch('/api/create-voice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoId: activeProjectId.value, lang, speakerUuid }) });
+
+            const res = await fetch('/api/create-voice', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ videoId: activeProjectId.value, postId, lang, speakerUuid })
+            });
             const r = await res.json();
+
             if (r.batch_uuid) {
-                batchMap.value[activeProjectId.value] = { batchUuid: r.batch_uuid, lang, folderNames: r.folderNames || [] };
-                await fetch('/api/save-batch-info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoId: activeProjectId.value, batchUuid: r.batch_uuid, lang, folderNames: r.folderNames || [] }) });
                 voiceModal.value.batchUuid = r.batch_uuid;
-            } else alert('❌ Tạo không thành công!');
+            } else {
+                alert('❌ Tạo không thành công!');
+            }
         }
 
         async function genAudio() {
@@ -572,36 +793,70 @@ createApp({
         }
 
         async function downloadVoice() {
-            let info = batchMap.value[activeProjectId.value];
-            if (!info) {
-                const res = await fetch(`/api/batch-info?videoId=${activeProjectId.value}`);
-                const batches = await res.json();
-                if (batches.length) { info = batches[batches.length - 1]; batchMap.value[activeProjectId.value] = info; }
-            }
-            if (!info?.batchUuid) return alert('Chưa tạo batch!');
-            const res = await fetch('/api/download-voice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoId: activeProjectId.value, batchUuid: info.batchUuid, lang: info.lang, folderNames: info.folderNames || [] }) });
+            if (!activePost.value) return;
+            const res = await fetch('/api/download-voice', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    videoId: activeProjectId.value,
+                    postId: activePostId.value
+                })
+            });
             const r = await res.json();
-            if (r.total) showToast(`✅ Đã tải ${r.total} file audio!`);
-            else alert(r.error || '❌ Batch chưa gen xong!');
-        }
-
-        async function generateMedia() {
-            let info = batchMap.value[activeProjectId.value];
-            if (!info) {
-                const res = await fetch(`/api/batch-info?videoId=${activeProjectId.value}`);
-                const batches = await res.json();
-                if (batches.length) { info = batches[batches.length - 1]; batchMap.value[activeProjectId.value] = info; }
+            if (r.total) {
+                showToast(`✅ Đã tải ${r.total} file audio!`);
+                await selectPost({ id: activePostId.value });
+            } else {
+                alert(r.error || '❌ Batch chưa gen xong!');
             }
-            if (!info?.lang) return alert('Chưa tạo voice!');
-            const res = await fetch('/api/generate-media-video', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoId: activeProjectId.value, lang: info.lang }) });
-            const r = await res.json();
-            if (r.success) showToast(`✅ Generate xong ${r.results.length} câu!`);
-            else alert('❌ ' + (r.error || 'Lỗi'));
         }
 
         loadPosts();
 
-        return { posts, activePostId, activePost, activeProjectId, voiceModal, editModal, toast, cropRatios, fmtTime, editVideoRef, timelineRef, selectPost, deleteProject, toggleSection, removeKeyword, addKeyword, saveContent, fetchMedia, deleteAsset, deleteAll, toggleSelect, openEdit, onVideoLoaded, onVideoTimeUpdate, seekVideo, startTrimDrag, onImgLoaded, setCropRatio, startCropDrag, startCropResize, submitEdit, createVoice, submitCreateVoice, genAudio, downloadVoice, generateMedia };
+        return {
+            posts,
+            activePostId,
+            activePost,
+            activeProjectId,
+            voiceModal,
+            editModal,
+            uploadModal,
+            toast,
+            cropRatios,
+            fmtTime,
+            editVideoRef,
+            timelineRef,
+            selectPost,
+            deleteProject,
+            toggleSection,
+            removeKeyword,
+            addKeyword,
+            saveContent,
+            fetchMedia,
+            deleteAsset,
+            deleteAll,
+            toggleSelect,
+            openEdit,
+            onVideoLoaded,
+            onVideoTimeUpdate,
+            seekVideo,
+            startTrimDrag,
+            onImgLoaded,
+            setCropRatio,
+            startCropDrag,
+            startCropResize,
+            submitEdit,
+            createVoice,
+            submitCreateVoice,
+            genAudio,
+            downloadVoice,
+            uploadAsset,
+            unselectAsset,
+            openFolder,
+            onDropFiles,
+            onSelectFiles,
+            submitUpload,
+        };
     }
 }).mount('#app');
 </script>
