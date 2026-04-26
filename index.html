@@ -482,11 +482,15 @@ createApp({
         async function loadPosts() {
             const res = await fetch('/api/posts');
             posts.value = await res.json();
-            if (posts.value.length) selectPost(posts.value[0]);
+            const savedId = Number(localStorage.getItem('activePostId'));
+            const found = posts.value.find(p => p.id === savedId);
+            if (found) selectPost(found);
+            else if (posts.value.length) selectPost(posts.value[0]);
         }
 
         async function selectPost(post) {
             activePostId.value = post.id;
+            localStorage.setItem('activePostId', post.id);
             const res = await fetch(`/api/posts/${post.id}`);
             const data = await res.json();
             // thêm reactive state cho từng paragraph
