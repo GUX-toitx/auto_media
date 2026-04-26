@@ -10,10 +10,27 @@ sudo apt install python3-certifi python3-brotli -y
 sudo apt install python3-websockets -y
 
 # Chạy dự án
-- Luồng thứ nhất chạy để lấy video và sub từ youtube, đang chưa có func để làm mịn sub nên phải giả định là có file làm mịn rồi để chạy luồng 2
-    node craw_sub.js
-- Luồng thứ hai chạy để lấy image và video từ keyword, phần này phần lấy keyword vẫn đang là todo
+- Luồng thứ nhất chạy để lấy video và sub từ youtube:
+    pm2 start craw-sub
+- Luồng thứ hai chạy để lấy image và video từ keyword:
     node sync_assets.js
+
+# Chạy server dashboard
+- Cài pm2 lần đầu:
+    npm install -g pm2
+- Khởi động:
+    pm2 start ecosystem.config.cjs
+- Mở dashboard: http://localhost:3000
+- Xem log:
+    pm2 logs auto-media
+- Restart:
+    pm2 restart auto-media
+- Dừng:
+    pm2 stop auto-media
+- Khởi động lại sau khi dừng:
+    pm2 start auto-media
+- Xóa khỏi pm2:
+    pm2 delete auto-media
 
 # Lưu ý khi chạy lần đầu với Playwright:
 1. chạy npx playwright install chromium để tải chromium 
