@@ -42,10 +42,10 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
         await page.goto('https://labs.google/fx/tools/flow', { waitUntil: 'networkidle', timeout: 30000 });
         await page.waitForTimeout(3000);
 
-        // Click New project
-        const newBtn = page.locator('button', { hasText: 'New project' });
+        // Click New project (icon add_2, xpath: /html/body/div[1]/div[2]/div/div/button)
+        const newBtn = page.locator('button:has(i.google-symbols)').filter({ hasText: /add_2/ }).first();
         if (await newBtn.count()) {
-            await newBtn.first().click();
+            await newBtn.click();
             await page.waitForTimeout(8000);
         }
 
@@ -124,9 +124,9 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
         await page.keyboard.type(fullPrompt, { delay: 20 });
         await page.waitForTimeout(500);
 
-        // Click Create
-        const createBtn = page.locator('button', { hasText: 'Create' }).last();
-        await createBtn.click();
+        // Click nút submit (icon arrow_forward)
+        const createBtn = page.locator('button:has(i.google-symbols)').filter({ hasText: /arrow_forward/ }).first();
+        await createBtn.click({ force: true });
 
         // Đếm media có sẵn trước khi gen
         const mediaTag = type === 'video' ? 'video' : 'img';
@@ -188,18 +188,22 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
             return [];
         }
 
-        // Tải tất cả về
+        // Tải tất cả về bằng page.request (cần cookie auth)
         const saved = [];
         const ext = type === 'video' ? '.mp4' : '.jpg';
-        const existing = fs.readdirSync(saveDirPath).filter(f => f.startsWith('flow_') && f.endsWith(ext)).length;
+        const existingFiles = fs.readdirSync(saveDirPath).filter(f => f.startsWith('flow_') && f.endsWith(ext)).length;
         for (let j = 0; j < imgSrcs.length; j++) {
-            const fileName = `flow_${existing + j + 1}${ext}`;
-            const res = await page.request.get(imgSrcs[j]);
-            if (res.ok()) {
-                fs.writeFileSync(path.join(saveDirPath, fileName), await res.body());
-                saved.push(fileName);
-                console.log(`[Flow] Saved: ${fileName}`);
-            }
+            const fileName = `flow_${existingFiles + j + 1}${ext}`;
+            try {
+                const res = await page.request.get(imgSrcs[j]);
+                if (res.ok()) {
+                    fs.writeFileSync(path.join(saveDirPath, fileName), await res.body());
+                    saved.push(fileName);
+                    console.log(`[Flow] Saved: ${fileName}`);
+                } else {
+                    console.error(`[Flow] Download failed ${res.status()}: ${imgSrcs[j]}`);
+                }
+            } catch (e) { console.error(`[Flow] Download error: ${e.message}`); }
 
             // Video: tải thêm thumbnail
             if (type === 'video') {
@@ -210,16 +214,17 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
                     }
                     return [...new Set(srcs)];
                 });
-                // Lấy thumbnail tương ứng (cùng index + offset)
                 const thumbIdx = existingMediaCount + j;
                 if (thumbSrcs[thumbIdx]) {
-                    const thumbName = `flow_${existing + j + 1}_thumbnail.jpg`;
-                    const thumbRes = await page.request.get(thumbSrcs[thumbIdx]);
-                    if (thumbRes.ok()) {
-                        fs.writeFileSync(path.join(saveDirPath, thumbName), await thumbRes.body());
-                        saved.push(thumbName);
-                        console.log(`[Flow] Saved: ${thumbName}`);
-                    }
+                    const thumbName = `flow_${existingFiles + j + 1}_thumbnail.jpg`;
+                    try {
+                        const thumbRes = await page.request.get(thumbSrcs[thumbIdx]);
+                        if (thumbRes.ok()) {
+                            fs.writeFileSync(path.join(saveDirPath, thumbName), await thumbRes.body());
+                            saved.push(thumbName);
+                            console.log(`[Flow] Saved: ${thumbName}`);
+                        }
+                    } catch (e) { console.error(`[Flow] Thumb download error: ${e.message}`); }
                 }
             }
         }
@@ -229,7 +234,7 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
         console.error('[Flow] Error:', e.message);
         return [];
     } finally {
-        await page.close();
+        await page.close().catch(() => {});
         try { await ctx.close(); } catch (_) {}
         _browserContext = null;
     }
