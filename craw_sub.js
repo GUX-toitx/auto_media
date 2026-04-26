@@ -399,7 +399,7 @@ async function processNextInQueue() {
             } else { throw new Error("Không lấy được Subtitle từ YouTube."); }
         } else {
             if (!rawInputContent) throw new Error("Cột 'Nội dung' trống.");
-            dbPostTitle = `INPUT_TEXT_${Date.now()}_${crypto.randomBytes(2).toString('hex')}`;
+            dbPostTitle = projectId;
             fullRawText = rawInputContent;
             fs.writeFileSync(path.join(targetDir, 'original_content.txt'), rawInputContent);
         }
