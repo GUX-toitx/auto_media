@@ -387,26 +387,62 @@
 
     <!-- AI GENERATE MODAL -->
     <div v-if="aiModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="aiModal.open = false">
-        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[400px] space-y-5">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[500px] space-y-4">
             <div class="flex justify-between items-center">
                 <h3 class="text-lg font-black text-white">✨ AI Generate {{ aiModal.type === 'video' ? 'Video' : 'Image' }}</h3>
                 <button @click="aiModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
             </div>
             <div>
-                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Số lượng</label>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Prompt</label>
+                <textarea v-model="aiModal.prompt" rows="3"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-[11px] text-gray-200 leading-relaxed outline-none focus:border-purple-500 resize-none"></textarea>
+            </div>
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Số lượng</label>
                 <div class="flex gap-2">
                     <button v-for="n in [1,2,3,4]" :key="n" @click="aiModal.count = n"
-                        class="flex-1 py-2.5 rounded-lg text-sm font-black transition-colors"
+                        class="flex-1 py-2 rounded-lg text-sm font-black transition-colors"
                         :class="aiModal.count === n ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">x{{ n }}</button>
                 </div>
             </div>
-            <div class="bg-gray-800/60 rounded-lg p-3 text-[11px] text-gray-400 leading-relaxed max-h-20 overflow-y-auto">
-                <span class="text-gray-600">Content:</span> {{ aiModal.content || 'Trống' }}
+            <div v-if="aiModal.type === 'image'">
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Khung hình</label>
+                <div class="flex gap-2">
+                    <button v-for="r in ['16:9','4:3','1:1','3:4','9:16']" :key="r" @click="aiModal.ratio = r"
+                        class="flex-1 py-2 rounded-lg text-[11px] font-black transition-colors"
+                        :class="aiModal.ratio === r ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">{{ r }}</button>
+                </div>
             </div>
+            <template v-if="aiModal.type === 'video'">
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Mode</label>
+                    <div class="flex gap-2">
+                        <button v-for="m in ['Frames','Ingredients']" :key="m" @click="aiModal.videoMode = m"
+                            class="flex-1 py-2 rounded-lg text-[11px] font-black transition-colors"
+                            :class="aiModal.videoMode === m ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">{{ m }}</button>
+                    </div>
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Khung hình</label>
+                    <div class="flex gap-2">
+                        <button v-for="r in ['16:9','9:16']" :key="r" @click="aiModal.ratio = r"
+                            class="flex-1 py-2 rounded-lg text-[11px] font-black transition-colors"
+                            :class="aiModal.ratio === r ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">{{ r }}</button>
+                    </div>
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Veo 3.1</label>
+                    <div class="flex gap-2">
+                        <button v-for="v in ['Lite','Fast','Quality']" :key="v" @click="aiModal.veo = v"
+                            class="flex-1 py-2 rounded-lg text-[11px] font-black transition-colors"
+                            :class="aiModal.veo === v ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">{{ v }}</button>
+                    </div>
+                </div>
+            </template>
             <div class="flex flex-wrap gap-1">
                 <span v-for="kw in aiModal.keywords" :key="kw" class="keyword-tag">{{ kw }}</span>
             </div>
-            <div class="flex gap-3 justify-end pt-2">
+            <div class="flex gap-3 justify-end pt-1">
                 <button @click="aiModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
                 <button @click="submitAiGenerate" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-purple-600 hover:bg-purple-500 transition-all">
                     🚀 Tạo {{ aiModal.type === 'video' ? 'Video' : 'Ảnh' }}
@@ -431,7 +467,7 @@ createApp({
         const voiceModal = ref({ open: false, lang: '', speakerUuid: '', langs: [], speakers: [], batchUuid: '' });
         const editModal = ref({ open: false, type: '', asset: null, start: 0, end: 0, duration: 0, cropX: 0, cropY: 0, cropW: 200, cropH: 200, cropReady: false, saving: false });
         const uploadModal = ref({ open: false, type: '', para: null, files: [], dragging: false, uploading: false });
-        const aiModal = ref({ open: false, type: '', para: null, gid: '', count: 4, content: '', keywords: [] });
+        const aiModal = ref({ open: false, type: '', para: null, gid: '', count: 2, content: '', keywords: [], prompt: '', ratio: '16:9', videoMode: 'Frames', veo: 'Fast' });
 
         const activeProjectId = computed(() => {
             if (!activePost.value) return '';
@@ -527,7 +563,7 @@ createApp({
 
         async function deleteAll(para, gid, type) {
             if (!confirm(`Xóa tất cả ${type === 'video' ? 'video' : 'ảnh'}?`)) return;
-            const res = await fetch('/api/delete-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoId: activeProjectId.value, groupId: String(gid), type }) });
+            const res = await fetch('/api/delete-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paragraphId: para.id, type }) });
             const r = await res.json();
             if (r.success) { if (type === 'video') para.videos = []; else para.images = []; }
         }
@@ -823,22 +859,25 @@ createApp({
             voiceModal.value.open = false;
         }
 
-        function aiGenerate(para, type) {
+        async function aiGenerate(para, type) {
             const kws = para.keywords?.length ? para.keywords : [];
             if (!kws.length) return showToast('⚠️ Chưa có keyword!');
             const paras = activePost.value.paragraphs;
             const gid = String(paras.findIndex(p => p.id === para.id) + 1);
-            aiModal.value = { open: true, type, para, gid, count: 4, content: para.content || '', keywords: kws };
+            const lang = activePost.value?.title?.match(/_([a-z]{2})$/)?.[1] || 'en';
+            const res = await fetch(`/api/get-prompt?type=${type}&lang=${lang}`);
+            const { prompt } = await res.json();
+            aiModal.value = { open: true, type, para, gid, count: type === 'video' ? 1 : 2, content: para.content || '', keywords: kws, lang, prompt: prompt + ' ' + (para.content || ''), ratio: '16:9', videoMode: 'Frames', veo: 'Lite' };
         }
 
         async function submitAiGenerate() {
-            const { type, para, gid, count, content, keywords } = aiModal.value;
+            const { type, para, gid, count, keywords, lang, prompt, ratio, videoMode, veo } = aiModal.value;
             aiModal.value.open = false;
             showToast(`🎨 Đang tạo ${count} ${type} AI qua Google Flow...`);
             await fetch('/api/ai-generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ videoId: activeProjectId.value, paragraphId: para.id, gid, keywords, type, content, count })
+                body: JSON.stringify({ videoId: activeProjectId.value, paragraphId: para.id, gid, keywords, type, content: '', count, lang, prompt, ratio, videoMode, veo })
             });
             showToast('✅ Đang tạo ngầm, reload sau vài phút!', 5000);
         }

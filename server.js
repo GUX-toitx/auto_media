@@ -277,20 +277,24 @@ app.post('/api/delete-project', async (req, res) => {
 
 // API: Xóa tất cả file trong folder
 app.post('/api/delete-all', async (req, res) => {
-    const { videoId, groupId, type } = req.body;
+    const { paragraphId, type } = req.body;
     try {
         const db = await getDb();
         const assets = await db.all(
-            `SELECT Asset.id, Asset.file_path FROM Asset
-             JOIN Paragraph ON Asset.paragraph_id = Paragraph.id
-             JOIN Post ON Paragraph.post_id = Post.id
-             WHERE (Post.title = ? OR Post.title LIKE ?) AND Asset.type = ? AND Asset.file_path LIKE ?`,
-            [videoId, `${videoId}\_%`, type, `%/_raw_${type === 'video' ? 'videos' : 'images'}/${groupId}/%`]
+            'SELECT id, file_path FROM Asset WHERE paragraph_id = ? AND type = ?',
+            [paragraphId, type]
         );
         for (const asset of assets) {
             await db.run('DELETE FROM Asset WHERE id = ?', [asset.id]);
             const fullPath = path.join(MEDIA_DIR, asset.file_path);
-            if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+            if (fs.existsSync(fullPath)) {
+                fs.unlinkSync(fullPath);
+                // Xóa folder nếu trống
+                const dir = path.dirname(fullPath);
+                if (fs.existsSync(dir) && fs.readdirSync(dir).length === 0) {
+                    fs.rmdirSync(dir);
+                }
+            }
         }
         await db.close();
         res.json({ success: true });
@@ -305,7 +309,11 @@ app.post('/api/delete', async (req, res) => {
         await db.run('DELETE FROM Asset WHERE file_path = ?', [relativePath]);
         await db.close();
         const fullPath = path.join(MEDIA_DIR, relativePath);
-        if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+        if (fs.existsSync(fullPath)) {
+            fs.unlinkSync(fullPath);
+            const dir = path.dirname(fullPath);
+            if (fs.existsSync(dir) && fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
+        }
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -444,7 +452,7 @@ app.post('/api/open-folder', async (req, res) => {
 
 // API: AI Generate Image/Video (Google Flow)
 app.post('/api/ai-generate', async (req, res) => {
-    const { videoId, paragraphId, gid, keywords, type, content, count } = req.body;
+    const { videoId, paragraphId, gid, keywords, type, content, count, lang, prompt, ratio, videoMode, veo } = req.body;
     if (!keywords?.length) return res.status(400).json({ error: 'Không có keyword' });
 
     const subDir = type === 'video' ? '_raw_videos_ai_gen' : '_raw_images_ai_gen';
@@ -455,17 +463,38 @@ app.post('/api/ai-generate', async (req, res) => {
 
     (async () => {
         const db = await getDb();
-        const saved = await generateFlowImage(keywords.join(', '), targetDir, content || '', type, count || 4);
+
+        // Lấy ảnh selected của paragraph nếu là Ingredients mode
+        let selectedImages = [];
+        if (videoMode === 'Ingredients') {
+            const assets = await db.all(
+                'SELECT file_path FROM Asset WHERE paragraph_id = ? AND type = ? AND selected = 1 ORDER BY "order"',
+                [paragraphId, 'image']
+            );
+            selectedImages = assets.map(a => path.join(MEDIA_DIR, a.file_path));
+        }
+
+        const saved = await generateFlowImage(keywords.join(', '), targetDir, content || '', type, count || 2, lang || 'en', prompt || '', ratio || '16:9', videoMode || 'Frames', veo || 'Lite', selectedImages);
         for (const fileName of saved) {
             const relativePath = path.join(videoId, 'assets', subDir, gid, fileName);
             const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
             if (!exists) {
-                await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, selected, "order", file_path) VALUES (?, NULL, ?, 0, 0, ?)', [paragraphId, type, relativePath]);
+                const assetType = fileName.includes('_thumbnail.') ? 'image' : type;
+                await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, selected, "order", file_path) VALUES (?, NULL, ?, 0, 0, ?)', [paragraphId, assetType, relativePath]);
             }
         }
         await db.close();
         console.log(`[AI Generate] Done ${type} for paragraph ${paragraphId}`);
     })().catch(e => console.error('[AI Generate] Error:', e.message));
+});
+
+// API: Lấy prompt theo type và lang
+app.get('/api/get-prompt', (req, res) => {
+    const { type, lang } = req.query;
+    const promptFile = path.join(MEDIA_DIR, 'prompts', type || 'image', `prompt_flow_${lang || 'en'}.txt`);
+    const fallbackFile = path.join(MEDIA_DIR, 'prompts', type || 'image', 'prompt_flow.txt');
+    const raw = fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf8') : fs.existsSync(fallbackFile) ? fs.readFileSync(fallbackFile, 'utf8') : '';
+    res.json({ prompt: raw.trim().replace(/\n/g, ' ') });
 });
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
