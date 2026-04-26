@@ -18,7 +18,7 @@ const app = express();
 const PORT = 3000;
 
 const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
-const DB_DIR = process.env.DB_DIR || '/usr/gux/media-team';
+const DB_DIR = process.env.DB_DIR || '/usr/gux/media-team/db';
 
 app.use(express.json()); // BẮT BUỘC PHẢI CÓ DÒNG NÀY Ở ĐÂY
 

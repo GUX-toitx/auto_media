@@ -4,7 +4,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 
 const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
-const DB_DIR = process.env.DB_DIR || '/usr/gux/media-team';
+const DB_DIR = process.env.DB_DIR || '/usr/gux/media-team/db';
 const DB_PATH = path.join(DB_DIR, 'media_system.sqlite');
 const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 
