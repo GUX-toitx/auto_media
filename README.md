@@ -26,4 +26,4 @@ sudo apt install python3-websockets -y
 2. chạy node browser.js để đăng nhập vào chrome Playwright, sau khi đăng nhập xong thì tắt trình duyệt đi là được, lần sau chạy sẽ không cần đăng nhập nữa vì đã lưu session vào user data dir rồi
 3. chạy như bình thường click button gen ai rồi chọn số lượng ấn gen rồi ngồi nhìn thôi
 
-4. Promt để trong prompt_flow.txt, chỉnh săur promt vào đây, promt sẽ tự đọng thêm đoạn content của paragraph đẻ gửi lên Flow
+4. Promt để trong prompts, chỉnh sửa promt vào đây, prompt sẽ tự động thêm đoạn content của paragraph đẻ gửi lên Flow
