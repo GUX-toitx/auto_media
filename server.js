@@ -11,6 +11,7 @@ import multer from 'multer';
 import { getLanguages, getReferenceSpeakers, generateAudios, updateBatchStatus, downloadBatchAudios } from './audio_service.js';
 import { processAll } from './video_service.js';
 import { generateFlowImage } from './browser.js';
+import archiver from 'archiver';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -177,31 +178,45 @@ app.post('/api/download-voice', async (req, res) => {
             }
         }
 
-        // 2. Copy selected assets vào folder theo lang
-        // Xóa sạch folder assets cũ trước khi copy mới
-        const assetsDir = path.join(MEDIA_DIR, videoId, lang, 'assets');
-        if (fs.existsSync(assetsDir)) fs.rmSync(assetsDir, { recursive: true, force: true });
+        // 2. Stream thẳng vào zip
+        const zipName = `${videoId}_${lang}.zip`;
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
 
-        for (const para of paragraphs) {
+        const archive = archiver('zip', { zlib: { level: 6 } });
+        archive.on('error', e => { throw e; });
+        archive.pipe(res);
+
+        const audioMap = {};
+        for (const r of result.results) {
+            if (r.paragraphId) audioMap[r.paragraphId] = path.join(MEDIA_DIR, r.relativePath);
+        }
+
+        for (let i = 0; i < paragraphs.length; i++) {
+            const para = paragraphs[i];
+            const sceneNo = i + 1;
+            const sceneFolder = `canh_${sceneNo}`;
+
+            const audioSrc = audioMap[para.id];
+            if (audioSrc && fs.existsSync(audioSrc)) {
+                archive.file(audioSrc, { name: `${sceneFolder}/${sceneNo}.mp3` });
+            }
+
             const assets = await db.all(
-                'SELECT type, file_path, "order" FROM Asset WHERE paragraph_id = ? AND selected = 1 ORDER BY "order"',
+                'SELECT file_path, "order" FROM Asset WHERE paragraph_id = ? AND selected = 1 ORDER BY "order"',
                 [para.id]
             );
             for (const asset of assets) {
-                const subDir = asset.type === 'video' ? '_raw_videos' : '_raw_images';
-                const targetDir = path.join(MEDIA_DIR, videoId, lang, 'assets', subDir, String(para.order));
-                if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-
                 const srcPath = path.join(MEDIA_DIR, asset.file_path);
                 if (fs.existsSync(srcPath)) {
-                    const destPath = path.join(targetDir, `${asset.order}_${path.basename(asset.file_path)}`);
-                    fs.copyFileSync(srcPath, destPath);
+                    const ext = path.extname(asset.file_path);
+                    archive.file(srcPath, { name: `${sceneFolder}/${sceneNo}_${asset.order}${ext}` });
                 }
             }
         }
 
         await db.close();
-        res.json(result);
+        await archive.finalize();
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -306,7 +321,15 @@ app.post('/api/delete', async (req, res) => {
     const { relativePath } = req.body;
     try {
         const db = await getDb();
+        const asset = await db.get('SELECT paragraph_id, selected, "order" FROM Asset WHERE file_path = ?', [relativePath]);
         await db.run('DELETE FROM Asset WHERE file_path = ?', [relativePath]);
+        // Nếu đang selected thì giảm order các asset sau
+        if (asset?.selected && asset.order > 0) {
+            await db.run(
+                'UPDATE Asset SET "order" = "order" - 1 WHERE paragraph_id = ? AND selected = 1 AND "order" > ?',
+                [asset.paragraph_id, asset.order]
+            );
+        }
         await db.close();
         const fullPath = path.join(MEDIA_DIR, relativePath);
         if (fs.existsSync(fullPath)) {
@@ -327,10 +350,10 @@ app.post('/api/unselect-asset', async (req, res) => {
         if (asset) {
             // Bỏ selected và reset order
             await db.run('UPDATE Asset SET selected = 0, "order" = 0 WHERE file_path = ?', [relativePath]);
-            // Giảm order các asset cùng type có order lớn hơn
+            // Giảm order tất cả assets (cả video lẫn image) có order lớn hơn
             await db.run(
-                'UPDATE Asset SET "order" = "order" - 1 WHERE paragraph_id = ? AND type = ? AND selected = 1 AND "order" > ?',
-                [asset.paragraph_id, type, order]
+                'UPDATE Asset SET "order" = "order" - 1 WHERE paragraph_id = ? AND selected = 1 AND "order" > ?',
+                [asset.paragraph_id, order]
             );
         }
         await db.close();

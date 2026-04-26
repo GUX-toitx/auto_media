@@ -560,6 +560,11 @@ createApp({
             const res = await fetch('/api/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath }) });
             const r = await res.json();
             if (r.success) {
+                if (asset.selected && asset.order > 0) {
+                    [...(para.videos || []), ...(para.images || [])]
+                        .filter(a => a.selected && a.order > asset.order)
+                        .forEach(a => a.order--);
+                }
                 para.videos = para.videos.filter(v => v.relativePath !== asset.relativePath);
                 para.images = para.images.filter(v => v.relativePath !== asset.relativePath);
             }
@@ -574,10 +579,10 @@ createApp({
 
         async function toggleSelect(asset, para, type) {
             const action = asset.selected ? 'unselect' : 'select';
-            const sameType = type === 'video' ? (para.videos || []) : (para.images || []);
+            const allAssets = [...(para.videos || []), ...(para.images || [])];
             let order = 0;
             if (action === 'select') {
-                const maxOrder = sameType.filter(a => a.selected).reduce((max, a) => Math.max(max, a.order || 0), 0);
+                const maxOrder = allAssets.filter(a => a.selected).reduce((max, a) => Math.max(max, a.order || 0), 0);
                 order = maxOrder + 1;
             }
             const res = await fetch('/api/toggle', {
@@ -593,7 +598,7 @@ createApp({
                 } else {
                     const removedOrder = asset.order;
                     asset.order = 0;
-                    sameType
+                    [...(para.videos || []), ...(para.images || [])]
                         .filter(a => a.selected && a.order > removedOrder)
                         .forEach(a => a.order--);
                 }
@@ -626,8 +631,9 @@ createApp({
                 const removedOrder = asset.order;
                 asset.selected = false;
                 asset.order = 0;
-                const sameType = type === 'video' ? (para.videos || []) : (para.images || []);
-                sameType.filter(a => a.selected && a.order > removedOrder).forEach(a => a.order--);
+                [...(para.videos || []), ...(para.images || [])]
+                    .filter(a => a.selected && a.order > removedOrder)
+                    .forEach(a => a.order--);
             }
         }
 
@@ -888,21 +894,28 @@ createApp({
 
         async function downloadVoice() {
             if (!activePost.value) return;
-            const res = await fetch('/api/download-voice', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    videoId: activeProjectId.value,
-                    postId: activePostId.value
-                })
-            });
-            const r = await res.json();
-            if (r.total) {
-                showToast(`✅ Đã tải ${r.total} file audio!`);
-                await selectPost({ id: activePostId.value });
-            } else {
-                alert(r.error || '❌ Batch chưa gen xong!');
-            }
+            showToast('⏳ Đang tải và đóng gói...', 60000);
+            try {
+                const res = await fetch('/api/download-voice', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoId: activeProjectId.value, postId: activePostId.value })
+                });
+                if (!res.ok) {
+                    const r = await res.json();
+                    return alert(r.error || '❌ Lỗi!');
+                }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                const disposition = res.headers.get('Content-Disposition') || '';
+                const fileName = disposition.match(/filename="(.+)"/)?.at(1) || `${activeProjectId.value}.zip`;
+                a.href = url;
+                a.download = fileName;
+                a.click();
+                URL.revokeObjectURL(url);
+                showToast('✅ Đã tải xong!');
+            } catch (e) { alert('❌ ' + e.message); }
         }
 
         loadPosts();
