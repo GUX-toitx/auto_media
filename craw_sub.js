@@ -270,7 +270,8 @@ Nhiệm vụ:
 
 🔥 ĐỊA DANH ƯU TIÊN SỐ 1: Nếu có địa danh (Trung Đông, Mỹ...), BẮT BUỘC dịch sang tiếng Anh và đưa vào Keyword.
 🔥 "ĐỘNG TỪ HÓA": Dùng V-ing hoặc tính từ sự kiện (vd: "stock market crashing", "military helicopter flying").
-🔥 VIẾT TẮT: KHÔNG thêm space vào giữa các chữ viết tắt. Ví dụ: U.S.A không phải U. S. A, U.K không phải U. K.
+🔥 VIẾT TẮT: KHÔNG thêm space vào giữa các chữ viết tắt. Ví dụ: U.S.A không phải U. S. A, U.K không phải U. K. KHÔNG dùng dạng có dấu chấm cuối như U.S. hay U.K.
+🔥 TÊN QUỐC GIA: KHÔNG viết tắt tên quốc gia, viết rõ tên đầy đủ. Ví dụ: America hoặc United States thay vì US/USA, United Kingdom thay vì UK.
 
 BẮT BUỘC trả về JSON:
 {
