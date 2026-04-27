@@ -55,6 +55,12 @@ app.get('/api/posts/:postId', async (req, res) => {
             const para = paragraphs[i];
             const gid = String(i + 1);
 
+            // Sentences kèm audio
+            para.sentences = (await db.all(
+                'SELECT id, content, original_content, audio, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"',
+                [para.id]
+            )).map(s => ({ ...s, audioUrl: s.audio ? `/${s.audio}` : null }));
+
             // Keywords từ DB
             para.keywords = (await db.all(
                 'SELECT content FROM Keyword WHERE paragraph_id = ? ORDER BY id',
@@ -63,15 +69,15 @@ app.get('/api/posts/:postId', async (req, res) => {
 
             // File media từ DB
             const assets = await db.all(
-                'SELECT id, type, selected, "order", file_path FROM Asset WHERE paragraph_id = ? ORDER BY id',
-                [para.id]
+                'SELECT id, type, selected, "order", file_path, sentence_id, paragraph_id, duration FROM Asset WHERE paragraph_id = ? OR sentence_id IN (SELECT id FROM Sentence WHERE paragraph_id = ?) ORDER BY id',
+                [para.id, para.id]
             );
             para.videos = assets
-                .filter(a => a.type === 'video')
-                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0 }));
+                .filter(a => a.type === 'video' && (a.paragraph_id || a.sentence_id))
+                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0 }));
             para.images = assets
-                .filter(a => a.type === 'image')
-                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0 }));
+                .filter(a => a.type === 'image' && (a.paragraph_id || a.sentence_id))
+                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0 }));
 
             // Audios & generated videos từ thư mục output
             para.audios = {};
@@ -151,6 +157,8 @@ app.post('/api/generate-media', (req, res) => {
 });
 
 
+// API: Polling OK -> tải audio từ voice service và lưu vào DB
+// API: Chỉ zip audio đã có + assets selected -> trả về browser
 app.post('/api/download-voice', async (req, res) => {
     try {
         const { videoId, postId } = req.body;
@@ -161,24 +169,15 @@ app.post('/api/download-voice', async (req, res) => {
 
         const lang = post.title.match(/_([a-z]{2})$/)?.[1] || 'unknown';
 
-        const paragraphs = await db.all(
-            'SELECT id, "order" FROM Paragraph WHERE post_id = ? ORDER BY "order"', [postId]
+        // Lấy tất cả sentences của post theo order
+        const sentences = await db.all(
+            `SELECT s.id, s.audio, s."order", s.paragraph_id FROM Sentence s
+             JOIN Paragraph p ON s.paragraph_id = p.id
+             WHERE p.post_id = ? ORDER BY s."order"`,
+            [postId]
         );
-        const folderNames = paragraphs.map(p => String(p.order));
-        const paragraphIds = paragraphs.map(p => p.id);
 
-        // 1. Tải audio
-        const baseDir = path.join(MEDIA_DIR, videoId, lang, 'audios');
-        const result = await downloadBatchAudios(post.audio_uuid, baseDir, folderNames, paragraphIds);
-        if (!result) { await db.close(); return res.json({ error: 'Batch chưa gen xong' }); }
-
-        for (const r of result.results) {
-            if (r.paragraphId) {
-                await db.run('UPDATE Paragraph SET audio = ? WHERE id = ?', [r.relativePath, r.paragraphId]);
-            }
-        }
-
-        // 2. Stream thẳng vào zip
+        // Stream thẳng vào zip
         const zipName = `${videoId}_${lang}.zip`;
         res.setHeader('Content-Type', 'application/zip');
         res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
@@ -186,37 +185,60 @@ app.post('/api/download-voice', async (req, res) => {
         const archive = archiver('zip', { zlib: { level: 6 } });
         archive.on('error', e => { throw e; });
         archive.pipe(res);
+        const tmpFiles = [];
+        const { execSync } = await import('child_process');
 
-        const audioMap = {};
-        for (const r of result.results) {
-            if (r.paragraphId) audioMap[r.paragraphId] = path.join(MEDIA_DIR, r.relativePath);
-        }
+        for (const s of sentences) {
+            const sceneFolder = `cau_${s.order}`;
 
-        for (let i = 0; i < paragraphs.length; i++) {
-            const para = paragraphs[i];
-            const sceneNo = i + 1;
-            const sceneFolder = `canh_${sceneNo}`;
+            // Lấy assets của sentence này
+            const assets = await db.all(
+                'SELECT file_path, "order", duration FROM Asset WHERE selected = 1 AND sentence_id = ? ORDER BY "order"',
+                [s.id]
+            );
 
-            const audioSrc = audioMap[para.id];
-            if (audioSrc && fs.existsSync(audioSrc)) {
-                archive.file(audioSrc, { name: `${sceneFolder}/${sceneNo}.mp3` });
+            const totalAssetDuration = Math.ceil(assets.reduce((sum, a) => sum + (a.duration || 0), 0));
+
+            // Xử lý audio
+            if (s.audio) {
+                const audioSrc = path.join(MEDIA_DIR, s.audio);
+                if (fs.existsSync(audioSrc)) {
+                    const audioName = `${sceneFolder}/audio.mp3`;
+                    if (totalAssetDuration > 0) {
+                        let mp3Duration = 0;
+                        try {
+                            const out = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${audioSrc}"`);
+                            mp3Duration = parseFloat(out.toString().trim());
+                        } catch (e) {}
+                        if (totalAssetDuration > mp3Duration) {
+                            const tmpPath = audioSrc.replace('.mp3', '_padded.mp3');
+                            try {
+                                execSync(`ffmpeg -i "${audioSrc}" -af "apad=pad_dur=${totalAssetDuration - mp3Duration}" -t ${totalAssetDuration} -y "${tmpPath}"`);
+                                archive.file(tmpPath, { name: audioName });
+                                tmpFiles.push(tmpPath);
+                            } catch (e) { archive.file(audioSrc, { name: audioName }); }
+                        } else {
+                            archive.file(audioSrc, { name: audioName });
+                        }
+                    } else {
+                        archive.file(audioSrc, { name: audioName });
+                    }
+                }
             }
 
-            const assets = await db.all(
-                'SELECT file_path, "order" FROM Asset WHERE paragraph_id = ? AND selected = 1 ORDER BY "order"',
-                [para.id]
-            );
+            // Assets
             for (const asset of assets) {
                 const srcPath = path.join(MEDIA_DIR, asset.file_path);
                 if (fs.existsSync(srcPath)) {
                     const ext = path.extname(asset.file_path);
-                    archive.file(srcPath, { name: `${sceneFolder}/${sceneNo}_${asset.order}${ext}` });
+                    const durSuffix = asset.duration ? `_${Math.round(asset.duration)}s` : '';
+                    archive.file(srcPath, { name: `${sceneFolder}/${asset.order}${durSuffix}${ext}` });
                 }
             }
         }
-
         await db.close();
         await archive.finalize();
+        for (const f of tmpFiles) { try { fs.unlinkSync(f); } catch(_) {} }
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -225,6 +247,36 @@ app.post('/api/update-batch-status', async (req, res) => {
         const { batchUuid } = req.body;
         const result = await updateBatchStatus(batchUuid);
         res.json(result);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/check-download-voice', async (req, res) => {
+    try {
+        const { batchUuid, postId, videoId } = req.body;
+        const batchData = await fetch(`${process.env.VOICE_API}/user/batch/${batchUuid}`, {
+            headers: { 'x-api-key': process.env.API_KEY, 'x-tenant': process.env.TENANT }
+        }).then(r => r.json());
+        const status = batchData.data?.status || batchData.status;
+
+        if (status === 'OK' && postId && videoId) {
+            const db = await getDb();
+            const post = await db.get('SELECT title FROM Post WHERE id = ?', [postId]);
+            const lang = post?.title?.match(/_([a-z]{2})$/)?.[1] || 'unknown';
+            const sentences = await db.all(
+                'SELECT id, "order" FROM Sentence WHERE paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?) ORDER BY "order"',
+                [postId]
+            );
+            const baseDir = path.join(MEDIA_DIR, videoId, 'output', lang, 'audios');
+            const result = await downloadBatchAudios(batchUuid, baseDir, sentences.map(s => String(s.order)), sentences.map(s => s.id));
+            if (result) {
+                for (const r of result.results) {
+                    if (r.paragraphId) await db.run('UPDATE Sentence SET audio = ? WHERE id = ?', [r.relativePath, r.paragraphId]);
+                }
+            }
+            await db.close();
+        }
+
+        res.json({ status });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -375,22 +427,28 @@ app.post('/api/unselect-asset', async (req, res) => {
 });
 
 app.post('/api/toggle', async (req, res) => {
-    const { relativePath, action, order } = req.body;
+    const { relativePath, action, order, sentenceId } = req.body;
     try {
         const db = await getDb();
         const selected = action === 'select' ? 1 : 0;
 
         if (action === 'unselect') {
-            const asset = await db.get('SELECT paragraph_id, "order" FROM Asset WHERE file_path = ?', [relativePath]);
+            const asset = await db.get('SELECT paragraph_id, sentence_id, "order" FROM Asset WHERE file_path = ?', [relativePath]);
             if (asset) {
+                const pid = asset.paragraph_id || await db.get('SELECT paragraph_id FROM Sentence WHERE id = ?', [asset.sentence_id]).then(r => r?.paragraph_id);
                 await db.run(
                     'UPDATE Asset SET "order" = "order" - 1 WHERE paragraph_id = ? AND selected = 1 AND "order" > ?',
-                    [asset.paragraph_id, asset.order]
+                    [pid, asset.order]
                 );
+                await db.run('UPDATE Asset SET selected = 0, "order" = 0, sentence_id = NULL, paragraph_id = ? WHERE file_path = ?', [pid, relativePath]);
             }
+        } else {
+            await db.run(
+                'UPDATE Asset SET selected = 1, "order" = ?, sentence_id = ?, paragraph_id = CASE WHEN ? IS NOT NULL THEN NULL ELSE paragraph_id END WHERE file_path = ?',
+                [order || 0, sentenceId || null, sentenceId || null, relativePath]
+            );
         }
 
-        await db.run('UPDATE Asset SET selected = ?, "order" = ? WHERE file_path = ?', [selected, order || 0, relativePath]);
         await db.close();
         res.json({ success: true, selected });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -422,8 +480,18 @@ app.post('/api/upload', upload.array('files'), async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/save-duration', async (req, res) => {
+    const { relativePath, duration } = req.body;
+    try {
+        const db = await getDb();
+        await db.run('UPDATE Asset SET duration = ? WHERE file_path = ?', [duration, relativePath]);
+        await db.close();
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/crop', async (req, res) => {
-    const { relativePath, x, y, width, height } = req.body;
+    const { relativePath, x, y, width, height, duration } = req.body;
     const fullPath = path.join(MEDIA_DIR, relativePath);
     if (!fs.existsSync(fullPath)) return res.status(404).json({ error: '404' });
     const ext = path.extname(fullPath);
@@ -434,23 +502,31 @@ app.post('/api/crop', async (req, res) => {
         const newRelativePath = relativePath.replace(ext, `_cropped${ext}`);
         const db = await getDb();
         const asset = await db.get('SELECT id, paragraph_id, type FROM Asset WHERE file_path = ?', [relativePath]);
-        if (asset) await db.run('INSERT OR IGNORE INTO Asset (paragraph_id, type, selected, file_path) VALUES (?, ?, 0, ?)', [asset.paragraph_id, asset.type, newRelativePath]);
+        if (asset) {
+            await db.run('UPDATE Asset SET duration = ? WHERE id = ?', [duration || null, asset.id]);
+            await db.run('INSERT OR IGNORE INTO Asset (paragraph_id, type, selected, duration, file_path) VALUES (?, ?, 0, ?, ?)', [asset.paragraph_id, asset.type, duration || null, newRelativePath]);
+        }
         await db.close();
         res.json({ success: true, newRelativePath });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/trim', async (req, res) => {
-    const { relativePath, start, end } = req.body;
+    const { relativePath, start, end, duration } = req.body;
     const fullPath = path.join(MEDIA_DIR, relativePath);
     if (!fs.existsSync(fullPath)) return res.status(404).json({ error: '404' });
     const ext = path.extname(fullPath);
     const tmpPath = fullPath.replace(ext, `_tmp${ext}`);
     try {
         const { execSync } = await import('child_process');
-        const duration = end - start;
-        execSync(`ffmpeg -ss ${start} -t ${duration} -i "${fullPath}" -c copy -y "${tmpPath}"`);
+        const dur = end - start;
+        execSync(`ffmpeg -ss ${start} -t ${dur} -i "${fullPath}" -c copy -y "${tmpPath}"`);
         fs.renameSync(tmpPath, fullPath);
+        if (duration != null) {
+            const db = await getDb();
+            await db.run('UPDATE Asset SET duration = ? WHERE file_path = ?', [duration, relativePath]);
+            await db.close();
+        }
         res.json({ success: true });
     } catch (e) {
         if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);

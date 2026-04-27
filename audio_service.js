@@ -71,14 +71,15 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid) {
     const projectName = path.basename(projectDir);
 
     const db = await getDb();
-    const paragraphs = await db.all(
-        'SELECT id, content, "order" FROM Paragraph WHERE post_id = ? ORDER BY "order"', [postId]
+    const sentences = await db.all(
+        'SELECT id, content, "order" FROM Sentence WHERE paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?) ORDER BY "order"',
+        [postId]
     );
     await db.close();
 
-    const texts = paragraphs.map(p => p.content.trim()).filter(Boolean);
-    const folderNames = paragraphs.map(p => String(p.order));
-    const paragraphIds = paragraphs.map(p => p.id);
+    const texts = sentences.map(s => s.content.trim()).filter(Boolean);
+    const folderNames = sentences.map(s => String(s.order));
+    const paragraphIds = sentences.map(s => s.id);
     if (!texts.length) throw new Error(`Không có paragraph nào trong post id: ${postId}`);
 
     const batchName = `${projectName}_${lang}`;

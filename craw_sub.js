@@ -89,6 +89,10 @@ async function initDB() {
     await db.run("ALTER TABLE Paragraph ADD COLUMN audio TEXT").catch(() => {});
     await db.run('ALTER TABLE Paragraph ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0').catch(() => {});
     await db.run('ALTER TABLE Asset ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0').catch(() => {});
+    await db.run('ALTER TABLE Asset ADD COLUMN duration REAL').catch(() => {});
+    await db.run('ALTER TABLE Sentence ADD COLUMN original_content TEXT').catch(() => {});
+    await db.run('ALTER TABLE Sentence ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0').catch(() => {});
+    await db.run('ALTER TABLE Sentence ADD COLUMN audio TEXT').catch(() => {});
     await db.run("ALTER TABLE Post ADD COLUMN audio_uuid TEXT").catch(() => {});
     
     return db;
@@ -424,6 +428,7 @@ async function processNextInQueue() {
                 allScenes = allScenes.concat(await analyzeAndGroupScenes(chunk, globalTheme, processLang));
             }
 
+            let sentenceOrder = 0;
             for (let i = 0; i < allScenes.length; i++) {
                 const scene = allScenes[i];
                 const gid = String(i + 1);
@@ -463,8 +468,10 @@ async function processNextInQueue() {
                 }
 
                 const sentences = scene.text.split(/(?<=\.)/).map(s => s.trim()).filter(Boolean);
-                for (const s of sentences) {
-                    await db.run('INSERT INTO Sentence (paragraph_id, content) VALUES (?, ?)', [dbParagraphId, s]);
+                const originalSentences = (scene.original_text || scene.text).split(/(?<=\.)/).map(s => s.trim()).filter(Boolean);
+                for (let si = 0; si < sentences.length; si++) {
+                    sentenceOrder++;
+                    await db.run('INSERT INTO Sentence (paragraph_id, content, original_content, "order") VALUES (?, ?, ?, ?)', [dbParagraphId, sentences[si], originalSentences[si] || scene.original_text || sentences[si], sentenceOrder]);
                 }
 
                 // Chỉ tải media 1 lần (theo ngôn ngữ đầu tiên)

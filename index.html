@@ -50,16 +50,28 @@
             <div class="space-y-4 mt-[150px]">
                 <div v-for="(para, i) in activePost.paragraphs" :key="para.id" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
 
-                    <!-- Row 1: badge + content -->
+                    <!-- Row 1: badge + sentences -->
                     <div class="flex items-start gap-2">
                         <span class="bg-blue-600 text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 mt-0.5">#{{ i + 1 }}</span>
-                        <div class="grid grid-cols-2 gap-2 flex-1">
-                            <div class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed h-20 overflow-y-auto whitespace-pre-wrap">
-                                <span v-if="para.original_content">{{ para.original_content }}</span>
-                                <span v-else class="italic text-gray-700">Chưa có</span>
+                        <div class="flex-1 space-y-1">
+                            <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300" @click="toggleSection(para, 'sentencesOpen')">
+                                {{ para.sentencesOpen ? '▼' : '▶' }} Sentences ({{ (para.sentences || []).length }})
                             </div>
-                            <textarea v-model="para.content" @blur="saveContent(para, true)"
-                                class="bg-gray-900 border border-gray-800 rounded-lg p-2 text-[11px] leading-relaxed focus:border-blue-500 outline-none h-20 resize-none transition-all"></textarea>
+                            <div v-if="para.sentencesOpen" class="space-y-1">
+                                <div v-for="s in (para.sentences || []).slice().sort((a,b) => a.order - b.order)" :key="s.id" class="bg-gray-900/60 border border-gray-800 rounded-lg p-2 space-y-1.5">
+                                    <div class="flex items-start gap-2">
+                                        <span class="bg-green-600 text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 mt-0.5">#{{ s.order }}</span>
+                                        <div class="grid grid-cols-2 gap-2 flex-1">
+                                            <div class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap">{{ s.original_content || s.content }}</div>
+                                            <div class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap">{{ s.content }}</div>
+                                        </div>
+                                    </div>
+                                    <div v-if="s.audioUrl" class="flex items-center gap-2 bg-gray-800/40 rounded-lg px-2 py-1">
+                                        <span class="text-[9px] font-black text-green-400 shrink-0">🎵</span>
+                                        <audio controls :src="s.audioUrl" class="h-7 flex-1" preload="metadata"></audio>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -72,28 +84,13 @@
                             class="bg-transparent text-[11px] p-0.5 outline-none text-blue-400 w-24 border-b border-transparent focus:border-blue-500">
                     </div>
 
-                    <!-- Row 3: audio (nếu có) -->
-                    <div v-if="Object.keys(para.audios || {}).length" class="flex flex-wrap gap-1 px-1">
-                        <div v-for="(audio, lang) in para.audios" :key="lang">
-                            <div class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-900 border border-green-800 text-[10px] text-green-400 font-bold cursor-pointer"
-                                @click="audio._open = !audio._open">[{{ lang.toUpperCase() }}] ● Voice</div>
-                            <div v-if="audio._open" class="mt-1"><audio controls :src="audio.url" class="h-7"></audio></div>
-                        </div>
-                    </div>
-
-                    <!-- Row 4: Audio -->
-                    <div v-if="para.audio" class="flex items-center gap-2 px-1 py-1 bg-gray-800/40 rounded-lg">
-                        <span class="text-[10px] font-black text-green-400">🎵 Audio</span>
-                        <audio controls :src="'/' + para.audio" class="h-7 flex-1" preload="metadata"></audio>
-                    </div>
-
                     <!-- Row 5: Videos -->
                     <div>
                         <div class="flex items-center text-[10px] font-black text-gray-500 select-none py-1">
                             <span @click="toggleSection(para, 'videoOpen')" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
                                 {{ para.videoOpen ? '▼' : '▶' }}
                                 <span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
-                                Videos ({{ (para.videos || []).length }})
+                                Videos ({{ (para.videos || []).filter(v => v.sentenceId === null).length }})
                             </span>
                             <button @click="deleteAll(para, i+1, 'video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
                             <div class="ml-auto flex gap-1.5">
@@ -102,10 +99,10 @@
                             </div>
                         </div>
                         <div v-if="para.videoOpen" class="grid grid-cols-4 gap-2 mt-1">
-                            <div v-if="!(para.videos || []).length" class="text-[10px] text-gray-700 italic">Trống</div>
-                            <div v-for="v in (para.videos || [])" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
+                            <div v-if="!(para.videos || []).filter(v => v.sentenceId === null).length" class="text-[10px] text-gray-700 italic">Trống</div>
+                            <div v-for="v in (para.videos || []).filter(v => v.sentenceId === null)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
                                 :class="v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
-                                <button @click="deleteAsset(v, para)" class="absolute top-1 left-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
+                                <button @click="deleteAsset(v, para)" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
                                 <video muted loop preload="metadata" :src="v.url"
                                     @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()"
                                     class="w-full h-24 object-cover rounded mb-1 bg-black"></video>
@@ -127,7 +124,7 @@
                             <span @click="toggleSection(para, 'imageOpen')" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
                                 {{ para.imageOpen ? '▼' : '▶' }}
                                 <span class="w-1.5 h-1.5 bg-orange-500 rounded-full"></span>
-                                Images ({{ (para.images || []).length }})
+                                Images ({{ (para.images || []).filter(img => img.sentenceId === null).length }})
                             </span>
                             <button @click="deleteAll(para, i+1, 'image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
                             <div class="ml-auto flex gap-1.5">
@@ -136,12 +133,12 @@
                             </div>
                         </div>
                         <div v-if="para.imageOpen" class="grid grid-cols-6 gap-2 mt-1">
-                            <div v-if="!(para.images || []).length" class="text-[10px] text-gray-700 italic">Trống</div>
-                            <div v-for="img in (para.images || [])" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border"
+                            <div v-if="!(para.images || []).filter(img => img.sentenceId === null).length" class="text-[10px] text-gray-700 italic">Trống</div>
+                            <div v-for="img in (para.images || []).filter(img => img.sentenceId === null)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border"
                                 :class="img.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
                                 <div class="relative">
                                     <img :src="img.url" class="w-full h-16 object-cover rounded mb-1">
-                                    <button @click="deleteAsset(img, para)" class="absolute top-0.5 left-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
+                                    <button @click="deleteAsset(img, para)" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
                                 </div>
                                 <div class="flex gap-1">
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white min-w-[20px] text-center">#{{ img.order }}</span>
@@ -165,16 +162,37 @@
                             </span>
                             <button @click="openFolder(i+1, 'video')" class="ml-auto text-[9px] px-2 py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black font-bold transition-all">📂 Open Folder</button>
                         </div>
-                        <div v-if="para.videoSelectedOpen" class="grid grid-cols-4 gap-2 mt-1">
+                        <div v-if="para.videoSelectedOpen" class="space-y-2 mt-1">
                             <div v-if="!(para.videos || []).filter(v => v.selected).length" class="text-[10px] text-gray-700 italic">Chưa chọn video nào</div>
-                            <div v-for="v in (para.videos || []).filter(v => v.selected).sort((a,b) => a.order - b.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
-                                <button @click="unselectAsset(v, para, i+1, 'video')" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
-                                <video muted loop preload="metadata" :src="v.url"
-                                    @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()"
-                                    class="w-full h-24 object-cover rounded mb-1 bg-black"></video>
-                                <div class="flex items-center justify-between px-1">
-                                    <span class="text-[9px] font-black text-green-400">#{{ v.order }}</span>
-                                    <span class="text-[9px] text-gray-500 truncate ml-1">{{ v.name }}</span>
+                            <template v-for="s in para.sentences" :key="s.id">
+                                <div v-if="(para.videos || []).filter(v => v.selected && v.sentenceId == s.id).length" class="space-y-1">
+                                    <div class="flex items-center gap-1.5"><button class="text-[9px] font-black px-1.5 py-0.5 rounded bg-green-700 text-green-300">#{{ s.order }}</button><span class="text-[9px] font-black text-green-400">{{ s.content?.slice(0, 50) }}</span></div>
+                                    <div class="grid grid-cols-4 gap-2">
+                                        <div v-for="v in (para.videos || []).filter(v => v.selected && v.sentenceId == s.id).sort((a,b) => a.order - b.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                            <button @click="unselectAsset(v, para, i+1, 'video')" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
+                                            <video muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" class="w-full h-24 object-cover rounded mb-1 bg-black"></video>
+                                            <div class="flex gap-1">
+                                                <span class="text-[9px] font-black py-1 px-2 rounded bg-blue-600 text-white min-w-[24px] text-center">#{{ v.order }}</span>
+                                                <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-1 rounded uppercase bg-green-600 transition-colors">✓</button>
+                                                <button @click="openEdit(v, 'video')" class="text-[9px] font-black py-1 px-2 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                            <!-- Assets không gán sentence -->
+                            <div v-if="(para.videos || []).filter(v => v.selected && !v.sentenceId).length" class="space-y-1">
+                                <div class="text-[9px] font-black text-gray-500 px-1">Không gán câu</div>
+                                <div class="grid grid-cols-4 gap-2">
+                                    <div v-for="v in (para.videos || []).filter(v => v.selected && !v.sentenceId).sort((a,b) => a.order - b.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                        <button @click="unselectAsset(v, para, i+1, 'video')" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
+                                        <video muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" class="w-full h-24 object-cover rounded mb-1 bg-black"></video>
+                                        <div class="flex gap-1">
+                                            <span class="text-[9px] font-black py-1 px-2 rounded bg-blue-600 text-white min-w-[24px] text-center">#{{ v.order }}</span>
+                                            <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-1 rounded uppercase bg-green-600 transition-colors">✓</button>
+                                            <button @click="openEdit(v, 'video')" class="text-[9px] font-black py-1 px-2 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -190,14 +208,36 @@
                             </span>
                             <button @click="openFolder(i+1, 'image')" class="ml-auto text-[9px] px-2 py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black font-bold transition-all">📂 Open Folder</button>
                         </div>
-                        <div v-if="para.imageSelectedOpen" class="grid grid-cols-6 gap-2 mt-1">
+                        <div v-if="para.imageSelectedOpen" class="space-y-2 mt-1">
                             <div v-if="!(para.images || []).filter(i => i.selected).length" class="text-[10px] text-gray-700 italic">Chưa chọn ảnh nào</div>
-                            <div v-for="img in (para.images || []).filter(i => i.selected).sort((a,b) => a.order - b.order)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
-                                <button @click="unselectAsset(img, para, i+1, 'image')" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
-                                <img :src="img.url" class="w-full h-16 object-cover rounded mb-1">
-                                <div class="flex items-center justify-between px-1">
-                                    <span class="text-[9px] font-black text-green-400">#{{ img.order }}</span>
-                                    <span class="text-[9px] text-gray-500 truncate ml-1">{{ img.name }}</span>
+                            <template v-for="s in para.sentences" :key="s.id">
+                                <div v-if="(para.images || []).filter(img => img.selected && img.sentenceId == s.id).length" class="space-y-1">
+                                    <div class="flex items-center gap-1.5"><button class="text-[9px] font-black px-1.5 py-0.5 rounded bg-green-700 text-green-300">#{{ s.order }}</button><span class="text-[9px] font-black text-green-400">{{ s.content?.slice(0, 50) }}</span></div>
+                                    <div class="grid grid-cols-6 gap-2">
+                                        <div v-for="img in (para.images || []).filter(img => img.selected && img.sentenceId == s.id).sort((a,b) => a.order - b.order)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                            <button @click="unselectAsset(img, para, i+1, 'image')" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
+                                            <img :src="img.url" class="w-full h-16 object-cover rounded mb-1">
+                                            <div class="flex gap-1">
+                                                <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white min-w-[20px] text-center">#{{ img.order }}</span>
+                                                <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
+                                                <button @click="openEdit(img, 'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                            <div v-if="(para.images || []).filter(img => img.selected && !img.sentenceId).length" class="space-y-1">
+                                <div class="text-[9px] font-black text-gray-500 px-1">Không gán câu</div>
+                                <div class="grid grid-cols-6 gap-2">
+                                    <div v-for="img in (para.images || []).filter(img => img.selected && !img.sentenceId).sort((a,b) => a.order - b.order)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                        <button @click="unselectAsset(img, para, i+1, 'image')" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
+                                        <img :src="img.url" class="w-full h-16 object-cover rounded mb-1">
+                                        <div class="flex gap-1">
+                                            <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white min-w-[20px] text-center">#{{ img.order }}</span>
+                                            <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
+                                            <button @click="openEdit(img, 'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -251,6 +291,9 @@
                     <span class="text-sm font-black text-gray-300">📎 Thứ tự</span>
                     <input type="number" v-model.number="editModal.order" min="0"
                         class="w-16 bg-gray-900 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white text-center outline-none focus:border-yellow-500 font-bold">
+                    <span class="text-sm font-black text-gray-300 ml-4">⏱ Duration (s)</span>
+                    <input type="number" v-model.number="editModal.duration_val" min="0" step="0.1"
+                        class="w-24 bg-gray-900 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white text-center outline-none focus:border-yellow-500 font-bold">
                 </div>
             </template>
 
@@ -299,6 +342,9 @@
                     <span class="text-sm font-black text-gray-300">📎 Thứ tự</span>
                     <input type="number" v-model.number="editModal.order" min="0"
                         class="w-16 bg-gray-900 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white text-center outline-none focus:border-yellow-500 font-bold">
+                    <span class="text-sm font-black text-gray-300 ml-4">⏱ Duration (s)</span>
+                    <input type="number" v-model.number="editModal.duration_val" min="0" step="0.1"
+                        class="w-24 bg-gray-900 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white text-center outline-none focus:border-yellow-500 font-bold">
                 </div>
             </template>
 
@@ -451,6 +497,30 @@
         </div>
     </div>
 
+    <!-- SENTENCE SELECT MODAL -->
+    <div v-if="sentenceModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="sentenceModal.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[500px] space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-lg font-black text-white">🎯 Chọn Sentence</h3>
+                <button @click="sentenceModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+            <div class="space-y-2 max-h-80 overflow-y-auto">
+                <div v-for="s in sentenceModal.sentences" :key="s.id"
+                    @click="selectForSentence(s.id)"
+                    class="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg p-3 cursor-pointer transition-colors">
+                    <div class="flex items-start gap-2">
+                        <span class="bg-green-600 text-[9px] font-black px-1.5 py-0.5 rounded shrink-0">#{{ s.order }}</span>
+                        <div class="space-y-1 flex-1">
+                            <div class="text-[11px] text-gray-400">{{ s.original_content || s.content }}</div>
+                            <div class="text-[11px] text-gray-200">{{ s.content }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <button @click="sentenceModal.open = false" class="w-full py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
+        </div>
+    </div>
+
     <!-- TOAST -->
     <div v-if="toast" class="fixed bottom-6 right-6 z-50 bg-blue-600 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-lg">{{ toast }}</div>
 </div>
@@ -468,6 +538,7 @@ createApp({
         const editModal = ref({ open: false, type: '', asset: null, start: 0, end: 0, duration: 0, cropX: 0, cropY: 0, cropW: 200, cropH: 200, cropReady: false, saving: false });
         const uploadModal = ref({ open: false, type: '', para: null, files: [], dragging: false, uploading: false });
         const aiModal = ref({ open: false, type: '', para: null, gid: '', count: 2, content: '', keywords: [], prompt: '', ratio: '16:9', videoMode: 'Frames', veo: 'Fast' });
+        const sentenceModal = ref({ open: false, asset: null, para: null, type: '', sentences: [] });
 
         const activeProjectId = computed(() => {
             if (!activePost.value) return '';
@@ -497,6 +568,7 @@ createApp({
             data.paragraphs = data.paragraphs.map(p => ({
                 ...p,
                 keywords: p.keywords || [],
+                sentences: p.sentences || [],
                 videos: p.videos || [],
                 images: p.images || [],
                 audios: p.audios || {},
@@ -504,6 +576,7 @@ createApp({
                 imageOpen: false,
                 videoSelectedOpen: false,
                 imageSelectedOpen: false,
+                sentencesOpen: true,
             }));
             activePost.value = data;
         }
@@ -579,30 +652,54 @@ createApp({
 
         async function toggleSelect(asset, para, type) {
             const action = asset.selected ? 'unselect' : 'select';
-            const allAssets = [...(para.videos || []), ...(para.images || [])];
-            let order = 0;
-            if (action === 'select') {
-                const maxOrder = allAssets.filter(a => a.selected).reduce((max, a) => Math.max(max, a.order || 0), 0);
-                order = maxOrder + 1;
+            if (action === 'unselect') {
+                const res = await fetch('/api/toggle', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ relativePath: asset.relativePath, action, order: 0 })
+                });
+                const r = await res.json();
+                if (r.success) await reloadParaAssets(para);
+                return;
             }
+
+            const sentences = para.sentences || [];
+            if (sentences.length === 1) {
+                await doSelect(asset, para, sentences[0].id);
+            } else if (sentences.length > 1) {
+                sentenceModal.value = { open: true, asset, para, type, sentences };
+            } else {
+                await doSelect(asset, para, null);
+            }
+        }
+
+        async function reloadParaAssets(para) {
+            const res = await fetch(`/api/posts/${activePostId.value}`);
+            const data = await res.json();
+            const updated = data.paragraphs.find(p => p.id === para.id);
+            if (updated) {
+                para.videos = updated.videos || [];
+                para.images = updated.images || [];
+            }
+        }
+
+        async function doSelect(asset, para, sentenceId) {
+            const allAssets = [...(para.videos || []), ...(para.images || [])];
+            const maxOrder = allAssets.filter(a => a.selected).reduce((max, a) => Math.max(max, a.order || 0), 0);
+            const order = maxOrder + 1;
             const res = await fetch('/api/toggle', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ relativePath: asset.relativePath, action, order })
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ relativePath: asset.relativePath, action: 'select', order, sentenceId })
             });
             const r = await res.json();
             if (r.success) {
-                asset.selected = !asset.selected;
-                if (action === 'select') {
-                    asset.order = order;
-                } else {
-                    const removedOrder = asset.order;
-                    asset.order = 0;
-                    [...(para.videos || []), ...(para.images || [])]
-                        .filter(a => a.selected && a.order > removedOrder)
-                        .forEach(a => a.order--);
-                }
+                await reloadParaAssets(para);
             }
+        }
+
+        async function selectForSentence(sentenceId) {
+            const { asset, para } = sentenceModal.value;
+            sentenceModal.value.open = false;
+            await doSelect(asset, para, sentenceId);
         }
 
         async function openFolder(gid, type) {
@@ -614,27 +711,13 @@ createApp({
         }
 
         async function unselectAsset(asset, para, gid, type) {
-            if (!confirm('Bỏ chọn và xóa file đã tải?')) return;
-            const res = await fetch('/api/unselect-asset', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    videoId: activeProjectId.value,
-                    relativePath: asset.relativePath,
-                    order: asset.order,
-                    gid: String(gid),
-                    type
-                })
+            if (!confirm('Bỏ chọn?')) return;
+            const res = await fetch('/api/toggle', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ relativePath: asset.relativePath, action: 'unselect', order: 0 })
             });
             const r = await res.json();
-            if (r.success) {
-                const removedOrder = asset.order;
-                asset.selected = false;
-                asset.order = 0;
-                [...(para.videos || []), ...(para.images || [])]
-                    .filter(a => a.selected && a.order > removedOrder)
-                    .forEach(a => a.order--);
-            }
+            if (r.success) await reloadParaAssets(para);
         }
 
         function uploadAsset(para, gid, type) {
@@ -694,6 +777,7 @@ createApp({
                 open: true, type, asset,
                 start: 0, end: 0, duration: 0, currentTime: 0,
                 order: asset.order || 0,
+                duration_val: asset.duration || 0,
                 cropX: 0, cropY: 0, cropW: 0, cropH: 0,
                 scaleX: 1, scaleY: 1, cropReady: false,
                 ratio: '16:9', saving: false
@@ -706,6 +790,7 @@ createApp({
         function onVideoLoaded(e) {
             editModal.value.duration = e.target.duration;
             editModal.value.end = e.target.duration;
+            editModal.value.duration_val = Math.round(e.target.duration * 10) / 10;
         }
 
         function onVideoTimeUpdate(e) { editModal.value.currentTime = e.target.currentTime; }
@@ -732,6 +817,7 @@ createApp({
                     editModal.value.end = Math.max(t, editModal.value.start + 0.1);
                     if (editVideoRef.value) editVideoRef.value.currentTime = editModal.value.end;
                 }
+                editModal.value.duration_val = Math.round((editModal.value.end - editModal.value.start) * 10) / 10;
             };
             const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
             document.addEventListener('mousemove', move);
@@ -809,9 +895,9 @@ createApp({
             try {
                 let res;
                 if (type === 'video') {
-                    res = await fetch('/api/trim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath, start, end }) });
+                    res = await fetch('/api/trim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath, start, end, duration: editModal.value.duration_val }) });
                 } else {
-                    res = await fetch('/api/crop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath, x: Math.round(cropX * scaleX), y: Math.round(cropY * scaleY), width: Math.round(cropW * scaleX), height: Math.round(cropH * scaleY) }) });
+                    res = await fetch('/api/crop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath, x: Math.round(cropX * scaleX), y: Math.round(cropY * scaleY), width: Math.round(cropW * scaleX), height: Math.round(cropH * scaleY), duration: editModal.value.duration_val }) });
                 }
                 const r = await res.json();
                 if (r.success) {
@@ -867,6 +953,34 @@ createApp({
             await fetch('/api/update-batch-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ batchUuid: voiceModal.value.batchUuid }) });
             showToast('✅ Đã bắt đầu gen audio!');
             voiceModal.value.open = false;
+            const sentenceCount = activePost.value?.paragraphs?.length || 10;
+            startPollingVoice(voiceModal.value.batchUuid, sentenceCount);
+        }
+
+        const pollingTimer = ref(null);
+        function startPollingVoice(batchUuid, sentenceCount) {
+            if (pollingTimer.value) clearInterval(pollingTimer.value);
+            const estimatedMs = sentenceCount * 1000;
+            console.log(`[Voice] ước tính ${sentenceCount} câu x 5s = ${estimatedMs/1000}s, bắt đầu poll sau đó`);
+
+            setTimeout(() => {
+                const poll = async () => {
+                    const res = await fetch('/api/check-download-voice', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ batchUuid, postId: activePostId.value, videoId: activeProjectId.value })
+                    });
+                    const r = await res.json();
+                    if (r.status === 'OK') {
+                        clearInterval(pollingTimer.value);
+                        pollingTimer.value = null;
+                        showToast('🎉 Voice đã gen xong!', 10000);
+                        await selectPost({ id: activePostId.value });
+                    }
+                };
+                poll();
+                pollingTimer.value = setInterval(poll, 8000);
+            }, estimatedMs);
         }
 
         async function aiGenerate(para, type) {
@@ -957,9 +1071,15 @@ createApp({
             submitCreateVoice,
             genAudio,
             downloadVoice,
+            pollingTimer,
+            startPollingVoice,
             aiGenerate,
             submitAiGenerate,
             aiModal,
+            sentenceModal,
+            selectForSentence,
+            doSelect,
+            reloadParaAssets,
             uploadAsset,
             unselectAsset,
             openFolder,
