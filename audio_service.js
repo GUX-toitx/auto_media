@@ -105,7 +105,10 @@ export async function downloadBatchAudios(batchUuid, baseDir, folderNames = [], 
 
     if (status !== 'OK') return null;
 
-    const sentences = (batchData.data?.sentences || []).sort((a, b) => a.index - b.index);
+    const condition = JSON.stringify({ where: { batch_uuid: batchUuid }, orderBy: { index: 'asc' } });
+    const sentenceData = await api(`/user/sentence?page=0&limit=-1&condition=${encodeURIComponent(condition)}`).then(r => r.json());
+    const sentences = (sentenceData.data || []);
+    console.log('[downloadBatchAudios] status:', status, '| sentences count:', sentences.length);
     const results = [];
 
     for (let i = 0; i < sentences.length; i++) {

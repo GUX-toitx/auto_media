@@ -268,9 +268,13 @@ app.post('/api/check-download-voice', async (req, res) => {
             );
             const baseDir = path.join(MEDIA_DIR, videoId, 'output', lang, 'audios');
             const result = await downloadBatchAudios(batchUuid, baseDir, sentences.map(s => String(s.order)), sentences.map(s => s.id));
+            console.log('[Voice] downloadBatchAudios result:', result ? result.total : 'null');
             if (result) {
                 for (const r of result.results) {
-                    if (r.paragraphId) await db.run('UPDATE Sentence SET audio = ? WHERE id = ?', [r.relativePath, r.paragraphId]);
+                    if (r.paragraphId) {
+                        await db.run('UPDATE Sentence SET audio = ? WHERE id = ?', [r.relativePath, r.paragraphId]);
+                        console.log(`[Voice] Saved audio for sentence ${r.paragraphId}: ${r.relativePath}`);
+                    }
                 }
             }
             await db.close();
@@ -443,9 +447,20 @@ app.post('/api/toggle', async (req, res) => {
                 await db.run('UPDATE Asset SET selected = 0, "order" = 0, sentence_id = NULL, paragraph_id = ? WHERE file_path = ?', [pid, relativePath]);
             }
         } else {
+            // Tính duration cho video nếu chưa có
+            const existing = await db.get('SELECT duration, type FROM Asset WHERE file_path = ?', [relativePath]);
+            let duration = existing?.duration || null;
+            if (!duration && existing?.type === 'video') {
+                try {
+                    const { execSync } = await import('child_process');
+                    const fullPath = path.join(MEDIA_DIR, relativePath);
+                    const out = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${fullPath}"`);
+                    duration = parseFloat(out.toString().trim());
+                } catch (e) {}
+            }
             await db.run(
-                'UPDATE Asset SET selected = 1, "order" = ?, sentence_id = ?, paragraph_id = CASE WHEN ? IS NOT NULL THEN NULL ELSE paragraph_id END WHERE file_path = ?',
-                [order || 0, sentenceId || null, sentenceId || null, relativePath]
+                'UPDATE Asset SET selected = 1, "order" = ?, sentence_id = ?, duration = COALESCE(?, duration), paragraph_id = CASE WHEN ? IS NOT NULL THEN NULL ELSE paragraph_id END WHERE file_path = ?',
+                [order || 0, sentenceId || null, duration, sentenceId || null, relativePath]
             );
         }
 

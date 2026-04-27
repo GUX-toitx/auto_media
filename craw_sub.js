@@ -70,6 +70,9 @@ async function initDB() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             paragraph_id INTEGER,
             content TEXT,
+            original_content TEXT,
+            audio TEXT,
+            "order" INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY(paragraph_id) REFERENCES Paragraph(id)
         );
         CREATE TABLE IF NOT EXISTS Asset (
@@ -79,21 +82,12 @@ async function initDB() {
             type TEXT NOT NULL DEFAULT 'video',
             selected INTEGER NOT NULL DEFAULT 0,
             "order" INTEGER NOT NULL DEFAULT 0,
+            duration REAL,
             file_path TEXT,
             FOREIGN KEY(paragraph_id) REFERENCES Paragraph(id),
             FOREIGN KEY(sentence_id) REFERENCES Sentence(id)
         );
     `);
-    await db.run("ALTER TABLE Asset ADD COLUMN type TEXT NOT NULL DEFAULT 'video'").catch(() => {});
-    await db.run("ALTER TABLE Asset ADD COLUMN selected INTEGER NOT NULL DEFAULT 0").catch(() => {});
-    await db.run("ALTER TABLE Paragraph ADD COLUMN audio TEXT").catch(() => {});
-    await db.run('ALTER TABLE Paragraph ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0').catch(() => {});
-    await db.run('ALTER TABLE Asset ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0').catch(() => {});
-    await db.run('ALTER TABLE Asset ADD COLUMN duration REAL').catch(() => {});
-    await db.run('ALTER TABLE Sentence ADD COLUMN original_content TEXT').catch(() => {});
-    await db.run('ALTER TABLE Sentence ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0').catch(() => {});
-    await db.run('ALTER TABLE Sentence ADD COLUMN audio TEXT').catch(() => {});
-    await db.run("ALTER TABLE Post ADD COLUMN audio_uuid TEXT").catch(() => {});
     
     return db;
 }
