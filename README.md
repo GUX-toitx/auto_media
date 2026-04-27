@@ -23,6 +23,7 @@ sudo apt install python3-websockets -y
 - Mở dashboard: http://localhost:3000
 - Xem log:
     pm2 logs auto-media
+    pm2 logs craw-sub
 - Restart:
     pm2 restart auto-media
 - Dừng:

@@ -270,6 +270,7 @@ Nhiệm vụ:
 
 🔥 ĐỊA DANH ƯU TIÊN SỐ 1: Nếu có địa danh (Trung Đông, Mỹ...), BẮT BUỘC dịch sang tiếng Anh và đưa vào Keyword.
 🔥 "ĐỘNG TỪ HÓA": Dùng V-ing hoặc tính từ sự kiện (vd: "stock market crashing", "military helicopter flying").
+🔥 VIẾT TẮT: KHÔNG thêm space vào giữa các chữ viết tắt. Ví dụ: U.S.A không phải U. S. A, U.K không phải U. K.
 
 BẮT BUỘC trả về JSON:
 {
@@ -461,8 +462,8 @@ async function processNextInQueue() {
                     await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [dbParagraphId, kw]);
                 }
 
-                const sentences = scene.text.split(/(?<=\.)/).map(s => s.trim()).filter(Boolean);
-                const originalSentences = (scene.original_text || scene.text).split(/(?<=\.)/).map(s => s.trim()).filter(Boolean);
+                const sentences = scene.text.split(/(?<=\.{1,3} )|(?<=[!?] )|(?<=[。！？])|\n+/).map(s => s.trim()).filter(Boolean);
+                const originalSentences = (scene.original_text || scene.text).split(/(?<=\.{1,3} )|(?<=[!?] )|(?<=[。！？])|\n+/).map(s => s.trim()).filter(Boolean);
                 for (let si = 0; si < sentences.length; si++) {
                     sentenceOrder++;
                     await db.run('INSERT INTO Sentence (paragraph_id, content, original_content, "order") VALUES (?, ?, ?, ?)', [dbParagraphId, sentences[si], originalSentences[si] || scene.original_text || sentences[si], sentenceOrder]);

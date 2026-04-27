@@ -70,6 +70,40 @@
                                         <span class="text-[9px] font-black text-green-400 shrink-0">🎵</span>
                                         <audio controls :src="s.audioUrl" class="h-7 flex-1" preload="metadata"></audio>
                                     </div>
+                                    <!-- Video selected của câu này -->
+                                    <div v-if="(para.videos || []).filter(v => v.selected && v.sentenceId == s.id).length">
+                                        <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="s._videoOpen = !s._videoOpen">
+                                            {{ s._videoOpen ? '▼' : '▶' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos ({{ (para.videos || []).filter(v => v.selected && v.sentenceId == s.id).length }})
+                                        </div>
+                                        <div v-if="s._videoOpen" class="grid grid-cols-4 gap-1 mt-1">
+                                            <div v-for="v in (para.videos || []).filter(v => v.selected && v.sentenceId == s.id).sort((a,b) => a.order - b.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                                <button @click="unselectAsset(v, para, 0, 'video')" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
+                                                <video muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" class="w-full h-20 object-cover rounded mb-1 bg-black"></video>
+                                                <div class="flex gap-1">
+                                                    <button class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</button>
+                                                    <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-green-600 uppercase">✓</button>
+                                                    <button @click="openEdit(v, 'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <!-- Image selected của câu này -->
+                                    <div v-if="(para.images || []).filter(img => img.selected && img.sentenceId == s.id).length">
+                                        <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="s._imageOpen = !s._imageOpen">
+                                            {{ s._imageOpen ? '▼' : '▶' }} <span class="w-1.5 h-1.5 bg-orange-500 rounded-full mx-1"></span> Images ({{ (para.images || []).filter(img => img.selected && img.sentenceId == s.id).length }})
+                                        </div>
+                                        <div v-if="s._imageOpen" class="grid grid-cols-6 gap-1 mt-1">
+                                            <div v-for="img in (para.images || []).filter(img => img.selected && img.sentenceId == s.id).sort((a,b) => a.order - b.order)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                                <button @click="unselectAsset(img, para, 0, 'image')" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
+                                                <img :src="img.url" class="w-full h-14 object-cover rounded mb-1">
+                                                <div class="flex gap-1">
+                                                    <button class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</button>
+                                                    <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-green-600 uppercase">✓</button>
+                                                    <button @click="openEdit(img, 'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -152,96 +186,6 @@
                         </div>
                     </div>
 
-                    <!-- Row 8: Video Selected -->
-                    <div>
-                        <div class="flex items-center text-[10px] font-black text-gray-500 select-none py-1">
-                            <span @click="toggleSection(para, 'videoSelectedOpen')" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
-                                {{ para.videoSelectedOpen ? '▼' : '▶' }}
-                                <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
-                                Video Selected ({{ (para.videos || []).filter(v => v.selected).length }})
-                            </span>
-                            <button @click="openFolder(i+1, 'video')" class="ml-auto text-[9px] px-2 py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black font-bold transition-all">📂 Open Folder</button>
-                        </div>
-                        <div v-if="para.videoSelectedOpen" class="space-y-2 mt-1">
-                            <div v-if="!(para.videos || []).filter(v => v.selected).length" class="text-[10px] text-gray-700 italic">Chưa chọn video nào</div>
-                            <template v-for="s in para.sentences" :key="s.id">
-                                <div v-if="(para.videos || []).filter(v => v.selected && v.sentenceId == s.id).length" class="space-y-1">
-                                    <div class="flex items-center gap-1.5"><button class="text-[9px] font-black px-1.5 py-0.5 rounded bg-green-700 text-green-300">#{{ s.order }}</button><span class="text-[9px] font-black text-green-400">{{ s.content?.slice(0, 50) }}</span></div>
-                                    <div class="grid grid-cols-4 gap-2">
-                                        <div v-for="v in (para.videos || []).filter(v => v.selected && v.sentenceId == s.id).sort((a,b) => a.order - b.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
-                                            <button @click="unselectAsset(v, para, i+1, 'video')" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
-                                            <video muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" class="w-full h-24 object-cover rounded mb-1 bg-black"></video>
-                                            <div class="flex gap-1">
-                                                <span class="text-[9px] font-black py-1 px-2 rounded bg-blue-600 text-white min-w-[24px] text-center">#{{ v.order }}</span>
-                                                <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-1 rounded uppercase bg-green-600 transition-colors">✓</button>
-                                                <button @click="openEdit(v, 'video')" class="text-[9px] font-black py-1 px-2 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </template>
-                            <!-- Assets không gán sentence -->
-                            <div v-if="(para.videos || []).filter(v => v.selected && !v.sentenceId).length" class="space-y-1">
-                                <div class="text-[9px] font-black text-gray-500 px-1">Không gán câu</div>
-                                <div class="grid grid-cols-4 gap-2">
-                                    <div v-for="v in (para.videos || []).filter(v => v.selected && !v.sentenceId).sort((a,b) => a.order - b.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
-                                        <button @click="unselectAsset(v, para, i+1, 'video')" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
-                                        <video muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" class="w-full h-24 object-cover rounded mb-1 bg-black"></video>
-                                        <div class="flex gap-1">
-                                            <span class="text-[9px] font-black py-1 px-2 rounded bg-blue-600 text-white min-w-[24px] text-center">#{{ v.order }}</span>
-                                            <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-1 rounded uppercase bg-green-600 transition-colors">✓</button>
-                                            <button @click="openEdit(v, 'video')" class="text-[9px] font-black py-1 px-2 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Row 9: Image Selected -->
-                    <div>
-                        <div class="flex items-center text-[10px] font-black text-gray-500 select-none py-1">
-                            <span @click="toggleSection(para, 'imageSelectedOpen')" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
-                                {{ para.imageSelectedOpen ? '▼' : '▶' }}
-                                <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
-                                Image Selected ({{ (para.images || []).filter(i => i.selected).length }})
-                            </span>
-                            <button @click="openFolder(i+1, 'image')" class="ml-auto text-[9px] px-2 py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black font-bold transition-all">📂 Open Folder</button>
-                        </div>
-                        <div v-if="para.imageSelectedOpen" class="space-y-2 mt-1">
-                            <div v-if="!(para.images || []).filter(i => i.selected).length" class="text-[10px] text-gray-700 italic">Chưa chọn ảnh nào</div>
-                            <template v-for="s in para.sentences" :key="s.id">
-                                <div v-if="(para.images || []).filter(img => img.selected && img.sentenceId == s.id).length" class="space-y-1">
-                                    <div class="flex items-center gap-1.5"><button class="text-[9px] font-black px-1.5 py-0.5 rounded bg-green-700 text-green-300">#{{ s.order }}</button><span class="text-[9px] font-black text-green-400">{{ s.content?.slice(0, 50) }}</span></div>
-                                    <div class="grid grid-cols-6 gap-2">
-                                        <div v-for="img in (para.images || []).filter(img => img.selected && img.sentenceId == s.id).sort((a,b) => a.order - b.order)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
-                                            <button @click="unselectAsset(img, para, i+1, 'image')" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
-                                            <img :src="img.url" class="w-full h-16 object-cover rounded mb-1">
-                                            <div class="flex gap-1">
-                                                <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white min-w-[20px] text-center">#{{ img.order }}</span>
-                                                <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
-                                                <button @click="openEdit(img, 'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </template>
-                            <div v-if="(para.images || []).filter(img => img.selected && !img.sentenceId).length" class="space-y-1">
-                                <div class="text-[9px] font-black text-gray-500 px-1">Không gán câu</div>
-                                <div class="grid grid-cols-6 gap-2">
-                                    <div v-for="img in (para.images || []).filter(img => img.selected && !img.sentenceId).sort((a,b) => a.order - b.order)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
-                                        <button @click="unselectAsset(img, para, i+1, 'image')" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
-                                        <img :src="img.url" class="w-full h-16 object-cover rounded mb-1">
-                                        <div class="flex gap-1">
-                                            <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white min-w-[20px] text-center">#{{ img.order }}</span>
-                                            <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
-                                            <button @click="openEdit(img, 'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
 
             </div>
         </div>
