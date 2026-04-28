@@ -1,6 +1,7 @@
 node_modules/
 .env
 package-lock.json
+chrome_profile_dvids/
 
 # Credentials
 *_cookies.txt
