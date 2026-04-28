@@ -16,7 +16,7 @@ import archiver from 'archiver';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
 const DB_DIR = process.env.DB_DIR || '/usr/gux/media-team/db';
@@ -30,7 +30,7 @@ const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 app.get('/api/posts', async (req, res) => {
     try {
         const db = await getDb();
-        const posts = await db.all('SELECT id, title FROM Post ORDER BY id DESC');
+        const posts = await db.all('SELECT id, title, status FROM Post ORDER BY id DESC');
         await db.close();
         res.json(posts);
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -617,4 +617,29 @@ app.use(express.static(MEDIA_DIR, {
         res.setHeader('Accept-Ranges', 'bytes'); // Cho phép trình duyệt yêu cầu từng đoạn video để tua
     }
 }));
+// SSE clients
+const sseClients = new Set();
+
+export function pushCrawlStatus(postTitle, status) {
+    const data = JSON.stringify({ postTitle, status });
+    for (const client of sseClients) {
+        client.write(`data: ${data}\n\n`);
+    }
+}
+
+app.get('/api/crawl-status/stream', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+    sseClients.add(res);
+    req.on('close', () => sseClients.delete(res));
+});
+
+app.post('/api/crawl-status/notify', (req, res) => {
+    const { postTitle, status } = req.body;
+    pushCrawlStatus(postTitle, status);
+    res.json({ success: true });
+});
+
 app.listen(PORT, () => console.log(`🚀 http://localhost:${PORT}`));

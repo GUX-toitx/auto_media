@@ -15,7 +15,6 @@
 </head>
 <body class="bg-gray-950 text-gray-100 font-sans h-screen flex overflow-hidden">
 <div id="app" class="flex w-full h-full overflow-hidden">
-
     <!-- SIDEBAR -->
     <aside class="w-64 bg-gray-900 border-r border-gray-800 flex flex-col h-full shrink-0">
         <div class="p-6 border-b border-gray-800 font-bold text-blue-500 tracking-widest text-sm text-center">📂 DỰ ÁN MEDIA</div>
@@ -24,10 +23,14 @@
                 <button @click="selectPost(post)"
                     :class="['sidebar-btn flex-1 text-left px-3 py-2 rounded-lg hover:bg-gray-800 text-xs truncate transition-all font-medium',
                         activePostId === post.id ? '!bg-yellow-500 !text-black border-l-2 !border-yellow-400' : 'text-gray-500 hover:text-white']">
-                    📁 {{ post.title }}
+                    <div class="flex items-center justify-between">
+                        <span class="truncate">📁 {{ post.title }}</span>
+                        <span v-if="post.status === 'crawling'" class="shrink-0 ml-1 animate-spin">⏳</span>
+                    </div>
                 </button>
                 <button @click="deleteProject(post)"
-                    class="shrink-0 bg-red-600 hover:bg-red-500 text-white rounded-lg px-2 transition-all"
+                    v-if="post.status !== 'crawling'"
+                    class="shrink-0 bg-red-600 hover:bg-red-500 text-white rounded-lg px-2 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                     title="Xóa project">🗑️</button>
             </div>
         </div>
@@ -39,11 +42,17 @@
             <header class="fixed top-0 left-64 right-0 z-30 bg-black/80 backdrop-blur border-b border-gray-800 pb-8 pt-8 flex justify-between items-end px-5">
                 <div>
                     <p class="text-blue-500 font-mono text-[10px] mb-2 uppercase tracking-[0.3em]">Workspace / Project</p>
-                    <h2 class="text-4xl font-black text-white">{{ activePost.title }}</h2>
+                    <div class="flex items-center gap-3">
+                        <h2 class="text-4xl font-black text-white">{{ activePost.title }}</h2>
+                    </div>
                 </div>
-                <div class="flex gap-3">
+                <div v-show="posts.find(p => p.id === activePostId)?.status !== 'crawling'" class="flex gap-3">
                     <button @click="createVoice" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
                     <button @click="downloadVoice" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice & Media Selected</button>
+                </div>
+                <div v-if="posts.find(p => p.id === activePostId)?.status === 'crawling'" class="flex items-center gap-2 text-blue-400">
+                    <span class="animate-spin text-2xl">⏳</span>
+                    <span class="text-[13px] font-black uppercase tracking-widest">Crawling...</span>
                 </div>
             </header>
 
@@ -977,6 +986,19 @@ createApp({
         }
 
         loadPosts();
+
+        // SSE: lắng nghe crawl status
+        const sse = new EventSource('/api/crawl-status/stream');
+        sse.onmessage = (e) => {
+            const { postTitle, status } = JSON.parse(e.data);
+            const post = posts.value.find(p => p.title === postTitle || p.title.startsWith(postTitle + '_'));
+            if (post) {
+                post.status = status;
+                if (!status) selectPost(post);
+            } else if (status === 'crawling') {
+                loadPosts();
+            }
+        };
 
         return {
             posts,

@@ -7,8 +7,7 @@ import Parser from 'srt-parser-2';
 import { execSync } from 'child_process';
 import crypto from 'crypto';
 import OpenAI from 'openai';
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
+import { initDB } from './migrate.js';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -16,6 +15,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // 1. CẤU HÌNH API KEYS VÀ ĐƯỜNG DẪN
 // ==========================================
 const BASE_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
+const PORT = process.env.PORT || 3000;
 const SPREADSHEET_ID = '1K596bCoqZcNx0hvZbJitwHhIYTANpgsI8KqrWsvkRSs';
 
 const OPENAI_KEY = process.env.OPENAI_KEY; 
@@ -33,64 +33,6 @@ const serviceAccountAuth = new JWT({
     key: creds.private_key,
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
 });
-
-// ==========================================
-// KHỞI TẠO DATABASE SQLITE
-// ==========================================
-async function initDB() {
-    const DB_DIR = process.env.DB_DIR || path.join(BASE_DIR, 'db');
-    const dbPath = path.join(DB_DIR, 'media_system.sqlite');
-    const db = await open({
-        filename: dbPath,
-        driver: sqlite3.Database
-    });
-
-    await db.exec(`
-        CREATE TABLE IF NOT EXISTS Post (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT UNIQUE,
-            audio_uuid TEXT
-        );
-        CREATE TABLE IF NOT EXISTS Paragraph (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            post_id INTEGER,
-            content TEXT,
-            original_content TEXT,
-            audio TEXT,
-            "order" INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY(post_id) REFERENCES Post(id)
-        );
-        CREATE TABLE IF NOT EXISTS Keyword (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            paragraph_id INTEGER,
-            content TEXT,
-            FOREIGN KEY(paragraph_id) REFERENCES Paragraph(id)
-        );
-        CREATE TABLE IF NOT EXISTS Sentence (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            paragraph_id INTEGER,
-            content TEXT,
-            original_content TEXT,
-            audio TEXT,
-            "order" INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY(paragraph_id) REFERENCES Paragraph(id)
-        );
-        CREATE TABLE IF NOT EXISTS Asset (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            paragraph_id INTEGER NULL,
-            sentence_id INTEGER NULL,
-            type TEXT NOT NULL DEFAULT 'video',
-            selected INTEGER NOT NULL DEFAULT 0,
-            "order" INTEGER NOT NULL DEFAULT 0,
-            duration REAL,
-            file_path TEXT,
-            FOREIGN KEY(paragraph_id) REFERENCES Paragraph(id),
-            FOREIGN KEY(sentence_id) REFERENCES Sentence(id)
-        );
-    `);
-    
-    return db;
-}
 
 // ==========================================
 // 2. HÀM TẢI STOCK (ĐA NGUỒN)
@@ -416,6 +358,13 @@ async function processNextInQueue() {
 
             // 🟢 LƯU DATABASE: Tạo Post riêng cho từng ngôn ngữ
             await db.run('INSERT OR IGNORE INTO Post (title) VALUES (?)', [postTitle]);
+            await db.run('UPDATE Post SET status = ? WHERE title = ?', ['crawling', postTitle]);
+            // Notify dashboard
+            fetch(`http://localhost:${PORT}/api/crawl-status/notify`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ postTitle, status: 'crawling' })
+            }).catch(() => {});
             const postRecord = await db.get('SELECT id FROM Post WHERE title = ?', [postTitle]);
             const dbPostId = postRecord.id;
 
@@ -496,10 +445,23 @@ async function processNextInQueue() {
 
         targetRow.set('Trạng thái', 'DONE');
         targetRow.set('Thư mục Lưu trữ', targetDir);
+        await db.run('UPDATE Post SET status = NULL WHERE title LIKE ?', [`${projectId}%`]);
+        // Notify dashboard
+        fetch(`http://localhost:${PORT}/api/crawl-status/notify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postTitle: projectId, status: null })
+        }).catch(() => {});
     } catch (e) {
         console.error(`[LỖI] ${projectId}:`, e.message);
         targetRow.set('Trạng thái', 'ERROR');
         targetRow.set('Ghi chú', e.message);
+        await db.run('UPDATE Post SET status = NULL WHERE title LIKE ?', [`${projectId}%`]);
+        fetch(`http://localhost:${PORT}/api/crawl-status/notify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postTitle: projectId, status: null })
+        }).catch(() => {});
     }
     await targetRow.save();
     return true; 

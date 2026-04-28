@@ -14,6 +14,10 @@ test/
 
 # Output & assets
 noidung_*/
+outsources/
+*.db
+*.sqlite
+database/
 *.mp4
 *.mp3
 *.wav

@@ -9,6 +9,9 @@ npm install
 sudo apt install python3-certifi python3-brotli -y
 sudo apt install python3-websockets -y
 
+# Khởi tạo Database (chạy 1 lần đầu)
+    node migrate.js
+
 # Chạy dự án
 - Luồng thứ nhất chạy để lấy video và sub từ youtube:
     pm2 start craw-sub
@@ -32,6 +35,8 @@ sudo apt install python3-websockets -y
     pm2 start auto-media
 - Xóa khỏi pm2:
     pm2 delete auto-media
+- Xóa và start lại:
+    pm2 delete all && pm2 start ecosystem.config.cjs
 
 # Lưu ý khi chạy lần đầu với Playwright:
 1. chạy npx playwright install chromium để tải chromium 
