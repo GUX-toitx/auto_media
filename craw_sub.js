@@ -8,6 +8,7 @@ import { execSync } from 'child_process';
 import crypto from 'crypto';
 import OpenAI from 'openai';
 import { initDB } from './migrate.js';
+import { fetchFromDvidsBot } from './dvidsCrawler.js';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -142,13 +143,22 @@ async function fetchFromPixabay(keyword, type, targetDir, neededCount) {
 async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 5) {
     if (!keyword) return 0;
     let totalDownloaded = 0;
-    const providers = [{ name: 'Storyblocks', fetcher: fetchFromStoryblocks }, { name: 'Pexels', fetcher: fetchFromPexels }];
+    
+    // Đã nạp thêm thợ săn DVIDS vào danh sách
+    const providers = [
+        { name: 'Storyblocks', fetcher: fetchFromStoryblocks }, 
+        { name: 'Pexels', fetcher: fetchFromPexels },
+        { name: 'DVIDS', fetcher: fetchFromDvidsBot }
+    ];
+    
     console.log(`   -> [${type.toUpperCase()}] Tìm "${keyword}" | Mỗi nguồn: ${countPerSource}`);
+    
     for (const provider of providers) {
         const got = await provider.fetcher(keyword, type, targetDir, countPerSource);
         console.log(`      [${provider.name}] Tải được: ${got}/${countPerSource} ${type}`);
         totalDownloaded += got;
     }
+    
     console.log(`   -> [${type.toUpperCase()}] "${keyword}" xong: ${totalDownloaded} ${type}`);
     return totalDownloaded;
 }
