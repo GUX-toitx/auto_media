@@ -48,6 +48,7 @@
                 </div>
                 <div v-show="posts.find(p => p.id === activePostId)?.status !== 'crawling'" class="flex gap-3">
                     <button @click="createVoice" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
+                    <button @click="retryDownloadVoice" class="bg-yellow-600 hover:bg-yellow-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">⬇️ Tải lại Voice</button>
                     <button @click="downloadVoice" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice & Media Selected</button>
                 </div>
                 <div v-if="posts.find(p => p.id === activePostId)?.status === 'crawling'" class="flex items-center gap-2 text-blue-400">
@@ -897,6 +898,7 @@ createApp({
 
             if (r.batch_uuid) {
                 voiceModal.value.batchUuid = r.batch_uuid;
+                await loadPosts();
             } else {
                 alert('❌ Tạo không thành công!');
             }
@@ -913,8 +915,8 @@ createApp({
         const pollingTimer = ref(null);
         function startPollingVoice(batchUuid, sentenceCount) {
             if (pollingTimer.value) clearInterval(pollingTimer.value);
-            const estimatedMs = sentenceCount * 1000;
-            console.log(`[Voice] ước tính ${sentenceCount} câu x 5s = ${estimatedMs/1000}s, bắt đầu poll sau đó`);
+            const estimatedMs = sentenceCount * 500;
+            console.log(`[Voice] ước tính ${sentenceCount} câu x 0.5s = ${estimatedMs/1000}s, bắt đầu poll sau đó`);
 
             setTimeout(() => {
                 const poll = async () => {
@@ -932,8 +934,26 @@ createApp({
                     }
                 };
                 poll();
-                pollingTimer.value = setInterval(poll, 8000);
+                pollingTimer.value = setInterval(poll, 5000);
             }, estimatedMs);
+        }
+
+        async function retryDownloadVoice() {
+            const post = posts.value.find(p => p.id === activePostId.value);
+            if (!post?.audio_uuid) return showToast('❌ Chưa có batch UUID, hãy tạo voice trước');
+            showToast('⏳ Đang kiểm tra voice...');
+            const res = await fetch('/api/check-download-voice', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ batchUuid: post.audio_uuid, postId: activePostId.value, videoId: activeProjectId.value })
+            });
+            const r = await res.json();
+            if (r.status === 'OK') {
+                showToast('🎉 Voice đã tải về thành công!');
+                await selectPost({ id: activePostId.value });
+            } else {
+                showToast('⏳ Voice chưa tạo xong, thử lại sau!');
+            }
         }
 
         async function aiGenerate(para, type) {
@@ -1034,6 +1054,7 @@ createApp({
             startCropResize,
             submitEdit,
             createVoice,
+            retryDownloadVoice,
             submitCreateVoice,
             genAudio,
             downloadVoice,
