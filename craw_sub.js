@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import OpenAI from 'openai';
 import { initDB } from './migrate.js';
 import { fetchFromDvidsBot } from './dvidsCrawler.js';
+import { fetchFromBellingcatBot } from './bellingcatCrawler.js';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -146,9 +147,10 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
     
     // Đã nạp thêm thợ săn DVIDS vào danh sách
     const providers = [
-        { name: 'Storyblocks', fetcher: fetchFromStoryblocks }, 
+        { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
         { name: 'Pexels', fetcher: fetchFromPexels },
-        { name: 'DVIDS', fetcher: fetchFromDvidsBot }
+        { name: 'DVIDS (Bot)', fetcher: fetchFromDvidsBot },
+        { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot }
     ];
     
     console.log(`   -> [${type.toUpperCase()}] Tìm "${keyword}" | Mỗi nguồn: ${countPerSource}`);
