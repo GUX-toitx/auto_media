@@ -762,18 +762,25 @@ createApp({
         }
 
         function startTrimDrag(e, handle) {
+            let dragged = false;
             const move = (ev) => {
+                dragged = true;
                 const t = getTimeFromEvent(ev);
                 if (handle === 'start') {
                     editModal.value.start = Math.min(t, editModal.value.end - 0.1);
                     if (editVideoRef.value) editVideoRef.value.currentTime = editModal.value.start;
                 } else {
                     editModal.value.end = Math.max(t, editModal.value.start + 0.1);
-                    if (editVideoRef.value) editVideoRef.value.currentTime = editModal.value.end;
                 }
                 editModal.value.duration_val = Math.round((editModal.value.end - editModal.value.start) * 10) / 10;
             };
-            const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+            const up = () => {
+                document.removeEventListener('mousemove', move);
+                document.removeEventListener('mouseup', up);
+                if (dragged) {
+                    timelineRef.value?.addEventListener('click', e => e.stopImmediatePropagation(), { once: true, capture: true });
+                }
+            };
             document.addEventListener('mousemove', move);
             document.addEventListener('mouseup', up);
         }
