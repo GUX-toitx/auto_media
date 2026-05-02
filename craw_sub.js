@@ -10,6 +10,8 @@ import OpenAI from 'openai';
 import { initDB } from './migrate.js';
 import { fetchFromDvidsBot } from './dvidsCrawler.js';
 import { fetchFromBellingcatBot } from './bellingcatCrawler.js';
+import { fetchFromReutersBot } from './reutersCrawler.js';
+import { fetchFromApnewsBot } from './apnewsCrawler.js';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -150,7 +152,9 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
         { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
         { name: 'Pexels', fetcher: fetchFromPexels },
         { name: 'DVIDS (Bot)', fetcher: fetchFromDvidsBot },
-        { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot }
+        { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot },
+        { name: 'Reuters (Bot)', fetcher: fetchFromReutersBot },
+        { name: 'AP News (Bot)', fetcher: fetchFromApnewsBot }
     ];
     
     console.log(`   -> [${type.toUpperCase()}] Tìm "${keyword}" | Mỗi nguồn: ${countPerSource}`);
