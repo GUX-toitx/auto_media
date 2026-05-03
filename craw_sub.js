@@ -13,6 +13,7 @@ import { fetchFromBellingcatBot } from './bellingcatCrawler.js';
 import { fetchFromReutersBot } from './reutersCrawler.js';
 import { fetchFromApnewsBot } from './apnewsCrawler.js';
 import { fetchFromAlJazeeraBot } from './aljazeeraCrawler.js';
+import { fetchFromCnnBot } from './cnnCrawler.js';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -150,13 +151,14 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
     
     // Đã nạp thêm thợ săn DVIDS vào danh sách
     const providers = [
-        // { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
-        // { name: 'Pexels', fetcher: fetchFromPexels },
-        // { name: 'DVIDS (Bot)', fetcher: fetchFromDvidsBot },
-        // { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot },
-        // { name: 'Reuters (Bot)', fetcher: fetchFromReutersBot },
-        // { name: 'AP News (Bot)', fetcher: fetchFromApnewsBot },
-        { name: 'Al Jazeera (Bot)', fetcher: fetchFromAlJazeeraBot }
+        { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
+        { name: 'Pexels', fetcher: fetchFromPexels },
+        { name: 'DVIDS (Bot)', fetcher: fetchFromDvidsBot },
+        { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot },
+        { name: 'Reuters (Bot)', fetcher: fetchFromReutersBot },
+        { name: 'AP News (Bot)', fetcher: fetchFromApnewsBot },
+        { name: 'Al Jazeera (Bot)', fetcher: fetchFromAlJazeeraBot },
+        { name: 'CNN (Bot)', fetcher: fetchFromCnnBot },
     ];
     
     console.log(`   -> [${type.toUpperCase()}] Tìm "${keyword}" | Mỗi nguồn: ${countPerSource}`);
