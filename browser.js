@@ -1,25 +1,40 @@
 import { chromium } from 'playwright';
 import path from 'path';
 import fs from 'fs';
+import sqlite3 from 'sqlite3';
+import { open } from 'sqlite';
 import 'dotenv/config';
 
 const CHROME_PATH = process.env.CUSTOM_CHROME === 'true'
     ? path.join(process.env.SETTING_DIR, 'chrome-mac-arm64', 'Google Chrome for Testing.app', 'Contents', 'MacOS', 'Google Chrome for Testing')
     : undefined;
-const USER_DATA_DIR = path.join(process.env.SETTING_DIR || path.join(process.env.HOME, '.cache', 'ms-playwright'), 'chrome-profile');
+const SETTING_DIR = process.env.SETTING_DIR || path.join(process.env.HOME, '.cache', 'ms-playwright');
 
-let _browserContext = null;
+const DB_PATH = path.join(process.env.DB_DIR || path.join(process.env.MEDIA_DIR || '/usr/gux/media-team', 'db'), 'media_system.sqlite');
+const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 
-export async function getBrowser() {
-    if (_browserContext) return _browserContext;
-    _browserContext = await chromium.launchPersistentContext(USER_DATA_DIR, {
+async function getNextProfile() {
+    const db = await getDb();
+    const profile = await db.get('SELECT id, profile_dir FROM ChromeProfile ORDER BY updated_at ASC LIMIT 1');
+    await db.close();
+    if (!profile) return null;
+    return { ...profile, profile_dir: path.join(SETTING_DIR, profile.profile_dir) };
+}
+
+async function markProfileUsed(id) {
+    const db = await getDb();
+    await db.run('UPDATE ChromeProfile SET updated_at = ? WHERE id = ?', [Date.now(), id]);
+    await db.close();
+}
+
+export async function getBrowser(profileDir) {
+    const userDataDir = profileDir || path.join(SETTING_DIR, 'chrome-profile');
+    return chromium.launchPersistentContext(userDataDir, {
         executablePath: CHROME_PATH,
         headless: false,
         args: ['--disable-blink-features=AutomationControlled'],
         viewport: { width: 1280, height: 900 },
     });
-    _browserContext.on('close', () => { _browserContext = null; });
-    return _browserContext;
 }
 
 export async function generateFlowImage(keyword, saveDirPath, content = '', type = 'image', count = 2, lang = 'en', customPrompt = '', ratio = '16:9', videoMode = 'Frames', veo = 'Fast', selectedImages = []) {
@@ -34,7 +49,12 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
     const fullPrompt = promptTemplate ? `${promptTemplate} ${content}` : content || keyword;
     if (!fs.existsSync(saveDirPath)) fs.mkdirSync(saveDirPath, { recursive: true });
 
-    const ctx = await getBrowser();
+    // Lấy profile có updated_at cũ nhất từ DB
+    const profile = await getNextProfile();
+    const profileDir = profile?.profile_dir || path.join(SETTING_DIR, 'chrome-profile');
+    const profileId = profile?.id;
+
+    const ctx = await getBrowser(profileDir);
     const page = ctx.pages()[0] || await ctx.newPage();
 
     try {
@@ -42,11 +62,48 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
         await page.goto('https://labs.google/fx/tools/flow', { waitUntil: 'networkidle', timeout: 30000 });
         await page.waitForTimeout(3000);
 
-        // Click New project (icon add_2, xpath: /html/body/div[1]/div[2]/div/div/button)
+        // Nếu bị redirect về accounts.google.com (chọn account hoặc login)
+        if (page.url().includes('accounts.google.com')) {
+            console.log('[Flow] Đang xử lý xác thực Google...');
+
+            // Thử click vào account đã đăng nhập (trang chọn account)
+            const accountBtn = page.locator('li[data-authuser], div[data-email], [data-identifier]').first();
+            if (await accountBtn.count()) {
+                await accountBtn.click();
+                console.log('[Flow] Đã chọn account');
+            }
+
+            // Chờ cho đến khi thoát khỏi accounts.google.com
+            await page.waitForURL(url => !url.toString().includes('accounts.google.com'), { timeout: 120000 });
+            await page.waitForTimeout(3000);
+            console.log('[Flow] Xác thực xong, tiếp tục...');
+        }
+
+        // Nếu có nút add_2 thì click tạo project mới
         const newBtn = page.locator('button:has(i.google-symbols)').filter({ hasText: /add_2/ }).first();
         if (await newBtn.count()) {
             await newBtn.click();
             await page.waitForTimeout(8000);
+            // Nếu xuất hiện confirm dialog tạo mới, click tiếp
+            const createBtn = page.locator('button:has(i.google-symbols)').filter({ hasText: /add_2/ }).last();
+            if (await createBtn.count() > 1) {
+                await createBtn.click();
+                await page.waitForTimeout(5000);
+            }
+        } else {
+            // Landing page: click Create with Flow
+            await page.locator('button').nth(0).click();
+            await page.waitForURL(url => !url.toString().endsWith('/flow') && !url.toString().endsWith('/flow/'), { timeout: 5000 }).catch(() => {});
+            await page.waitForTimeout(5000);
+            console.log('[Flow] Đã vào tool từ landing page');
+            // Chờ add_2 xuất hiện rồi click
+            await page.waitForSelector('button i.google-symbols', { timeout: 5000 }).catch(() => {});
+            await page.waitForTimeout(2000);
+            const newBtnAfter = page.locator('button:has(i.google-symbols)').filter({ hasText: /add_2/ }).first();
+            if (await newBtnAfter.count()) {
+                await newBtnAfter.click();
+                await page.waitForTimeout(8000);
+            }
         }
 
         // Mở modal settings (button chứa cả ratio và count, ví dụ: "Videocrop_16_9x2")
@@ -61,7 +118,8 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
             await page.waitForTimeout(300);
 
             // Chọn số lượng
-            const countBtn = page.locator('button[role=tab]', { hasText: `x${count}` });
+            const countText = count === 1 ? '1x' : `x${count}`;
+            const countBtn = page.locator('button[role=tab]', { hasText: countText });
             if (await countBtn.count()) await countBtn.first().click();
             await page.waitForTimeout(300);
 
@@ -236,14 +294,50 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
     } finally {
         await page.close().catch(() => {});
         try { await ctx.close(); } catch (_) {}
-        _browserContext = null;
+        if (profileId) await markProfileUsed(profileId);
     }
 }
 
-// Chạy trực tiếp để test
+// Chạy trực tiếp để đăng nhập profile
+// node browser.js <profile_dir> [email] [password]
 if (process.argv[1]?.endsWith('browser.js')) {
-    const ctx = await getBrowser();
+    const profileDirArg = process.argv[2];
+    const email = process.argv[3] || null;
+    const password = process.argv[4] || null;
+
+    const profileDir = profileDirArg
+        ? (path.isAbsolute(profileDirArg) ? profileDirArg : path.join(SETTING_DIR, profileDirArg))
+        : path.join(SETTING_DIR, 'chrome-profile');
+
+    if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
+
+    const profileDirName = path.basename(profileDir);
+    console.log('[OK] Đang mở profile: ' + profileDirName + (email ? ` (${email})` : ''));
+    const ctx = await getBrowser(profileDir);
     const page = ctx.pages()[0] || await ctx.newPage();
-    await page.goto('https://www.google.com');
-    console.log('[OK] Chrome áo đã mở. Nhấn Ctrl+C để đóng.');
+    await page.goto('https://accounts.google.com');
+
+    if (email) {
+        try {
+            await page.waitForSelector('input[type="email"]', { timeout: 10000 });
+            await page.fill('input[type="email"]', email);
+            await page.click('#identifierNext, button:has-text("Next"), button:has-text("Tiếp theo")');
+
+            if (password) {
+                await page.waitForSelector('input[type="password"]', { timeout: 10000 });
+                await page.fill('input[type="password"]', password);
+                await page.click('#passwordNext, button:has-text("Next"), button:has-text("Tiếp theo")');
+            }
+            console.log('[OK] Đã điền email/password, chờ xác nhận...');
+
+            // Chờ đăng nhập xong (URL chuyển sang myaccount hoặc google.com)
+            await page.waitForURL(url => !url.toString().includes('accounts.google.com'), { timeout: 60000 });
+            console.log('[OK] Đăng nhập thành công, bạn có thể tắt trình duyệt.');
+        } catch (e) {
+            console.log('[WARN] Tự điền thất bại:', e.message);
+        }
+    }
+
+    await ctx.waitForEvent('close').catch(() => {});
+    process.exit(0);
 }

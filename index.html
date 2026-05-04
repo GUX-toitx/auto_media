@@ -17,7 +17,10 @@
 <div id="app" class="flex w-full h-full overflow-hidden">
     <!-- SIDEBAR -->
     <aside class="w-64 bg-gray-900 border-r border-gray-800 flex flex-col h-full shrink-0">
-        <div class="p-6 border-b border-gray-800 font-bold text-blue-500 tracking-widest text-sm text-center">📂 DỰ ÁN MEDIA</div>
+        <div class="p-3 border-b border-gray-800 flex gap-2">
+            <button @click="page = 'posts'" :class="['flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all', page === 'posts' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white']">📂 Dự án</button>
+            <button @click="openProfilePage" :class="['flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all', page === 'profiles' ? 'bg-green-600 text-white shadow-lg shadow-green-500/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white']">🧑💻 Profiles</button>
+        </div>
         <div class="flex-1 overflow-y-auto p-4 space-y-1">
             <div v-for="post in posts" :key="post.id" class="flex items-stretch gap-1">
                 <button @click="selectPost(post)"
@@ -37,8 +40,7 @@
     </aside>
 
     <!-- MAIN -->
-    <main class="flex-1 overflow-y-auto px-5 bg-black/20">
-        <div v-if="activePost" class="px-[30px] mx-auto">
+    <main v-if="page === 'posts'" class="flex-1 overflow-y-auto px-5 bg-black/20">
             <header class="fixed top-0 left-64 right-0 z-30 bg-black/80 backdrop-blur border-b border-gray-800 pb-8 pt-8 flex justify-between items-end px-5">
                 <div>
                     <p class="text-blue-500 font-mono text-[10px] mb-2 uppercase tracking-[0.3em]">Workspace / Project</p>
@@ -475,6 +477,58 @@
         </div>
     </div>
 
+    <!-- CHROME PROFILE PAGE -->
+    <div v-if="page === 'profiles'" class="flex-1 overflow-y-auto px-8 py-8 bg-black/20 space-y-6">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <h2 class="text-2xl font-black text-white">🧑💻 Chrome Profiles</h2>
+                <span class="text-[11px] text-gray-500">Mỗi profile = 1 tài khoản Google, hệ thống tự xoay vòng theo lần dùng cuối</span>
+            </div>
+            <button @click="profileModal.addOpen = true" class="px-4 py-2 rounded-lg text-[11px] font-bold uppercase bg-green-600 hover:bg-green-500 transition-all">➕ Tạo mới</button>
+        </div>
+        <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+            <table class="w-full text-[12px]">
+                <thead>
+                    <tr class="border-b border-gray-800 text-gray-500 uppercase tracking-widest text-[10px]">
+                        <th class="text-left px-4 py-3">Profile</th>
+                        <th class="text-left px-4 py-3">Email</th>
+                        <th class="text-left px-4 py-3">Dùng lần cuối</th>
+                        <th class="px-4 py-3"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-if="!profileModal.list.length">
+                        <td colspan="5" class="px-4 py-6 text-center text-gray-600 italic">Chưa có profile nào</td>
+                    </tr>
+                    <tr v-for="p in profileModal.list" :key="p.id" class="border-b border-gray-800/50 hover:bg-gray-800/30">
+                        <td class="px-4 py-3 font-mono text-green-400">{{ p.profile_dir }}</td>
+                        <td class="px-4 py-3 text-gray-300">{{ p.email || '-' }}</td>
+                        <td class="px-4 py-3 text-gray-500">{{ p.updated_at ? new Date(p.updated_at).toLocaleString('vi') : 'Chưa dùng' }}</td>
+                        <td class="px-4 py-3 text-right">
+                            <button @click="loginProfile(p)" :disabled="p._logging || !!p.profile_dir" class="bg-blue-600/80 hover:bg-blue-500 disabled:opacity-40 text-white text-[10px] px-2 py-1 rounded mr-1">{{ p._logging ? "Đang mở..." : "🔑 Đăng nhập" }}</button><button @click="deleteProfile(p)" class="bg-red-600/80 hover:bg-red-500 text-white text-[10px] px-2 py-1 rounded">Xóa</button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ADD PROFILE MODAL -->
+    <div v-if="profileModal.addOpen" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="profileModal.addOpen = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[500px] space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-lg font-black text-white">➕ Tạo mới Profiles</h3>
+                <button @click="profileModal.addOpen = false" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+            <p class="text-[10px] text-gray-500">Mỗi dòng 1 tài khoản, định dạng: <span class="font-mono text-gray-300">email|password</span></p>
+            <textarea v-model="profileModal.bulkText" rows="8" placeholder="email1@gmail.com|password1&#10;email2@gmail.com|password2"
+                class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-[12px] font-mono text-gray-200 outline-none focus:border-green-500 resize-none"></textarea>
+            <div class="flex gap-3 justify-end">
+                <button @click="profileModal.addOpen = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
+                <button @click="bulkAddProfiles" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-green-600 hover:bg-green-500 transition-all">✅ Lưu</button>
+            </div>
+        </div>
+    </div>
     <!-- TOAST -->
     <div v-if="toast" class="fixed top-6 right-6 z-50 bg-blue-600 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-lg">{{ toast }}</div>
 </div>
@@ -493,6 +547,48 @@ createApp({
         const uploadModal = ref({ open: false, type: '', para: null, files: [], dragging: false, uploading: false });
         const aiModal = ref({ open: false, type: '', para: null, gid: '', count: 2, content: '', keywords: [], prompt: '', ratio: '16:9', videoMode: 'Frames', veo: 'Fast' });
         const sentenceModal = ref({ open: false, asset: null, para: null, type: '', sentences: [] });
+        const page = ref('posts');
+        const profileModal = ref({ list: [], bulkText: '', cmds: [], addOpen: false });
+
+        async function openProfilePage() {
+            const res = await fetch('/api/chrome-profiles');
+            profileModal.value.list = await res.json();
+            profileModal.value.bulkText = '';
+            profileModal.value.cmds = [];
+            page.value = 'profiles';
+        }
+
+        async function bulkAddProfiles() {
+            const lines = profileModal.value.bulkText.trim().split('\n').filter(l => l.trim());
+            if (!lines.length) return showToast('⚠️ Nhập ít nhất 1 dòng!');
+            for (const line of lines) {
+                const [email, password] = line.split('|').map(s => s.trim());
+                if (!email) continue;
+                await fetch('/api/chrome-profiles', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password: password || '' })
+                });
+            }
+            const res = await fetch('/api/chrome-profiles');
+            profileModal.value.list = await res.json();
+            profileModal.value.bulkText = '';
+            profileModal.value.addOpen = false;
+            showToast(`✅ Đã lưu ${lines.length} profile!`);
+        }
+
+        async function deleteProfile(p) {
+            if (!confirm(`Xóa profile "${p.profile_dir}"?`)) return;
+            await fetch(`/api/chrome-profiles/${p.id}/delete`, { method: 'POST' });
+            const res = await fetch('/api/chrome-profiles');
+            profileModal.value.list = await res.json();
+        }
+
+        async function loginProfile(p) {
+            p._logging = true;
+            await fetch(`/api/chrome-profiles/${p.id}/login`, { method: 'POST' });
+            showToast(`🔑 Đã mở trình duyệt cho ${p.email || p.profile_dir}, đăng nhập xong thì tắt đi!`, 8000);
+            p._logging = false;
+        }
 
         const activeProjectId = computed(() => {
             if (!activePost.value) return '';
@@ -1028,6 +1124,7 @@ createApp({
         };
 
         return {
+            page,
             posts,
             activePostId,
             activePost,
@@ -1072,6 +1169,11 @@ createApp({
             aiModal,
             sentenceModal,
             selectForSentence,
+            profileModal,
+            openProfilePage,
+            bulkAddProfiles,
+            deleteProfile,
+            loginProfile,
             doSelect,
             reloadParaAssets,
             uploadAsset,

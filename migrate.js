@@ -55,6 +55,13 @@ export async function initDB() {
             FOREIGN KEY(paragraph_id) REFERENCES Paragraph(id),
             FOREIGN KEY(sentence_id) REFERENCES Sentence(id)
         );
+        CREATE TABLE IF NOT EXISTS ChromeProfile (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_dir TEXT,
+            email TEXT,
+            password TEXT,
+            updated_at INTEGER NOT NULL DEFAULT 0
+        );
     `);
 
     // ALTER migrations (bỏ qua nếu cột đã tồn tại)

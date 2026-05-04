@@ -602,6 +602,64 @@ app.post('/api/ai-generate', async (req, res) => {
     })().catch(e => console.error('[AI Generate] Error:', e.message));
 });
 
+// API: Mở trình duyệt đăng nhập cho profile
+app.post('/api/chrome-profiles/:id/login', async (req, res) => {
+    try {
+        const db = await getDb();
+        const profile = await db.get('SELECT id, email, password FROM ChromeProfile WHERE id = ?', [req.params.id]);
+        await db.close();
+        if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+        const profileDirName = `chrome-profile-${profile.id}`;
+        const args = ['browser.js', profileDirName];
+        if (profile.email) args.push(profile.email);
+        if (profile.password) args.push(profile.password);
+
+        // Cập nhật profile_dir vào DB
+        const db2 = await getDb();
+        await db2.run('UPDATE ChromeProfile SET profile_dir = ? WHERE id = ?', [profileDirName, profile.id]);
+        await db2.close();
+
+        const child = spawn('node', args, { stdio: 'inherit' });
+        child.unref();
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API: ChromeProfile CRUD
+app.get('/api/chrome-profiles', async (req, res) => {
+    try {
+        const db = await getDb();
+        const profiles = await db.all('SELECT id, profile_dir, email, updated_at FROM ChromeProfile ORDER BY updated_at DESC');
+        await db.close();
+        res.json(profiles);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/chrome-profiles', async (req, res) => {
+    const { email, password } = req.body;
+    try {
+        const db = await getDb();
+        await db.run('INSERT INTO ChromeProfile (email, password, updated_at) VALUES (?, ?, 0)', [email || null, password || null]);
+        await db.close();
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/chrome-profiles/:id/delete', async (req, res) => {
+    try {
+        const db = await getDb();
+        const profile = await db.get('SELECT profile_dir FROM ChromeProfile WHERE id = ?', [req.params.id]);
+        await db.run('DELETE FROM ChromeProfile WHERE id = ?', [req.params.id]);
+        await db.close();
+        if (profile?.profile_dir) {
+            const fullPath = path.join(process.env.SETTING_DIR, profile.profile_dir);
+            if (fs.existsSync(fullPath)) fs.rmSync(fullPath, { recursive: true, force: true });
+        }
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // API: Lấy prompt theo type và lang
 app.get('/api/get-prompt', (req, res) => {
     const { type, lang } = req.query;

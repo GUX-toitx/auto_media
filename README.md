@@ -47,6 +47,15 @@ sudo apt install python3-websockets -y
         CUSTOM_CHROME=true
         SETTING_DIR=đường dẫn đến thư mục chứa chromium
 2. chạy node browser.js để đăng nhập vào chrome Playwright, sau khi đăng nhập xong thì tắt trình duyệt đi là được, lần sau chạy sẽ không cần đăng nhập nữa vì đã lưu session vào user data dir rồi
+
+# Quản lý nhiều tài khoản Google cho Flow
+- Mỗi tài khoản Google cần 1 profile riêng, hệ thống sẽ tự xoay vòng theo tài khoản lâu dùng nhất
+- Tạo profile và đăng nhập:
+    node browser.js                              -> profile mặc định (chrome-profile)
+    node browser.js 2 email@gmail.com matkhau    -> chrome-profile-2
+    node browser.js 3 email@gmail.com matkhau    -> chrome-profile-3
+- Email/password được lưu vào DB để biết profile nào dùng tài khoản nào
+- Sau khi tạo profile mới, trình duyệt tự mở vào trang đăng nhập Google -> đăng nhập xong tắt đi là được
 3. chạy như bình thường click button gen ai rồi chọn số lượng ấn gen rồi ngồi nhìn thôi
 
 4. Promt để trong prompts, chỉnh sửa promt vào đây, prompt sẽ tự động thêm đoạn content của paragraph đẻ gửi lên Flow
