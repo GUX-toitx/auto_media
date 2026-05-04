@@ -149,7 +149,6 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
     if (!keyword) return 0;
     let totalDownloaded = 0;
     
-    // Đã nạp thêm thợ săn DVIDS vào danh sách
     const providers = [
         { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
         { name: 'Pexels', fetcher: fetchFromPexels },
@@ -163,10 +162,22 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
     
     console.log(`   -> [${type.toUpperCase()}] Tìm "${keyword}" | Mỗi nguồn: ${countPerSource}`);
     
-    for (const provider of providers) {
+    // Gói các nhà cung cấp thành các Task
+    const tasks = providers.map(provider => async () => {
         const got = await provider.fetcher(keyword, type, targetDir, countPerSource);
         console.log(`      [${provider.name}] Tải được: ${got}/${countPerSource} ${type}`);
-        totalDownloaded += got;
+        return got;
+    });
+
+    // CHẠY ĐA LUỒNG: Chạy tối đa 4 nguồn cùng lúc. 
+    // Storyblocks/Pexels chạy cực nhanh sẽ xong trước, nhường RAM cho các Bot báo chí.
+    const results = await runConcurrently(tasks, 8); 
+
+    // Tổng hợp kết quả
+    for (const res of results) {
+        if (res.status === 'fulfilled') {
+            totalDownloaded += res.value;
+        }
     }
     
     console.log(`   -> [${type.toUpperCase()}] "${keyword}" xong: ${totalDownloaded} ${type}`);
@@ -266,6 +277,31 @@ async function translateText(text, targetLang) {
 }
 
 // ==========================================
+// HÀM HỖ TRỢ CHẠY ĐA LUỒNG CÓ KIỂM SOÁT (CHỐNG SẬP RAM SERVER)
+// ==========================================
+async function runConcurrently(tasks, limit) {
+    const results = [];
+    const executing = new Set();
+    
+    for (const task of tasks) {
+        const p = Promise.resolve().then(() => task());
+        results.push(p);
+        
+        // Bọc lỗi lại để Promise.race không bị nổ tung khi có 1 bot chết giữa chừng
+        const safeP = p.catch(() => {}); 
+        
+        executing.add(safeP);
+        const clean = () => executing.delete(safeP);
+        safeP.then(clean);
+        
+        if (executing.size >= limit) {
+            await Promise.race(executing); // Giờ thì an toàn tuyệt đối
+        }
+    }
+    return Promise.allSettled(results);
+}
+
+// ==========================================
 // 4. CHẾ ĐỘ CHẠY LẺ (SINGLE MODE) TỪ DASHBOARD
 // ==========================================
 async function runSingleCrawl(videoId, paragraphId, keywordsArray) {
@@ -290,8 +326,17 @@ async function runSingleCrawl(videoId, paragraphId, keywordsArray) {
     }
 
     // Tải media
-    for (const kw of keywordsArray) { await fetchAndDownloadStock(kw, 'video', vFolder, 5); }
-    for (const kw of keywordsArray) { await fetchAndDownloadStock(kw, 'image', iFolder, 5); }
+    const mediaTasks = [];
+                    
+    // Gom toàn bộ nhiệm vụ tải Video và Ảnh của tất cả Keywords vào 1 mảng
+    // SỬA kws -> keywordsArray
+    for (const kw of keywordsArray) { 
+        mediaTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, 5));
+        mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, 5));
+    }
+
+    // CHẠY ĐA LUỒNG: Chạy 2 Keyword/Type cùng lúc
+    await runConcurrently(mediaTasks, 5);
 
     // Sync asset mới vào DB
     const syncAssets = async (folderPath, assetType) => {
@@ -441,9 +486,18 @@ async function processNextInQueue() {
 
                 // Chỉ tải media 1 lần (theo ngôn ngữ đầu tiên)
                 if (processLang === langsToProcess[0]) {
-                    console.log(`   - [Cảnh ${gid}] Đang tải media...`);
-                    for (const kw of kws) { await fetchAndDownloadStock(kw, 'video', vFolder, 5); }
-                    for (const kw of kws) { await fetchAndDownloadStock(kw, 'image', iFolder, 5); }
+                    console.log(`   - [Cảnh ${gid}] Đang tải media (Chế độ Đa Luồng)...`);
+                    
+                    const mediaTasks = [];
+                    
+                    // Gom toàn bộ nhiệm vụ tải Video và Ảnh của tất cả Keywords vào 1 mảng
+                    for (const kw of kws) {
+                        mediaTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, 5));
+                        mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, 5));
+                    }
+
+                    // CHẠY ĐA LUỒNG: Chạy 2 Keyword/Type cùng lúc
+                    await runConcurrently(mediaTasks, 5);
 
                     const syncAssetsToDB = async (folderPath, assetType) => {
                         const files = fs.readdirSync(folderPath).filter(f => f.startsWith('stock_') && (f.endsWith('.mp4') || f.endsWith('.jpg')));

@@ -4,17 +4,27 @@ import path from 'path';
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import * as cheerio from 'cheerio';
+// Import trình quản lý Proxy xoay vòng
+import { getOldestProxy } from './proxyManager.js';
 
 puppeteer.use(StealthPlugin());
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-async function downloadMedia(url, targetDir, ext) {
+// Nhận thêm tham số proxy để tải file ẩn danh
+async function downloadMedia(url, targetDir, ext, proxy = null) {
     const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const savePath = path.join(targetDir, `stock_${existing + 1}.${ext}`);
 
     try {
-        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        const fetchOptions = { headers: { 'User-Agent': 'Mozilla/5.0' } };
+        
+        // Gắn proxy dispatcher vào hàm fetch để giấu IP thật của máy chủ
+        if (proxy && proxy.dispatcher) {
+            fetchOptions.dispatcher = proxy.dispatcher;
+        }
+
+        const res = await fetch(url, fetchOptions);
         if (res.ok) {
             fs.writeFileSync(savePath, Buffer.from(await res.arrayBuffer()));
             return true;
@@ -34,26 +44,47 @@ export async function fetchFromBellingcatBot(keyword, type, targetDir, neededCou
 
     console.log(`      [Bellingcat Bot] Đang thâm nhập OSINT: ${searchUrl}`);
 
-    // Dùng một Profile riêng cho Bellingcat để tránh đụng độ với DVIDS
     const profilePath = path.join(process.cwd(), 'chrome_profile_bellingcat');
+
+    // Lấy proxy cũ nhất trong hàng đợi (nhớ dùng await)
+    const proxy = await getOldestProxy();
+
+    // Khai báo mảng args chuẩn trước
+    const browserArgs = [
+        '--no-sandbox', 
+        '--disable-setuid-sandbox', 
+        '--disable-dev-shm-usage', 
+        '--window-size=1920,1080',
+        '--disable-blink-features=AutomationControlled'
+    ];
+
+    // Gắn IP Proxy vào trình duyệt nếu có
+    if (proxy) {
+        browserArgs.push(`--proxy-server=${proxy.server}`);
+        console.log(`      [Bellingcat Bot] Đang ngụy trang bằng IP: ${proxy.server}`);
+    }
 
     const browser = await puppeteer.launch({ 
         headless: "new", 
-        userDataDir: profilePath,
-        args: [
-            '--no-sandbox', 
-            '--disable-setuid-sandbox', 
-            '--disable-dev-shm-usage', 
-            '--window-size=1920,1080',
-            '--disable-blink-features=AutomationControlled'
-        ] 
+        // userDataDir: profilePath,
+        args: browserArgs 
     });
     
     try {
         const page = await browser.newPage();
+
+        // Xác thực Proxy bằng Username & Password
+        if (proxy && proxy.username && proxy.password) {
+            await page.authenticate({ 
+                username: proxy.username, 
+                password: proxy.password 
+            });
+        }
+
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
-        await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        // Tăng timeout lên 60 giây để hệ thống đa luồng không bị nghẽn mạng
+        await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await delay(3000); // Chờ check Cloudflare
 
         const html = await page.content();
@@ -75,7 +106,7 @@ export async function fetchFromBellingcatBot(keyword, type, targetDir, neededCou
             const pageTitle = await page.title();
             console.log(`      [Bellingcat Bot] ⚠️ Không có kết quả. (Page Title: "${pageTitle}")`);
             if (pageTitle.includes('Just a moment') || pageTitle.includes('Cloudflare')) {
-                console.log(`      [Bellingcat Bot] ⛔ Đã bị Cloudflare chặn! Cần nghỉ ngơi giảm nhịp độ...`);
+                console.log(`      [Bellingcat Bot] ⛔ Bị Cloudflare chặn! Sẽ vượt qua ở lượt IP proxy tiếp theo...`);
                 await delay(5000); 
             }
             return 0;
@@ -88,7 +119,8 @@ export async function fetchFromBellingcatBot(keyword, type, targetDir, neededCou
             if (downloaded >= neededCount) break;
 
             try {
-                await page.goto(link, { waitUntil: 'domcontentloaded', timeout: 20000 });
+                // Tăng timeout trang con lên 60s
+                await page.goto(link, { waitUntil: 'domcontentloaded', timeout: 60000 });
                 await delay(1500); 
 
                 const articleHtml = await page.content();
@@ -123,13 +155,13 @@ export async function fetchFromBellingcatBot(keyword, type, targetDir, neededCou
                 // Lọc trùng link ảnh trong cùng 1 bài
                 mediaUrls = [...new Set(mediaUrls)];
 
-                // 3. Tải file về
+                // 3. Tiến hành tải (Chuyền proxy vào)
                 for (const url of mediaUrls) {
                     if (downloaded >= neededCount) break;
 
                     const finalUrl = url.startsWith('//') ? `https:${url}` : url;
                     
-                    if (await downloadMedia(finalUrl, targetDir, ext)) {
+                    if (await downloadMedia(finalUrl, targetDir, ext, proxy)) {
                         downloaded++;
                         console.log(`      [Bellingcat Bot] ---> Đã lấy OSINT thành công ${downloaded}/${neededCount} ${type}`);
                     }

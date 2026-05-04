@@ -57,7 +57,7 @@ export async function fetchFromReutersBot(keyword, type, targetDir, neededCount)
 
     const browser = await puppeteer.launch({ 
         headless: "new", 
-        userDataDir: profilePath,
+        // userDataDir: profilePath,
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox', 

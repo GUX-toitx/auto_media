@@ -4,23 +4,33 @@ import path from 'path';
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import * as cheerio from 'cheerio';
+// Import trình quản lý Proxy xoay vòng
+import { getOldestProxy } from './proxyManager.js';
 
 puppeteer.use(StealthPlugin());
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-async function downloadMedia(url, targetDir, ext) {
+// Nhận thêm tham số proxy để tải file an toàn
+async function downloadMedia(url, targetDir, ext, proxy = null) {
     const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const savePath = path.join(targetDir, `stock_${existing + 1}.${ext}`);
 
     try {
-        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        const fetchOptions = { headers: { 'User-Agent': 'Mozilla/5.0' } };
+        
+        // Gắn proxy vào fetch để ẩn IP máy chủ khi tải ảnh/video
+        if (proxy && proxy.dispatcher) {
+            fetchOptions.dispatcher = proxy.dispatcher;
+        }
+
+        const res = await fetch(url, fetchOptions);
         if (res.ok) {
             fs.writeFileSync(savePath, Buffer.from(await res.arrayBuffer()));
             return true;
         }
     } catch (e) {
-        console.error(`      [AlJazeera Lỗi Tải] URL: ${url} - ${e.message}`);
+        console.error(`      [AlJazeera Lỗi Tải File] URL: ${url} - ${e.message}`);
     }
     return false;
 }
@@ -54,24 +64,45 @@ export async function fetchFromAlJazeeraBot(keyword, type, targetDir, neededCoun
 
     const profilePath = path.join(process.cwd(), 'chrome_profile_aljazeera');
 
+    // Lấy proxy cũ nhất trong hàng đợi để tối đa hóa thời gian nghỉ của IP
+    const proxy = await getOldestProxy();
+
+    // Chuẩn bị các cờ cấu hình trình duyệt
+    const browserArgs = [
+        '--no-sandbox', 
+        '--disable-setuid-sandbox', 
+        '--disable-dev-shm-usage', 
+        '--window-size=1920,1080',
+        '--disable-blink-features=AutomationControlled'
+    ];
+
+    // Gắn proxy vào trình duyệt nếu có
+    if (proxy) {
+        browserArgs.push(`--proxy-server=${proxy.server}`);
+        console.log(`      [AlJazeera Bot] Đang ngụy trang bằng IP: ${proxy.server}`);
+    }
+
     const browser = await puppeteer.launch({ 
         headless: "new", 
-        userDataDir: profilePath,
-        args: [
-            '--no-sandbox', 
-            '--disable-setuid-sandbox', 
-            '--disable-dev-shm-usage', 
-            '--window-size=1920,1080',
-            '--disable-blink-features=AutomationControlled'
-        ] 
+        // userDataDir: profilePath,
+        args: browserArgs 
     });
     
     try {
         const page = await browser.newPage();
+
+        // CỰC KỲ QUAN TRỌNG: Xác thực User/Pass cho Proxy
+        if (proxy && proxy.username && proxy.password) {
+            await page.authenticate({ 
+                username: proxy.username, 
+                password: proxy.password 
+            });
+        }
+
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
-        // Al Jazeera load cũng khá nặng, cần đợi
-        await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        // Nâng timeout lên 60 giây để xử lý tình trạng chia nhỏ băng thông mạng
+        await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await delay(3000); 
         await humanScroll(page);
         await delay(2000);
@@ -81,7 +112,6 @@ export async function fetchFromAlJazeeraBot(keyword, type, targetDir, neededCoun
         let articleLinks = [];
 
         // 1. Quét bài báo trong trang kết quả
-        // Các bài viết của Al Jazeera thường nằm trong thẻ <a> có class gc__title-link hoặc có URL dạng /news/ /features/
         $('a').each((i, el) => {
             const href = $(el).attr('href');
             if (href && (href.includes('/news/') || href.includes('/features/') || href.includes('/gallery/'))) {
@@ -95,8 +125,7 @@ export async function fetchFromAlJazeeraBot(keyword, type, targetDir, neededCoun
             const pageTitle = await page.title();
             console.log(`      [AlJazeera Bot] ⚠️ Không thấy bài báo. (Page Title: "${pageTitle}")`);
             if (pageTitle.includes('Cloudflare') || pageTitle.includes('Attention')) {
-                 console.log(`      [AlJazeera Bot] ⛔ Bị Cloudflare chặn! Cần đợi hoặc check IP...`);
-                 await delay(5000);
+                 console.log(`      [AlJazeera Bot] ⛔ Bị Cloudflare chặn! Sẽ vượt qua ở lượt IP proxy tiếp theo...`);
             }
             return 0;
         }
@@ -108,7 +137,8 @@ export async function fetchFromAlJazeeraBot(keyword, type, targetDir, neededCoun
             if (downloaded >= neededCount) break;
 
             try {
-                await page.goto(link, { waitUntil: 'domcontentloaded', timeout: 25000 });
+                // Timeout cho trang con cũng phải là 60s
+                await page.goto(link, { waitUntil: 'domcontentloaded', timeout: 60000 });
                 await delay(2000);
                 
                 // Trị Modal (nếu có popup newsletter)
@@ -121,31 +151,24 @@ export async function fetchFromAlJazeeraBot(keyword, type, targetDir, neededCoun
                 let mediaUrls = [];
 
                 if (type === 'video') {
-                    // Video trên Al Jazeera thường giấu qua API hoặc Brightcove, nhưng meta og:video thỉnh thoảng vẫn có
                     const ogVideo = $$('meta[property="og:video"]').attr('content');
                     if (ogVideo && ogVideo.endsWith('.mp4')) mediaUrls.push(ogVideo);
                 } else {
-                    // Ưu tiên 1: Lấy ảnh Cover từ thẻ Meta (Chuẩn nhất)
                     const ogImage = $$('meta[property="og:image"]').attr('content');
                     if (ogImage) {
                          mediaUrls.push(ogImage);
                     }
 
-                    // Ưu tiên 2: Al Jazeera có một chuyên mục là /gallery/ (rất nhiều ảnh).
-                    // Ta cào trong class wp-block-image hoặc thẻ figure
                     $$('figure img, .wp-block-image img').each((i, el) => {
-                        // Al Jazeera hay để ảnh xịn ở tham số srcset hoặc src
                         let src = $$(el).attr('src');
                         let srcset = $$(el).attr('srcset');
 
                         if (srcset) {
-                            // Lấy link có độ phân giải lớn nhất trong srcset
                             const links = srcset.split(',').map(s => s.trim().split(' ')[0]);
                             src = links[links.length - 1]; 
                         }
 
                         if (src && src.startsWith('http') && !src.includes('avatar')) {
-                             // Cắt tham số w=... để ép lấy ảnh gốc
                              mediaUrls.push(src.split('?')[0]);
                         }
                     });
@@ -153,13 +176,13 @@ export async function fetchFromAlJazeeraBot(keyword, type, targetDir, neededCoun
 
                 mediaUrls = [...new Set(mediaUrls)];
 
-                // 3. Tiến hành tải
+                // 3. Tiến hành tải (Chuyền Object Proxy vào)
                 for (const url of mediaUrls) {
                     if (downloaded >= neededCount) break;
 
                     const finalUrl = url.startsWith('//') ? `https:${url}` : url;
                     
-                    if (await downloadMedia(finalUrl, targetDir, ext)) {
+                    if (await downloadMedia(finalUrl, targetDir, ext, proxy)) {
                         downloaded++;
                         console.log(`      [AlJazeera Bot] ---> Đã lấy tin thành công ${downloaded}/${neededCount} ${type}`);
                     }

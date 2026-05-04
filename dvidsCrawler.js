@@ -4,18 +4,28 @@ import path from 'path';
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import * as cheerio from 'cheerio';
+// Import trình quản lý Proxy xoay vòng
+import { getOldestProxy } from './proxyManager.js';
 
 puppeteer.use(StealthPlugin());
 
 // Hàm tạo nhịp nghỉ (chờ Cloudflare/JS render)
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-async function downloadMedia(url, targetDir, ext) {
+// Nhận thêm tham số proxy để ẩn danh khi tải file
+async function downloadMedia(url, targetDir, ext, proxy = null) {
     const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const savePath = path.join(targetDir, `stock_${existing + 1}.${ext}`);
 
     try {
-        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        const fetchOptions = { headers: { 'User-Agent': 'Mozilla/5.0' } };
+        
+        // Gắn proxy dispatcher vào hàm fetch
+        if (proxy && proxy.dispatcher) {
+            fetchOptions.dispatcher = proxy.dispatcher;
+        }
+
+        const res = await fetch(url, fetchOptions);
         if (res.ok) {
             fs.writeFileSync(savePath, Buffer.from(await res.arrayBuffer()));
             return true;
@@ -36,25 +46,46 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
 
     const profilePath = path.join(process.cwd(), 'chrome_profile_dvids');
 
+    // Lấy proxy cũ nhất trong hàng đợi (nhớ dùng await)
+    const proxy = await getOldestProxy();
+
+    // Khai báo các cờ cấu hình trình duyệt
+    const browserArgs = [
+        '--no-sandbox', 
+        '--disable-setuid-sandbox', 
+        '--disable-dev-shm-usage', 
+        '--window-size=1920,1080',
+        '--disable-blink-features=AutomationControlled', // Tắt cờ báo hiệu "Tôi là Bot" của Chrome
+        '--disable-features=IsolateOrigins,site-per-process' // Giúp iframe/Cloudflare xử lý mượt hơn
+    ];
+
+    // Gắn IP Proxy vào trình duyệt nếu có
+    if (proxy) {
+        browserArgs.push(`--proxy-server=${proxy.server}`);
+        console.log(`      [DVIDS Bot] Đang ngụy trang bằng IP: ${proxy.server}`);
+    }
+
     const browser = await puppeteer.launch({ 
         headless: "new", 
-        userDataDir: profilePath, // <--- TIÊM PROFILE VÀO ĐÂY
-        args: [
-            '--no-sandbox', 
-            '--disable-setuid-sandbox', 
-            '--disable-dev-shm-usage', 
-            '--window-size=1920,1080',
-            '--disable-blink-features=AutomationControlled', // Tắt cờ báo hiệu "Tôi là Bot" của Chrome
-            '--disable-features=IsolateOrigins,site-per-process' // Giúp iframe/Cloudflare xử lý mượt hơn
-        ] 
+        // userDataDir: profilePath,
+        args: browserArgs 
     });
     
     try {
         const page = await browser.newPage();
+
+        // Xác thực Proxy bằng Username & Password
+        if (proxy && proxy.username && proxy.password) {
+            await page.authenticate({ 
+                username: proxy.username, 
+                password: proxy.password 
+            });
+        }
+
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
-        // Dùng domcontentloaded thay vì networkidle2 để tránh bị treo
-        await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        // Tăng timeout lên 60 giây để xử lý tình trạng chia nhỏ băng thông khi đa luồng
+        await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
         
         // CHỜ 3 GIÂY CHO TRANG RENDER XONG VÀ VƯỢT QUA CLOUDFLARE
         await delay(3000); 
@@ -79,7 +110,7 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
             
             // Nếu bị dính Cloudflare Challenge, cho bot nghỉ ngơi 1 chút để nhả rate-limit
             if (pageTitle.includes('Just a moment') || pageTitle.includes('Cloudflare')) {
-                console.log(`      [DVIDS Bot] ⛔ Đã bị Cloudflare chặn! Cần nghỉ ngơi giảm nhịp độ...`);
+                console.log(`      [DVIDS Bot] ⛔ Đã bị Cloudflare chặn! Sẽ vượt qua ở lượt IP proxy tiếp theo...`);
                 await delay(5000); 
             }
             return 0; 
@@ -92,7 +123,8 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
             if (downloaded >= neededCount) break;
 
             try {
-                await page.goto(link, { waitUntil: 'domcontentloaded', timeout: 20000 });
+                // Tăng timeout trang con lên 60 giây
+                await page.goto(link, { waitUntil: 'domcontentloaded', timeout: 60000 });
                 await delay(1500); // Chờ chút xíu cho thẻ meta được JS sinh ra (nếu có)
 
                 const detailHtml = await page.content();
@@ -117,10 +149,10 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
                                   $$('meta[itemprop="image"]').attr('content');
                 }
 
-                // 3. Tải file về
+                // 3. Tải file về (Chuyền object proxy vào)
                 if (downloadUrl) {
                     const finalUrl = downloadUrl.startsWith('//') ? `https:${downloadUrl}` : downloadUrl;
-                    if (await downloadMedia(finalUrl, targetDir, ext)) {
+                    if (await downloadMedia(finalUrl, targetDir, ext, proxy)) {
                         downloaded++;
                         console.log(`      [DVIDS Bot] ---> Đã bế thành công ${downloaded}/${neededCount} ${type}`);
                     }
