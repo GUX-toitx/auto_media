@@ -10,7 +10,7 @@ const CHROME_PATH = process.env.CUSTOM_CHROME === 'true'
     : undefined;
 const SETTING_DIR = process.env.SETTING_DIR || path.join(process.env.HOME, '.cache', 'ms-playwright');
 
-const DB_PATH = path.join(process.env.DB_DIR || path.join(process.env.MEDIA_DIR || '/usr/gux/media-team', 'db'), 'media_system.sqlite');
+const DB_PATH = path.join(process.env.DB_DIR, 'media_system.sqlite');
 const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 
 async function getNextProfile() {
