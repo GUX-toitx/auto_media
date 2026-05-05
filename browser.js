@@ -6,11 +6,16 @@ import { open } from 'sqlite';
 import 'dotenv/config';
 
 const CHROME_PATH = process.env.CUSTOM_CHROME === 'true'
-    ? path.join(process.env.SETTING_DIR, 'chrome-mac-arm64', 'Google Chrome for Testing.app', 'Contents', 'MacOS', 'Google Chrome for Testing')
+    ? process.platform === 'win32'
+        ? path.join(process.env.SETTING_DIR, 'chrome-win64', 'chrome.exe')
+        : path.join(process.env.SETTING_DIR, 'chrome-mac-arm64', 'Google Chrome for Testing.app', 'Contents', 'MacOS', 'Google Chrome for Testing')
     : undefined;
 const SETTING_DIR = process.env.SETTING_DIR || path.join(process.env.HOME, '.cache', 'ms-playwright');
 
-const DB_PATH = path.join(process.env.DB_DIR, 'media_system.sqlite');
+const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
+const DB_DIR = process.env.DB_DIR || '/usr/gux/media-team/db';
+
+const DB_PATH = path.join(DB_DIR, 'media_system.sqlite');
 const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 
 async function getNextProfile() {
@@ -28,7 +33,7 @@ async function markProfileUsed(id) {
 }
 
 function getRandomProxy() {
-    const proxyFile = path.join(process.env.MEDIA_DIR || '/usr/gux/media-team', 'proxies.txt');
+    const proxyFile = path.join(MEDIA_DIR, 'proxies.txt');
     if (!fs.existsSync(proxyFile)) return null;
     const lines = fs.readFileSync(proxyFile, 'utf8').trim().split('\n').filter(l => l.trim());
     if (!lines.length) return null;
