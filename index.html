@@ -28,11 +28,9 @@
                         activePostId === post.id ? '!bg-yellow-500 !text-black border-l-2 !border-yellow-400' : 'text-gray-500 hover:text-white']">
                     <div class="flex items-center justify-between">
                         <span class="truncate">📁 {{ post.title }}</span>
-                        <span v-if="post.status === 'crawling'" class="shrink-0 ml-1 animate-spin">⏳</span>
                     </div>
                 </button>
                 <button @click="deleteProject(post)"
-                    v-if="post.status !== 'crawling'"
                     class="shrink-0 bg-red-600 hover:bg-red-500 text-white rounded-lg px-2 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                     title="Xóa project">🗑️</button>
             </div>
@@ -45,7 +43,7 @@
                 <div>
                     <p class="text-blue-500 font-mono text-[10px] mb-2 uppercase tracking-[0.3em]">Workspace / Project</p>
                     <div class="flex items-center gap-3">
-                        <h2 class="text-4xl font-black text-white">{{ activePost.title }}</h2>
+                        <h2 class="text-4xl font-black text-white">{{ activePost?.title }}</h2>
                     </div>
                 </div>
                 <div v-show="posts.find(p => p.id === activePostId)?.status !== 'crawling'" class="flex gap-3">
@@ -60,7 +58,7 @@
             </header>
 
             <div class="space-y-4 mt-[150px]">
-                <div v-for="(para, i) in activePost.paragraphs" :key="para.id" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
+                <div v-for="(para, i) in (activePost?.paragraphs || [])" :key="para.id" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
 
                     <!-- Row 1: badge + sentences -->
                     <div class="flex items-start gap-2">
@@ -644,6 +642,7 @@ createApp({
         }
 
         async function selectPost(post) {
+            stopCrawlPolling();
             activePostId.value = post.id;
             localStorage.setItem('activePostId', post.id);
             const res = await fetch(`/api/posts/${post.id}`);
@@ -663,6 +662,72 @@ createApp({
                 sentencesOpen: true,
             }));
             activePost.value = data;
+            maybeStartCrawlPolling();
+        }
+
+        const crawlPollingTimer = ref(null);
+        function stopCrawlPolling() {
+            if (crawlPollingTimer.value) {
+                clearInterval(crawlPollingTimer.value);
+                crawlPollingTimer.value = null;
+            }
+        }
+        function maybeStartCrawlPolling() {
+            stopCrawlPolling();
+            const cur = posts.value.find(p => p.id === activePostId.value);
+            if (cur?.status === 'crawling') {
+                crawlPollingTimer.value = setInterval(refreshCrawlingPost, 5000);
+            }
+        }
+        async function refreshCrawlingPost() {
+            if (!activePostId.value) return stopCrawlPolling();
+            try {
+                const listRes = await fetch('/api/posts');
+                posts.value = await listRes.json();
+                const cur = posts.value.find(p => p.id === activePostId.value);
+                if (!cur) return stopCrawlPolling();
+
+                const res = await fetch(`/api/posts/${activePostId.value}`);
+                const data = await res.json();
+
+                // Merge để giữ trạng thái UI (open/close) của các paragraph cũ
+                const existing = new Map((activePost.value?.paragraphs || []).map(p => [p.id, p]));
+                activePost.value.paragraphs = data.paragraphs.map(p => {
+                    const old = existing.get(p.id);
+                    if (old) {
+                        return Object.assign(old, {
+                            content: p.content,
+                            original_content: p.original_content,
+                            audio: p.audio,
+                            keywords: p.keywords || [],
+                            sentences: p.sentences || [],
+                            videos: p.videos || [],
+                            images: p.images || [],
+                            audios: p.audios || {},
+                        });
+                    }
+                    return {
+                        ...p,
+                        keywords: p.keywords || [],
+                        sentences: p.sentences || [],
+                        videos: p.videos || [],
+                        images: p.images || [],
+                        audios: p.audios || {},
+                        videoOpen: false,
+                        imageOpen: false,
+                        videoSelectedOpen: false,
+                        imageSelectedOpen: false,
+                        sentencesOpen: true,
+                    };
+                });
+
+                if (cur.status !== 'crawling') {
+                    stopCrawlPolling();
+                    showToast('✅ Crawl xong!');
+                }
+            } catch (e) {
+                console.error('[Polling] Lỗi:', e.message);
+            }
         }
 
         async function deleteProject(post) {
@@ -1152,6 +1217,7 @@ createApp({
             if (post) {
                 post.status = status;
                 if (!status) selectPost(post);
+                else if (status === 'crawling' && post.id === activePostId.value) maybeStartCrawlPolling();
             } else if (status === 'crawling') {
                 loadPosts();
             }

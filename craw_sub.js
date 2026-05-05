@@ -145,10 +145,10 @@ async function fetchFromPixabay(keyword, type, targetDir, neededCount) {
     return downloaded;
 }
 
-async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 5) {
+async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 5, onProviderDone = null) {
     if (!keyword) return 0;
     let totalDownloaded = 0;
-    
+
     const providers = [
         { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
         { name: 'Pexels', fetcher: fetchFromPexels },
@@ -159,19 +159,31 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
         { name: 'Al Jazeera (Bot)', fetcher: fetchFromAlJazeeraBot },
         { name: 'CNN (Bot)', fetcher: fetchFromCnnBot },
     ];
-    
+
     console.log(`   -> [${type.toUpperCase()}] Tìm "${keyword}" | Mỗi nguồn: ${countPerSource}`);
-    
-    // Gói các nhà cung cấp thành các Task
+
+    const PROVIDER_TIMEOUT_MS = 45 * 1000;
     const tasks = providers.map(provider => async () => {
-        const got = await provider.fetcher(keyword, type, targetDir, countPerSource);
-        console.log(`      [${provider.name}] Tải được: ${got}/${countPerSource} ${type}`);
+        let got = 0;
+        try {
+            got = await Promise.race([
+                provider.fetcher(keyword, type, targetDir, countPerSource),
+                new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout ${PROVIDER_TIMEOUT_MS / 1000}s`)), PROVIDER_TIMEOUT_MS)),
+            ]);
+            console.log(`      [${provider.name}] Tải được: ${got}/${countPerSource} ${type}`);
+        } catch (e) {
+            console.log(`      [${provider.name}] Bỏ qua (${e.message})`);
+            got = 0;
+        }
+        // Sync DB ngay sau khi provider này xong (ngay cả khi timeout — file đã tải có thể vẫn có)
+        if (onProviderDone) {
+            try { await onProviderDone(); } catch (e) { console.error('   [Sync DB] Lỗi:', e.message); }
+        }
         return got;
     });
 
-    // CHẠY ĐA LUỒNG: Chạy tối đa 4 nguồn cùng lúc. 
-    // Storyblocks/Pexels chạy cực nhanh sẽ xong trước, nhường RAM cho các Bot báo chí.
-    const results = await runConcurrently(tasks, 8); 
+    // Hạ concurrency 8 -> 3 để tránh spawn quá nhiều headless Chrome cùng lúc
+    const results = await runConcurrently(tasks, 3);
 
     // Tổng hợp kết quả
     for (const res of results) {
@@ -325,20 +337,7 @@ async function runSingleCrawl(videoId, paragraphId, keywordsArray) {
         if (!exists) await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [paragraphId, kw]);
     }
 
-    // Tải media
-    const mediaTasks = [];
-                    
-    // Gom toàn bộ nhiệm vụ tải Video và Ảnh của tất cả Keywords vào 1 mảng
-    // SỬA kws -> keywordsArray
-    for (const kw of keywordsArray) { 
-        mediaTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, 5));
-        mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, 5));
-    }
-
-    // CHẠY ĐA LUỒNG: Chạy 2 Keyword/Type cùng lúc
-    await runConcurrently(mediaTasks, 5);
-
-    // Sync asset mới vào DB
+    // Sync asset mới vào DB (gọi mỗi khi 1 provider tải xong)
     const syncAssets = async (folderPath, assetType) => {
         const ext = assetType === 'video' ? '.mp4' : '.jpg';
         const files = fs.readdirSync(folderPath).filter(f => f.startsWith('stock_') && f.endsWith(ext));
@@ -348,6 +347,18 @@ async function runSingleCrawl(videoId, paragraphId, keywordsArray) {
             if (!exists) await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [paragraphId, assetType, relativePath]);
         }
     };
+
+    // Tải media
+    const mediaTasks = [];
+    for (const kw of keywordsArray) {
+        mediaTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, 5, () => syncAssets(vFolder, 'video')));
+        mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, 5, () => syncAssets(iFolder, 'image')));
+    }
+
+    // CHẠY ĐA LUỒNG: 2 keyword/type cùng lúc (giảm 5 -> 2 để tránh thrashing)
+    await runConcurrently(mediaTasks, 2);
+
+    // Sync lần cuối để chắc chắn không sót file
     await syncAssets(vFolder, 'video');
     await syncAssets(iFolder, 'image');
 
@@ -438,6 +449,11 @@ async function processNextInQueue() {
                 allScenes = allScenes.concat(await analyzeAndGroupScenes(chunk, globalTheme, processLang));
             }
 
+            // ============================================================
+            // PHA 1: Lưu HẾT các cảnh vào DB (Paragraph/Keyword/Sentence + file context)
+            // — Không tải media. Mục đích: dashboard F5 thấy ngay đủ cảnh.
+            // ============================================================
+            const sceneRecords = [];
             let sentenceOrder = 0;
             for (let i = 0; i < allScenes.length; i++) {
                 const scene = allScenes[i];
@@ -449,13 +465,11 @@ async function processNextInQueue() {
 
                 const kws = scene.keywords && scene.keywords.length > 0 ? scene.keywords : ["cinematic b-roll footage"];
 
-                // LƯU CÁC FILE CONTEXT
                 const ctxLang = processLang || lang;
                 fs.writeFileSync(path.join(vFolder, 'keywords.txt'), kws.join(', '));
                 fs.writeFileSync(path.join(iFolder, 'keywords.txt'), kws.join(', '));
                 fs.writeFileSync(path.join(vFolder, `${ctxLang}.context.txt`), scene.text);
                 fs.writeFileSync(path.join(iFolder, `${ctxLang}.context.txt`), scene.text);
-                // context.txt luôn là nội dung gốc
                 if (!processLang) {
                     fs.writeFileSync(path.join(vFolder, 'context.txt'), scene.text);
                     fs.writeFileSync(path.join(iFolder, 'context.txt'), scene.text);
@@ -463,7 +477,6 @@ async function processNextInQueue() {
                     fs.writeFileSync(path.join(iFolder, 'original_content.txt'), fullRawText);
                 }
 
-                // 🟢 LƯU DATABASE: Tạo Paragraph với original_content
                 const maxOrder = await db.get(
                     'SELECT COALESCE(MAX("order"), 0) as max FROM Paragraph WHERE post_id = ?', [dbPostId]
                 );
@@ -484,36 +497,45 @@ async function processNextInQueue() {
                     await db.run('INSERT INTO Sentence (paragraph_id, content, original_content, "order") VALUES (?, ?, ?, ?)', [dbParagraphId, sentences[si], originalSentences[si] || scene.original_text || sentences[si], sentenceOrder]);
                 }
 
-                // Chỉ tải media 1 lần (theo ngôn ngữ đầu tiên)
-                if (processLang === langsToProcess[0]) {
-                    console.log(`   - [Cảnh ${gid}] Đang tải media (Chế độ Đa Luồng)...`);
-                    
-                    const mediaTasks = [];
-                    
-                    // Gom toàn bộ nhiệm vụ tải Video và Ảnh của tất cả Keywords vào 1 mảng
-                    for (const kw of kws) {
-                        mediaTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, 5));
-                        mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, 5));
-                    }
+                sceneRecords.push({ gid, vFolder, iFolder, kws, dbParagraphId });
+            }
+            console.log(`   [LANG ${processLang || lang}] ✅ Đã lưu ${sceneRecords.length} cảnh vào DB. Bắt đầu tải media...`);
 
-                    // CHẠY ĐA LUỒNG: Chạy 2 Keyword/Type cùng lúc
-                    await runConcurrently(mediaTasks, 5);
-
-                    const syncAssetsToDB = async (folderPath, assetType) => {
-                        const files = fs.readdirSync(folderPath).filter(f => f.startsWith('stock_') && (f.endsWith('.mp4') || f.endsWith('.jpg')));
-                        for (const file of files) {
-                            const relativePath = path.join(projectId, 'assets', folderPath.includes('_raw_videos') ? '_raw_videos' : '_raw_images', gid, file);
-                            const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
-                            if (!exists) {
-                                await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [dbParagraphId, assetType, relativePath]);
-                            }
+            // ============================================================
+            // PHA 2: Tải media — POOL PHẲNG cho TẤT CẢ cảnh (chỉ chạy với ngôn ngữ đầu tiên)
+            // Bot chậm ở cảnh nào không block cảnh khác.
+            // ============================================================
+            if (processLang === langsToProcess[0]) {
+                const makeSync = (gid, dbParagraphId) => async (folderPath, assetType) => {
+                    const files = fs.readdirSync(folderPath).filter(f => f.startsWith('stock_') && (f.endsWith('.mp4') || f.endsWith('.jpg')));
+                    for (const file of files) {
+                        const relativePath = path.join(projectId, 'assets', folderPath.includes('_raw_videos') ? '_raw_videos' : '_raw_images', gid, file);
+                        const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
+                        if (!exists) {
+                            await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [dbParagraphId, assetType, relativePath]);
                         }
-                    };
-                    await syncAssetsToDB(vFolder, 'video');
-                    await syncAssetsToDB(iFolder, 'image');
+                    }
+                };
+
+                const allTasks = [];
+                for (const rec of sceneRecords) {
+                    const { gid, vFolder, iFolder, kws, dbParagraphId } = rec;
+                    const syncAssetsToDB = makeSync(gid, dbParagraphId);
+                    for (const kw of kws) {
+                        allTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, 5, () => syncAssetsToDB(vFolder, 'video')));
+                        allTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, 5, () => syncAssetsToDB(iFolder, 'image')));
+                    }
                 }
 
-                await sleep(2000);
+                console.log(`   [LANG ${processLang || lang}] Tổng số media task: ${allTasks.length}, chạy 6 task song song`);
+                await runConcurrently(allTasks, 6);
+
+                // Sync lần cuối toàn bộ cảnh để chắc chắn không sót file
+                for (const rec of sceneRecords) {
+                    const syncAssetsToDB = makeSync(rec.gid, rec.dbParagraphId);
+                    await syncAssetsToDB(rec.vFolder, 'video');
+                    await syncAssetsToDB(rec.iFolder, 'image');
+                }
             }
         }
 
