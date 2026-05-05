@@ -15,7 +15,7 @@ const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 
 async function getNextProfile() {
     const db = await getDb();
-    const profile = await db.get('SELECT id, profile_dir FROM ChromeProfile ORDER BY updated_at ASC LIMIT 1');
+    const profile = await db.get('SELECT id, profile_dir, proxy FROM ChromeProfile ORDER BY updated_at ASC LIMIT 1');
     await db.close();
     if (!profile) return null;
     return { ...profile, profile_dir: path.join(SETTING_DIR, profile.profile_dir) };
@@ -27,14 +27,26 @@ async function markProfileUsed(id) {
     await db.close();
 }
 
-export async function getBrowser(profileDir) {
+function getRandomProxy() {
+    const proxyFile = path.join(process.env.MEDIA_DIR || '/usr/gux/media-team', 'proxies.txt');
+    if (!fs.existsSync(proxyFile)) return null;
+    const lines = fs.readFileSync(proxyFile, 'utf8').trim().split('\n').filter(l => l.trim());
+    if (!lines.length) return null;
+    const [host, port, user, pass] = lines[Math.floor(Math.random() * lines.length)].split(':');
+    return { server: `http://${host}:${port}`, username: user, password: pass };
+}
+
+export async function getBrowser(profileDir, proxy) {
     const userDataDir = profileDir || path.join(SETTING_DIR, 'chrome-profile');
-    return chromium.launchPersistentContext(userDataDir, {
+    const resolvedProxy = proxy || getRandomProxy();
+    const options = {
         executablePath: CHROME_PATH,
         headless: false,
         args: ['--disable-blink-features=AutomationControlled'],
         viewport: { width: 1280, height: 900 },
-    });
+    };
+    if (resolvedProxy) options.proxy = resolvedProxy;
+    return chromium.launchPersistentContext(userDataDir, options);
 }
 
 export async function generateFlowImage(keyword, saveDirPath, content = '', type = 'image', count = 2, lang = 'en', customPrompt = '', ratio = '16:9', videoMode = 'Frames', veo = 'Fast', selectedImages = []) {
@@ -54,7 +66,7 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
     const profileDir = profile?.profile_dir || path.join(SETTING_DIR, 'chrome-profile');
     const profileId = profile?.id;
 
-    const ctx = await getBrowser(profileDir);
+    const ctx = await getBrowser(profileDir, profile?.proxy);
     const page = ctx.pages()[0] || await ctx.newPage();
 
     try {
@@ -304,6 +316,7 @@ if (process.argv[1]?.endsWith('browser.js')) {
     const profileDirArg = process.argv[2];
     const email = process.argv[3] || null;
     const password = process.argv[4] || null;
+    const proxy = process.argv[5] || null;
 
     const profileDir = profileDirArg
         ? (path.isAbsolute(profileDirArg) ? profileDirArg : path.join(SETTING_DIR, profileDirArg))
@@ -313,7 +326,7 @@ if (process.argv[1]?.endsWith('browser.js')) {
 
     const profileDirName = path.basename(profileDir);
     console.log('[OK] Đang mở profile: ' + profileDirName + (email ? ` (${email})` : ''));
-    const ctx = await getBrowser(profileDir);
+    const ctx = await getBrowser(profileDir, proxy);
     const page = ctx.pages()[0] || await ctx.newPage();
     await page.goto('https://accounts.google.com');
 
@@ -330,8 +343,18 @@ if (process.argv[1]?.endsWith('browser.js')) {
             }
             console.log('[OK] Đã điền email/password, chờ xác nhận...');
 
-            // Chờ đăng nhập xong (URL chuyển sang myaccount hoặc google.com)
+            // Chờ đăng nhập xong
             await page.waitForURL(url => !url.toString().includes('accounts.google.com'), { timeout: 60000 });
+
+            // Tự động đóng các modal xác nhận của Google
+            for (let i = 0; i < 5; i++) {
+                await page.waitForTimeout(2000);
+                const confirmBtn = page.locator('button').filter({ hasText: /confirm|done|continue|yes|got it|ok|dismiss|not now|skip/i }).first();
+                if (await confirmBtn.count()) {
+                    await confirmBtn.click();
+                    console.log('[OK] Đã đóng modal xác nhận');
+                }
+            }
             console.log('[OK] Đăng nhập thành công, bạn có thể tắt trình duyệt.');
         } catch (e) {
             console.log('[WARN] Tự điền thất bại:', e.message);

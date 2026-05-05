@@ -521,7 +521,21 @@
                 <button @click="profileModal.addOpen = false" class="text-gray-500 hover:text-white text-xl">×</button>
             </div>
             <p class="text-[10px] text-gray-500">Mỗi dòng 1 tài khoản, định dạng: <span class="font-mono text-gray-300">email|password</span></p>
-            <textarea v-model="profileModal.bulkText" rows="8" placeholder="email1@gmail.com|password1&#10;email2@gmail.com|password2"
+            <!-- Upload file -->
+            <div class="border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors"
+                :class="profileModal.fileName ? 'border-green-500 bg-green-500/10' : 'border-gray-700 hover:border-green-500'"
+                @click="$refs.profileFileInput.click()"
+                @dragover.prevent
+                @drop.prevent="onDropProfileFile($event)">
+                <div v-if="profileModal.fileName" class="flex items-center justify-center gap-2">
+                    <span class="text-[11px] text-green-400 font-bold">📄 {{ profileModal.fileName }}</span>
+                    <button @click.stop="profileModal.fileName = ''; profileModal.bulkText = ''" class="text-red-400 hover:text-red-300 text-sm">×</button>
+                </div>
+                <p v-else class="text-[11px] text-gray-500">📂 Kéo thả file .txt hoặc <span class="text-green-400 font-bold">nhấn để chọn</span></p>
+                <input ref="profileFileInput" type="file" accept=".txt" class="hidden" @change="onProfileFileSelect($event)">
+            </div>
+            <p class="text-[10px] text-gray-500 text-center">— hoặc nhập text vào ô dưới đây —</p>
+            <textarea v-if="!profileModal.fileName" v-model="profileModal.bulkText" rows="6" placeholder="email1@gmail.com|password1&#10;email2@gmail.com|password2"
                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-[12px] font-mono text-gray-200 outline-none focus:border-green-500 resize-none"></textarea>
             <div class="flex gap-3 justify-end">
                 <button @click="profileModal.addOpen = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
@@ -548,7 +562,7 @@ createApp({
         const aiModal = ref({ open: false, type: '', para: null, gid: '', count: 2, content: '', keywords: [], prompt: '', ratio: '16:9', videoMode: 'Frames', veo: 'Fast' });
         const sentenceModal = ref({ open: false, asset: null, para: null, type: '', sentences: [] });
         const page = ref('posts');
-        const profileModal = ref({ list: [], bulkText: '', cmds: [], addOpen: false });
+        const profileModal = ref({ list: [], bulkText: '', cmds: [], addOpen: false, fileName: '' });
 
         async function openProfilePage() {
             const res = await fetch('/api/chrome-profiles');
@@ -572,8 +586,28 @@ createApp({
             const res = await fetch('/api/chrome-profiles');
             profileModal.value.list = await res.json();
             profileModal.value.bulkText = '';
+            profileModal.value.fileName = '';
             profileModal.value.addOpen = false;
             showToast(`✅ Đã lưu ${lines.length} profile!`);
+        }
+
+        function onProfileFileSelect(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            profileModal.value.fileName = file.name;
+            const reader = new FileReader();
+            reader.onload = (ev) => { profileModal.value.bulkText = ev.target.result.trim(); };
+            reader.readAsText(file);
+            e.target.value = '';
+        }
+
+        function onDropProfileFile(e) {
+            const file = e.dataTransfer.files[0];
+            if (!file) return;
+            profileModal.value.fileName = file.name;
+            const reader = new FileReader();
+            reader.onload = (ev) => { profileModal.value.bulkText = ev.target.result.trim(); };
+            reader.readAsText(file);
         }
 
         async function deleteProfile(p) {
@@ -1174,6 +1208,8 @@ createApp({
             bulkAddProfiles,
             deleteProfile,
             loginProfile,
+            onProfileFileSelect,
+            onDropProfileFile,
             doSelect,
             reloadParaAssets,
             uploadAsset,

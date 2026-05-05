@@ -606,7 +606,7 @@ app.post('/api/ai-generate', async (req, res) => {
 app.post('/api/chrome-profiles/:id/login', async (req, res) => {
     try {
         const db = await getDb();
-        const profile = await db.get('SELECT id, email, password FROM ChromeProfile WHERE id = ?', [req.params.id]);
+        const profile = await db.get('SELECT id, email, password, proxy FROM ChromeProfile WHERE id = ?', [req.params.id]);
         await db.close();
         if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
@@ -624,6 +624,14 @@ app.post('/api/chrome-profiles/:id/login', async (req, res) => {
         child.unref();
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API: Đọc proxies.txt
+app.get('/api/proxies', (req, res) => {
+    const proxyFile = path.join(__dirname, 'proxies.txt');
+    if (!fs.existsSync(proxyFile)) return res.json([]);
+    const lines = fs.readFileSync(proxyFile, 'utf8').trim().split('\n').filter(l => l.trim());
+    res.json(lines);
 });
 
 // API: ChromeProfile CRUD
