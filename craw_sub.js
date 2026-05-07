@@ -169,6 +169,18 @@ async function fetchFromPixabay(keyword, type, targetDir, neededCount) {
     return downloaded;
 }
 
+// Hàm "Đao Phủ": Ép một Promise (luồng) phải xong trong thời gian giới hạn, nếu không sẽ bị chém
+const withTimeout = (promise, ms, name) => {
+    let timeoutId;
+    const timeoutPromise = new Promise((resolve) => {
+        timeoutId = setTimeout(() => {
+            console.log(`      [TIMEOUT] ⚠️ Bot ${name} treo quá ${(ms/1000)}s. Tự động chém bỏ luồng này!`);
+            resolve(0); // Trả về 0 file để hệ thống bỏ qua và chạy tiếp
+        }, ms);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+};
+
 async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 5) {
     if (!keyword) return 0;
     let totalDownloaded = 0;
@@ -187,21 +199,31 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
     
     console.log(`   -> [${type.toUpperCase()}] Tìm "${keyword}" | Mỗi nguồn: ${countPerSource}`);
     
-    // Gói các nhà cung cấp thành các Task
     const tasks = providers.map(provider => async () => {
-        const got = await provider.fetcher(keyword, type, targetDir, countPerSource);
-        console.log(`      [${provider.name}] Tải được: ${got}/${countPerSource} ${type}`);
-        return got;
+        try {
+            // 🟢 THIẾT QUÂN LUẬT: Ép mỗi Bot chỉ được chạy tối đa 120 giây (2 phút).
+            const got = await withTimeout(
+                provider.fetcher(keyword, type, targetDir, countPerSource), 
+                120000, 
+                provider.name
+            );
+            
+            if (got > 0 || typeof got === 'number') {
+                console.log(`      [${provider.name}] Tải được: ${got}/${countPerSource} ${type}`);
+            }
+            return typeof got === 'number' ? got : 0;
+        } catch (e) {
+            console.log(`      [${provider.name}] ⚠️ Lỗi: ${e.message}`);
+            return 0;
+        }
     });
 
-    // CHẠY ĐA LUỒNG: Chạy tối đa 4 nguồn cùng lúc. 
-    // Storyblocks/Pexels chạy cực nhanh sẽ xong trước, nhường RAM cho các Bot báo chí.
-    const results = await runConcurrently(tasks, 4); 
+    // Chạy đa luồng
+    const results = await runConcurrently(tasks, 5); 
 
-    // Tổng hợp kết quả
     for (const res of results) {
         if (res.status === 'fulfilled') {
-            totalDownloaded += res.value;
+            totalDownloaded += (res.value || 0);
         }
     }
     
@@ -577,9 +599,14 @@ async function processNextInQueue() {
                     // Tạo một vòng lặp ngầm: Cứ 2 giây quét ổ cứng 1 lần, thấy file mới là nhét vào DB
                     const liveSyncTask = async () => {
                         while (isSceneDownloading) {
-                            await syncAssetsToDB(vFolder, 'video', scene.dbParagraphId);
-                            await syncAssetsToDB(iFolder, 'image', scene.dbParagraphId);
-                            await sleep(2000); // Quét 2s / lần
+                            try { // <--- THÊM TRY CATCH Ở ĐÂY
+                                await syncAssetsToDB(vFolder, 'video', scene.dbParagraphId);
+                                await syncAssetsToDB(iFolder, 'image', scene.dbParagraphId);
+                            } catch (err) {
+                                // Nếu DB bị kẹt (locked), cứ lờ đi để vòng sau (2s sau) nó tự làm lại
+                                // Không in ra log để đỡ rác màn hình
+                            }
+                            await sleep(2000); 
                         }
                     };
                     
