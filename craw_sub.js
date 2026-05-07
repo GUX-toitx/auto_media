@@ -74,7 +74,7 @@ async function fetchFromStoryblocks(keyword, type, targetDir, neededCount) {
     const ext = type === 'video' ? 'mp4' : 'jpg';
     const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const resource = type === 'video' ? '/api/v2/videos/search' : '/api/v2/images/search';
-    const url = buildStoryblocksUrlV2(resource, { keywords: keyword, results_per_page: neededCount * 2, sort: 'most_downloaded' });
+    const url = buildStoryblocksUrlV2(resource, { keywords: keyword, results_per_page: neededCount * 2, sort: 'most_relevant' });
     try {
         const response = await fetch(url);
         if (!response.ok) return 0;
@@ -153,7 +153,7 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
         { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
         { name: 'Pexels', fetcher: fetchFromPexels },
         { name: 'DVIDS (Bot)', fetcher: fetchFromDvidsBot },
-        { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot },
+        // { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot },
         { name: 'Reuters (Bot)', fetcher: fetchFromReutersBot },
         { name: 'AP News (Bot)', fetcher: fetchFromApnewsBot },
         { name: 'Al Jazeera (Bot)', fetcher: fetchFromAlJazeeraBot },
