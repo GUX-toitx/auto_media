@@ -51,7 +51,6 @@ async function downloadFileHelper(url, targetDir, ext) {
 
     if (!fs.existsSync(savePath)) {
         try {
-            // 🟢 LỚP KHIÊN 1: ÉP TIMEOUT. Nếu mạng lag, tải file quá 15 giây -> Hủy luôn!
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 15000);
 
@@ -60,26 +59,30 @@ async function downloadFileHelper(url, targetDir, ext) {
                 signal: controller.signal 
             });
             
-            clearTimeout(timeoutId); // Hủy đếm ngược nếu tải nhanh xong sớm
+            clearTimeout(timeoutId);
 
             if (res.ok) {
-                // 🟢 LỚP KHIÊN 2: CHẶN DUNG LƯỢNG. Video > 35MB (khoảng 5 phút) -> Vứt!
                 const size = res.headers.get('content-length');
+                // 1. Chặn file quá TO (Treo máy)
                 if (ext === 'mp4' && size && parseInt(size) > 35 * 1024 * 1024) {
-                    console.log(`      [Bỏ qua] Video quá nặng (${(parseInt(size)/1024/1024).toFixed(1)}MB)`);
                     return false;
                 }
 
                 const buffer = await res.arrayBuffer();
+                
+                // 🟢 2. CHẶN FILE QUÁ NHỎ (FILE RÁC/LỖI HTML)
+                // Đảm bảo file MP4 phải lớn hơn 50KB (50 * 1024 bytes)
+                if (ext === 'mp4' && buffer.byteLength < 50 * 1024) {
+                    console.log(`      [Bỏ qua] Video rác/lỗi rỗng (${(buffer.byteLength/1024).toFixed(1)}KB)`);
+                    return false;
+                }
+
+                // Nếu qua được các bài test thì mới cho lưu vào ổ cứng
                 fs.writeFileSync(savePath, Buffer.from(buffer));
                 return true;
             }
         } catch (error) { 
-            if (error.name === 'AbortError') {
-                console.log(`      [Timeout] Đã bỏ qua 1 file vì tải quá 15 giây.`);
-            } else {
-                // Lỗi mạng bình thường thì lờ đi
-            }
+            // Bỏ qua lỗi
         }
     }
     return false;
