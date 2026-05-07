@@ -31,8 +31,8 @@
                         <span v-if="post.status === 'crawling'" class="shrink-0 ml-1 animate-spin">⏳</span>
                     </div>
                 </button>
+                
                 <button @click="deleteProject(post)"
-                    v-if="post.status !== 'crawling'"
                     class="shrink-0 bg-red-600 hover:bg-red-500 text-white rounded-lg px-2 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                     title="Xóa project">🗑️</button>
             </div>
@@ -656,7 +656,7 @@ createApp({
                 videos: p.videos || [],
                 images: p.images || [],
                 audios: p.audios || {},
-                videoOpen: false,
+                videoOpen: false, // Mình để nguyên UI state
                 imageOpen: false,
                 videoSelectedOpen: false,
                 imageSelectedOpen: false,
@@ -1142,6 +1142,68 @@ createApp({
             } catch (e) { alert('❌ ' + e.message); }
         }
 
+        // ==========================================
+        // TÍNH NĂNG MỚI: POLLING LẤY MEDIA NGẦM 5S
+        // ==========================================
+        let mediaPollingInterval = null;
+
+        const fetchLatestMedia = async () => {
+            if (!activePostId.value || !activePost.value) return;
+            try {
+                const res = await fetch(`/api/posts/${activePostId.value}`);
+                const updatedData = await res.json();
+                
+                if (updatedData && updatedData.paragraphs) {
+                    activePost.value.paragraphs.forEach((curPara, index) => {
+                        const updPara = updatedData.paragraphs[index];
+                        if (updPara) {
+                            // Chỉ cập nhật mảng videos và images, không chạm vào UI State (videoOpen, imageOpen...)
+                            curPara.videos = updPara.videos || [];
+                            curPara.images = updPara.images || [];
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error("Lỗi khi update media ngầm:", error);
+            }
+        };
+
+        const startMediaPolling = () => {
+            if (mediaPollingInterval) clearInterval(mediaPollingInterval);
+            mediaPollingInterval = setInterval(() => {
+                fetchLatestMedia();
+            }, 5000);
+        };
+
+        const stopMediaPolling = () => {
+            if (mediaPollingInterval) {
+                clearInterval(mediaPollingInterval);
+                mediaPollingInterval = null;
+            }
+        };
+
+        // Theo dõi trạng thái của Project hiện tại. Hễ Crawling thì bật Polling, xong thì tự tắt.
+        const watch = Vue.watch || window.Vue?.watch;
+        if (watch) {
+            watch(
+                () => posts.value.find(p => p.id === activePostId.value)?.status,
+                (newStatus) => {
+                    if (newStatus === 'crawling') {
+                        startMediaPolling();
+                    } else {
+                        stopMediaPolling();
+                    }
+                },
+                { immediate: true }
+            );
+        }
+
+        const onUnmounted = Vue.onUnmounted || window.Vue?.onUnmounted;
+        if (onUnmounted) {
+            onUnmounted(() => { stopMediaPolling(); });
+        }
+        // ==========================================
+
         loadPosts();
 
         // SSE: lắng nghe crawl status
@@ -1151,7 +1213,8 @@ createApp({
             const post = posts.value.find(p => p.title === postTitle || p.title.startsWith(postTitle + '_'));
             if (post) {
                 post.status = status;
-                if (!status) selectPost(post);
+                // Nếu status trống (tức là đã cào xong) thì reload lại một lần cuối cho chắc cốp
+                if (!status && activePostId.value === post.id) selectPost(post);
             } else if (status === 'crawling') {
                 loadPosts();
             }

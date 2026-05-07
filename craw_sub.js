@@ -14,6 +14,7 @@ import { fetchFromReutersBot } from './reutersCrawler.js';
 import { fetchFromApnewsBot } from './apnewsCrawler.js';
 import { fetchFromAlJazeeraBot } from './aljazeeraCrawler.js';
 import { fetchFromCnnBot } from './cnnCrawler.js';
+import { fetchFromGoogleImageBot } from './googleImageCrawler.js';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -150,14 +151,15 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
     let totalDownloaded = 0;
     
     const providers = [
-        { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
-        { name: 'Pexels', fetcher: fetchFromPexels },
-        { name: 'DVIDS (Bot)', fetcher: fetchFromDvidsBot },
+        // { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
+        // { name: 'Pexels', fetcher: fetchFromPexels },
+        // { name: 'DVIDS (Bot)', fetcher: fetchFromDvidsBot },
         // { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot },
-        { name: 'Reuters (Bot)', fetcher: fetchFromReutersBot },
-        { name: 'AP News (Bot)', fetcher: fetchFromApnewsBot },
-        { name: 'Al Jazeera (Bot)', fetcher: fetchFromAlJazeeraBot },
-        { name: 'CNN (Bot)', fetcher: fetchFromCnnBot },
+        // { name: 'Reuters (Bot)', fetcher: fetchFromReutersBot },
+        // { name: 'AP News (Bot)', fetcher: fetchFromApnewsBot },
+        // { name: 'Al Jazeera (Bot)', fetcher: fetchFromAlJazeeraBot },
+        // { name: 'CNN (Bot)', fetcher: fetchFromCnnBot },
+        { name: 'Google Image (Bot)', fetcher: fetchFromGoogleImageBot },
     ];
     
     console.log(`   -> [${type.toUpperCase()}] Tìm "${keyword}" | Mỗi nguồn: ${countPerSource}`);
@@ -414,22 +416,20 @@ async function processNextInQueue() {
         const globalTheme = await getGlobalTheme(fullRawText);
         const textChunks = chunkTextToParagraphs(fullRawText);
 
-        // Xử lý từng ngôn ngữ đích (hoặc ngôn ngữ gốc nếu không có ngôn ngữ đích)
         const langsToProcess = targetLangs.length > 0 ? targetLangs : [null];
 
         for (const processLang of langsToProcess) {
             const postTitle = processLang ? `${dbPostTitle}_${processLang}` : dbPostTitle;
             console.log(`\n   [LANG] Xử lý ngôn ngữ: ${processLang || lang}`);
 
-            // 🟢 LƯU DATABASE: Tạo Post riêng cho từng ngôn ngữ
+            // Khởi tạo Post trên DB
             await db.run('INSERT OR IGNORE INTO Post (title) VALUES (?)', [postTitle]);
             await db.run('UPDATE Post SET status = ? WHERE title = ?', ['crawling', postTitle]);
-            // Notify dashboard
             fetch(`http://localhost:${PORT}/api/crawl-status/notify`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ postTitle, status: 'crawling' })
             }).catch(() => {});
+            
             const postRecord = await db.get('SELECT id FROM Post WHERE title = ?', [postTitle]);
             const dbPostId = postRecord.id;
 
@@ -438,102 +438,130 @@ async function processNextInQueue() {
                 allScenes = allScenes.concat(await analyzeAndGroupScenes(chunk, globalTheme, processLang));
             }
 
+            // ========================================================
+            // 🟢 PHA 1: COMMIT TRƯỚC TOÀN BỘ CẢNH (PARAGRAPHS) VÀO DB
+            // ========================================================
             let sentenceOrder = 0;
-            for (let i = 0; i < allScenes.length; i++) {
-                const scene = allScenes[i];
-                const gid = String(i + 1);
+            console.log(`   [HỆ THỐNG] Đang chốt cấu trúc ${allScenes.length} cảnh vào Database...`);
+            
+            await db.run('BEGIN TRANSACTION');
+            try {
+                for (let i = 0; i < allScenes.length; i++) {
+                    const scene = allScenes[i];
+                    const gid = String(i + 1);
 
-                const vFolder = path.join(targetDir, 'assets', '_raw_videos', gid);
-                const iFolder = path.join(targetDir, 'assets', '_raw_images', gid);
-                [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+                    // 1. Tạo sẵn Folder trống
+                    const vFolder = path.join(targetDir, 'assets', '_raw_videos', gid);
+                    const iFolder = path.join(targetDir, 'assets', '_raw_images', gid);
+                    [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 
-                const kws = scene.keywords && scene.keywords.length > 0 ? scene.keywords : ["cinematic b-roll footage"];
+                    // 2. Ghi Context Text File
+                    const kws = scene.keywords && scene.keywords.length > 0 ? scene.keywords : ["cinematic b-roll footage"];
+                    const ctxLang = processLang || lang;
+                    fs.writeFileSync(path.join(vFolder, 'keywords.txt'), kws.join(', '));
+                    fs.writeFileSync(path.join(iFolder, 'keywords.txt'), kws.join(', '));
+                    fs.writeFileSync(path.join(vFolder, `${ctxLang}.context.txt`), scene.text);
+                    fs.writeFileSync(path.join(iFolder, `${ctxLang}.context.txt`), scene.text);
+                    if (!processLang) {
+                        fs.writeFileSync(path.join(vFolder, 'context.txt'), scene.text);
+                        fs.writeFileSync(path.join(iFolder, 'context.txt'), scene.text);
+                        fs.writeFileSync(path.join(vFolder, 'original_content.txt'), fullRawText);
+                        fs.writeFileSync(path.join(iFolder, 'original_content.txt'), fullRawText);
+                    }
 
-                // LƯU CÁC FILE CONTEXT
-                const ctxLang = processLang || lang;
-                fs.writeFileSync(path.join(vFolder, 'keywords.txt'), kws.join(', '));
-                fs.writeFileSync(path.join(iFolder, 'keywords.txt'), kws.join(', '));
-                fs.writeFileSync(path.join(vFolder, `${ctxLang}.context.txt`), scene.text);
-                fs.writeFileSync(path.join(iFolder, `${ctxLang}.context.txt`), scene.text);
-                // context.txt luôn là nội dung gốc
-                if (!processLang) {
-                    fs.writeFileSync(path.join(vFolder, 'context.txt'), scene.text);
-                    fs.writeFileSync(path.join(iFolder, 'context.txt'), scene.text);
-                    fs.writeFileSync(path.join(vFolder, 'original_content.txt'), fullRawText);
-                    fs.writeFileSync(path.join(iFolder, 'original_content.txt'), fullRawText);
+                    // 3. Insert Cảnh vào DB
+                    const maxOrder = await db.get('SELECT COALESCE(MAX("order"), 0) as max FROM Paragraph WHERE post_id = ?', [dbPostId]);
+                    const paraRes = await db.run(
+                        'INSERT INTO Paragraph (post_id, content, original_content, "order") VALUES (?, ?, ?, ?)',
+                        [dbPostId, scene.text, scene.original_text || scene.text, maxOrder.max + 1]
+                    );
+                    
+                    // Lưu ID thật của Cảnh trong DB vào object scene để Lát nữa xài
+                    scene.dbParagraphId = paraRes.lastID;
+                    scene.gid = gid;
+                    scene.kws = kws; // Lưu keyword lại
+
+                    // 4. Insert Keywords
+                    for (const kw of kws) {
+                        await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [scene.dbParagraphId, kw]);
+                    }
+
+                    // 5. Insert Sentences
+                    const sentences = scene.text.split(/(?<=\.{1,3} )|(?<=[!?] )|(?<=[。！？])|\n+/).map(s => s.trim()).filter(Boolean);
+                    const originalSentences = (scene.original_text || scene.text).split(/(?<=\.{1,3} )|(?<=[!?] )|(?<=[。！？])|\n+/).map(s => s.trim()).filter(Boolean);
+                    for (let si = 0; si < sentences.length; si++) {
+                        sentenceOrder++;
+                        await db.run('INSERT INTO Sentence (paragraph_id, content, original_content, "order") VALUES (?, ?, ?, ?)', [scene.dbParagraphId, sentences[si], originalSentences[si] || scene.original_text || sentences[si], sentenceOrder]);
+                    }
                 }
+                await db.run('COMMIT');
+                console.log(`   [HỆ THỐNG] ✅ Đã đẩy toàn bộ Script lên Giao diện thành công!`);
+            } catch (err) {
+                await db.run('ROLLBACK');
+                throw err; // Bắn lỗi ra ngoài nếu DB tịt
+            }
 
-                // 🟢 LƯU DATABASE: Tạo Paragraph với original_content
-                const maxOrder = await db.get(
-                    'SELECT COALESCE(MAX("order"), 0) as max FROM Paragraph WHERE post_id = ?', [dbPostId]
-                );
-                const paraRes = await db.run(
-                    'INSERT INTO Paragraph (post_id, content, original_content, "order") VALUES (?, ?, ?, ?)',
-                    [dbPostId, scene.text, scene.original_text || scene.text, maxOrder.max + 1]
-                );
-                const dbParagraphId = paraRes.lastID;
-
-                for (const kw of kws) {
-                    await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [dbParagraphId, kw]);
-                }
-
-                const sentences = scene.text.split(/(?<=\.{1,3} )|(?<=[!?] )|(?<=[。！？])|\n+/).map(s => s.trim()).filter(Boolean);
-                const originalSentences = (scene.original_text || scene.text).split(/(?<=\.{1,3} )|(?<=[!?] )|(?<=[。！？])|\n+/).map(s => s.trim()).filter(Boolean);
-                for (let si = 0; si < sentences.length; si++) {
-                    sentenceOrder++;
-                    await db.run('INSERT INTO Sentence (paragraph_id, content, original_content, "order") VALUES (?, ?, ?, ?)', [dbParagraphId, sentences[si], originalSentences[si] || scene.original_text || sentences[si], sentenceOrder]);
-                }
-
-                // Chỉ tải media 1 lần (theo ngôn ngữ đầu tiên)
-                if (processLang === langsToProcess[0]) {
-                    console.log(`   - [Cảnh ${gid}] Đang tải media (Chế độ Đa Luồng)...`);
+            // ========================================================
+            // 🟢 PHA 2: KÍCH HOẠT BOT ĐI TẢI MEDIA ĐẮP VÀO KHUNG
+            // ========================================================
+            if (processLang === langsToProcess[0]) {
+                console.log(`   [HỆ THỐNG] Kích hoạt bầy Bot thả đi tải Media...`);
+                
+                for (let i = 0; i < allScenes.length; i++) {
+                    const scene = allScenes[i];
+                    console.log(`   - [Cảnh ${scene.gid}] Đang tải media (Chế độ Đa Luồng)...`);
+                    
+                    const vFolder = path.join(targetDir, 'assets', '_raw_videos', scene.gid);
+                    const iFolder = path.join(targetDir, 'assets', '_raw_images', scene.gid);
                     
                     const mediaTasks = [];
-                    
-                    // Gom toàn bộ nhiệm vụ tải Video và Ảnh của tất cả Keywords vào 1 mảng
-                    for (const kw of kws) {
+                    for (const kw of scene.kws) {
                         mediaTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, 5));
                         mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, 5));
                     }
 
-                    // CHẠY ĐA LUỒNG: Chạy 2 Keyword/Type cùng lúc
+                    // Chạy đa luồng tải ảnh/video
                     await runConcurrently(mediaTasks, 5);
 
-                    const syncAssetsToDB = async (folderPath, assetType) => {
+                    // Sync ngay lập tức tài nguyên vừa tải về vào Cảnh đó
+                    const syncAssetsToDB = async (folderPath, assetType, paragraphIdToLink) => {
                         const files = fs.readdirSync(folderPath).filter(f => f.startsWith('stock_') && (f.endsWith('.mp4') || f.endsWith('.jpg')));
                         for (const file of files) {
-                            const relativePath = path.join(projectId, 'assets', folderPath.includes('_raw_videos') ? '_raw_videos' : '_raw_images', gid, file);
+                            const relativePath = path.join(projectId, 'assets', folderPath.includes('_raw_videos') ? '_raw_videos' : '_raw_images', scene.gid, file);
                             const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
                             if (!exists) {
-                                await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [dbParagraphId, assetType, relativePath]);
+                                await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [paragraphIdToLink, assetType, relativePath]);
                             }
                         }
                     };
-                    await syncAssetsToDB(vFolder, 'video');
-                    await syncAssetsToDB(iFolder, 'image');
-                }
+                    await syncAssetsToDB(vFolder, 'video', scene.dbParagraphId);
+                    await syncAssetsToDB(iFolder, 'image', scene.dbParagraphId);
 
-                await sleep(2000);
+                    await sleep(2000); // Nghỉ 2s trước khi qua cảnh tiếp theo
+                }
             }
         }
 
+        // ========================================================
+        // 🟢 PHA 3: ĐÓNG DỰ ÁN
+        // ========================================================
         targetRow.set('Trạng thái', 'DONE');
         targetRow.set('Thư mục Lưu trữ', targetDir);
         await db.run('UPDATE Post SET status = NULL WHERE title LIKE ?', [`${projectId}%`]);
-        // Notify dashboard
+        
+        // Notify dashboard project hoàn thành
         fetch(`http://localhost:${PORT}/api/crawl-status/notify`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ postTitle: projectId, status: null })
         }).catch(() => {});
+
     } catch (e) {
         console.error(`[LỖI] ${projectId}:`, e.message);
         targetRow.set('Trạng thái', 'ERROR');
         targetRow.set('Ghi chú', e.message);
         await db.run('UPDATE Post SET status = NULL WHERE title LIKE ?', [`${projectId}%`]);
         fetch(`http://localhost:${PORT}/api/crawl-status/notify`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ postTitle: projectId, status: null })
         }).catch(() => {});
     }
