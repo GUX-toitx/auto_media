@@ -151,22 +151,31 @@ export async function fetchFromCnnBot(keyword, type, targetDir, neededCount) {
                     const ogVideo = $$('meta[property="og:video"]').attr('content');
                     if (ogVideo && ogVideo.endsWith('.mp4')) mediaUrls.push(ogVideo);
                 } else {
-                    const ogImage = $$('meta[property="og:image"]').attr('content');
-                    if (ogImage) mediaUrls.push(ogImage);
+                    // 🟢 BỘ LỌC THẦN THÁNH: Chứa tất cả các từ khóa rác thường gặp trên báo chí
+                    const junkRegex = /logo|avatar|icon|tracking|app-?store|play-?store|google-?play|apple|android|badge|placeholder|blank|promo|newsletter/i;
 
+                    // 1. Lấy ảnh đại diện bài viết (OG Image) - Thường là ảnh chuẩn nhất
+                    const ogImage = $$('meta[property="og:image"]').attr('content');
+                    if (ogImage && !junkRegex.test(ogImage)) {
+                        mediaUrls.push(ogImage);
+                    }
+
+                    // 2. Lấy ảnh trong các thẻ picture
                     $$('picture source').each((i, el) => {
                         const srcset = $$(el).attr('srcset');
                         if (srcset) {
                             const firstLink = srcset.split(',')[0].split(' ')[0];
-                            if (firstLink && !firstLink.includes('logo') && !firstLink.includes('blank')) {
+                            // Kiểm tra chặt chẽ bằng junkRegex thay vì includes thông thường
+                            if (firstLink && firstLink.startsWith('http') && !junkRegex.test(firstLink)) {
                                 mediaUrls.push(firstLink);
                             }
                         }
                     });
                     
-                    $$('.image__container img, .image__light img').each((i, el) => {
-                        const src = $$(el).attr('src');
-                        if (src && src.startsWith('http') && !src.match(/logo|avatar|icon|tracking/i)) {
+                    // 3. Lấy ảnh trong nội dung bài (mở rộng thêm class 'article__main' và 'figure')
+                    $$('.image__container img, .image__light img, .article__main img, figure img').each((i, el) => {
+                        const src = $$(el).attr('src') || $$(el).attr('data-src'); // Lấy thêm data-src phòng lazyload
+                        if (src && src.startsWith('http') && !junkRegex.test(src)) {
                             mediaUrls.push(src);
                         }
                     });

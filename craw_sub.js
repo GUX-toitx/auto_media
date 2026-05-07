@@ -51,13 +51,36 @@ async function downloadFileHelper(url, targetDir, ext) {
 
     if (!fs.existsSync(savePath)) {
         try {
-            const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+            // 🟢 LỚP KHIÊN 1: ÉP TIMEOUT. Nếu mạng lag, tải file quá 15 giây -> Hủy luôn!
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+            const res = await fetch(url, { 
+                headers: { 'User-Agent': 'Mozilla/5.0' },
+                signal: controller.signal 
+            });
+            
+            clearTimeout(timeoutId); // Hủy đếm ngược nếu tải nhanh xong sớm
+
             if (res.ok) {
+                // 🟢 LỚP KHIÊN 2: CHẶN DUNG LƯỢNG. Video > 35MB (khoảng 5 phút) -> Vứt!
+                const size = res.headers.get('content-length');
+                if (ext === 'mp4' && size && parseInt(size) > 35 * 1024 * 1024) {
+                    console.log(`      [Bỏ qua] Video quá nặng (${(parseInt(size)/1024/1024).toFixed(1)}MB)`);
+                    return false;
+                }
+
                 const buffer = await res.arrayBuffer();
                 fs.writeFileSync(savePath, Buffer.from(buffer));
                 return true;
             }
-        } catch (error) { console.error("Lỗi tải file:", error.message); }
+        } catch (error) { 
+            if (error.name === 'AbortError') {
+                console.log(`      [Timeout] Đã bỏ qua 1 file vì tải quá 15 giây.`);
+            } else {
+                // Lỗi mạng bình thường thì lờ đi
+            }
+        }
     }
     return false;
 }
@@ -151,14 +174,14 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
     let totalDownloaded = 0;
     
     const providers = [
-        // { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
-        // { name: 'Pexels', fetcher: fetchFromPexels },
-        // { name: 'DVIDS (Bot)', fetcher: fetchFromDvidsBot },
-        // { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot },
-        // { name: 'Reuters (Bot)', fetcher: fetchFromReutersBot },
-        // { name: 'AP News (Bot)', fetcher: fetchFromApnewsBot },
-        // { name: 'Al Jazeera (Bot)', fetcher: fetchFromAlJazeeraBot },
-        // { name: 'CNN (Bot)', fetcher: fetchFromCnnBot },
+        { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
+        { name: 'Pexels', fetcher: fetchFromPexels },
+        { name: 'DVIDS (Bot)', fetcher: fetchFromDvidsBot },
+        { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot },
+        { name: 'Reuters (Bot)', fetcher: fetchFromReutersBot },
+        { name: 'AP News (Bot)', fetcher: fetchFromApnewsBot },
+        { name: 'Al Jazeera (Bot)', fetcher: fetchFromAlJazeeraBot },
+        { name: 'CNN (Bot)', fetcher: fetchFromCnnBot },
         { name: 'Google Image (Bot)', fetcher: fetchFromGoogleImageBot },
     ];
     
@@ -173,7 +196,7 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
 
     // CHẠY ĐA LUỒNG: Chạy tối đa 4 nguồn cùng lúc. 
     // Storyblocks/Pexels chạy cực nhanh sẽ xong trước, nhường RAM cho các Bot báo chí.
-    const results = await runConcurrently(tasks, 8); 
+    const results = await runConcurrently(tasks, 4); 
 
     // Tổng hợp kết quả
     for (const res of results) {
@@ -338,14 +361,17 @@ async function runSingleCrawl(videoId, paragraphId, keywordsArray) {
     }
 
     // CHẠY ĐA LUỒNG: Chạy 2 Keyword/Type cùng lúc
-    await runConcurrently(mediaTasks, 5);
+    await runConcurrently(mediaTasks, 2);
 
     // Sync asset mới vào DB
     const syncAssets = async (folderPath, assetType) => {
-        const ext = assetType === 'video' ? '.mp4' : '.jpg';
-        const files = fs.readdirSync(folderPath).filter(f => f.startsWith('stock_') && f.endsWith(ext));
+        const videoExts = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm']);
+        const imageExts = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif']);
+        const validExts = assetType === 'video' ? videoExts : imageExts;
+        const subDir = assetType === 'video' ? '_raw_videos' : '_raw_images';
+        const files = fs.readdirSync(folderPath).filter(f => f.startsWith('stock_') && validExts.has(path.extname(f).toLowerCase()));
         for (const file of files) {
-            const relativePath = path.join(videoId, 'assets', assetType === 'video' ? '_raw_videos' : '_raw_images', gid, file);
+            const relativePath = path.join(videoId, 'assets', subDir, gid, file);
             const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
             if (!exists) await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [paragraphId, assetType, relativePath]);
         }
@@ -396,7 +422,11 @@ async function processNextInQueue() {
 
         if (crawlType === 'Video ID') {
             dbPostTitle = projectId;
-            execSync(`yt-dlp --cookies ./youtube.com_cookies.txt -f "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/mp4" -o "${targetDir}/original.%(ext)s" "${projectId}"`, { stdio: 'inherit' });
+            
+            // 🟢 LỚP KHIÊN: Ép yt-dlp chỉ tải video <= 300 giây (5 phút)
+            execSync(`yt-dlp --cookies ./youtube.com_cookies.txt --match-filter "duration <= 300" -f "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/mp4" -o "${targetDir}/original.%(ext)s" "${projectId}"`, { stdio: 'inherit' });
+            
+            // Lệnh lấy Subtitle giữ nguyên
             execSync(`yt-dlp --cookies ./youtube.com_cookies.txt --write-sub --write-auto-subs --sub-lang ${lang} --convert-subs srt --skip-download -o "${targetDir}/original.%(ext)s" "${projectId}" --ignore-errors`, { stdio: 'inherit' });
 
             const srtFile = fs.readdirSync(targetDir).find(f => f.endsWith('.srt') && f.includes(`.${lang.toLowerCase()}.`));
@@ -520,20 +550,50 @@ async function processNextInQueue() {
                         mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, 5));
                     }
 
-                    // Chạy đa luồng tải ảnh/video
-                    await runConcurrently(mediaTasks, 5);
-
-                    // Sync ngay lập tức tài nguyên vừa tải về vào Cảnh đó
+                    // Định nghĩa hàm Sync DB trước
                     const syncAssetsToDB = async (folderPath, assetType, paragraphIdToLink) => {
-                        const files = fs.readdirSync(folderPath).filter(f => f.startsWith('stock_') && (f.endsWith('.mp4') || f.endsWith('.jpg')));
+                        const videoExts = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm']);
+                        const imageExts = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif']);
+                        const validExts = assetType === 'video' ? videoExts : imageExts;
+                        const subDir = assetType === 'video' ? '_raw_videos' : '_raw_images';
+                        
+                        if (!fs.existsSync(folderPath)) return;
+                        
+                        const files = fs.readdirSync(folderPath).filter(f => f.startsWith('stock_') && validExts.has(path.extname(f).toLowerCase()));
                         for (const file of files) {
-                            const relativePath = path.join(projectId, 'assets', folderPath.includes('_raw_videos') ? '_raw_videos' : '_raw_images', scene.gid, file);
+                            const relativePath = path.join(projectId, 'assets', subDir, scene.gid, file);
                             const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
                             if (!exists) {
+                                // IN RA LOG ĐỂ BẠN THẤY NÓ LƯU REAL-TIME
+                                console.log(`      [LIVE SYNC] Vừa lưu ngay 1 ${assetType} vào DB cho Cảnh ${scene.gid}`);
                                 await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [paragraphIdToLink, assetType, relativePath]);
                             }
                         }
                     };
+
+                    // 🟢 CHIẾN THUẬT MỚI: ĐỒNG BỘ LIÊN TỤC TRONG LÚC TẢI
+                    let isSceneDownloading = true;
+                    
+                    // Tạo một vòng lặp ngầm: Cứ 2 giây quét ổ cứng 1 lần, thấy file mới là nhét vào DB
+                    const liveSyncTask = async () => {
+                        while (isSceneDownloading) {
+                            await syncAssetsToDB(vFolder, 'video', scene.dbParagraphId);
+                            await syncAssetsToDB(iFolder, 'image', scene.dbParagraphId);
+                            await sleep(2000); // Quét 2s / lần
+                        }
+                    };
+                    
+                    // Kích hoạt vòng lặp chạy song song (Lưu ý: KHÔNG dùng chữ await ở đây)
+                    const syncPromise = liveSyncTask();
+
+                    // 🟢 BẮT ĐẦU CHẠY ĐA LUỒNG TẢI MEDIA
+                    await runConcurrently(mediaTasks, 2);
+
+                    // Khi hàm tải xong, báo hiệu cho vòng lặp Live Sync dừng lại
+                    isSceneDownloading = false;
+                    await syncPromise; // Chờ vòng lặp kết thúc hẳn để chống lỗi RAM
+                    
+                    // Chạy quét vét đáy 1 lần cuối cùng cho chắc cốp không sót file nào
                     await syncAssetsToDB(vFolder, 'video', scene.dbParagraphId);
                     await syncAssetsToDB(iFolder, 'image', scene.dbParagraphId);
 

@@ -40,7 +40,7 @@
     </aside>
 
     <!-- MAIN -->
-    <main v-if="page === 'posts'" class="flex-1 overflow-y-auto px-5 bg-black/20">
+    <main v-if="page === 'posts' && activePost" class="flex-1 overflow-y-auto px-5 bg-black/20">
             <header class="fixed top-0 left-64 right-0 z-30 bg-black/80 backdrop-blur border-b border-gray-800 pb-8 pt-8 flex justify-between items-end px-5">
                 <div>
                     <p class="text-blue-500 font-mono text-[10px] mb-2 uppercase tracking-[0.3em]">Workspace / Project</p>
@@ -548,7 +548,7 @@
 </div>
 
 <script>
-const { createApp, ref, computed } = Vue;
+const { createApp, ref, computed, watch } = Vue;
 
 createApp({
     setup() {
@@ -1183,25 +1183,17 @@ createApp({
         };
 
         // Theo dõi trạng thái của Project hiện tại. Hễ Crawling thì bật Polling, xong thì tự tắt.
-        const watch = Vue.watch || window.Vue?.watch;
-        if (watch) {
-            watch(
-                () => posts.value.find(p => p.id === activePostId.value)?.status,
-                (newStatus) => {
-                    if (newStatus === 'crawling') {
-                        startMediaPolling();
-                    } else {
-                        stopMediaPolling();
-                    }
-                },
-                { immediate: true }
-            );
-        }
-
-        const onUnmounted = Vue.onUnmounted || window.Vue?.onUnmounted;
-        if (onUnmounted) {
-            onUnmounted(() => { stopMediaPolling(); });
-        }
+        watch(
+            () => posts.value.find(p => p.id === activePostId.value)?.status,
+            (newStatus) => {
+                if (newStatus === 'crawling') {
+                    startMediaPolling();
+                } else {
+                    stopMediaPolling();
+                }
+            },
+            { immediate: true }
+        );
         // ==========================================
 
         loadPosts();
