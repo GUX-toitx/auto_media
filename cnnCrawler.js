@@ -191,6 +191,17 @@ export async function fetchFromCnnBot(keyword, type, targetDir, neededCount) {
                 const articleHtml = await page.content();
                 const $$ = cheerio.load(articleHtml);
 
+                // 🟢 THÊM ĐOẠN NÀY VÀO DƯỚI CHEERIO.LOAD
+                // 1. Chém bay cái Div to bự chứa widget theo tên Class bạn vừa gửi
+                $$('.container_lead-plus-headlines-with-images__cards-wrapper').remove();
+                
+                // 2. Chém bay bất cứ Element nào có thuộc tính liên kết đến cnni-fast
+                $$('[data-open-link*="cnni-fast"]').remove();
+                $$('[data-card-url*="cnni-fast"]').remove();
+                
+                // 3. Quét tóm gọn: Thấy thẻ <a> nào chứa cnni-fast hoặc onelink.me thì xóa luôn thằng cha bao bọc nó
+                $$('a[href*="cnni-fast"], a[href*="onelink.me"]').parent().remove();
+
                 let mediaUrls = [];
 
                 if (type === 'video') {
@@ -198,7 +209,7 @@ export async function fetchFromCnnBot(keyword, type, targetDir, neededCount) {
                     if (ogVideo && ogVideo.endsWith('.mp4')) mediaUrls.push(ogVideo);
                 } else {
                     // 🟢 ĐÃ THÊM: onelink\.me và cnni-fast vào dánh sách cấm
-                    const junkRegex = /cnni-fast|onelink\.me|logo|avatar|icon|tracking|app-?store|play-?store|google-?play|apple|android|badge|placeholder|blank|promo|newsletter/i;
+                    const junkRegex = /cnni-fast|onelink\.me|logo|avatar|icon|tracking|app-?store|play-?store|google-?play|apple|android|badge|placeholder|blank|promo|newsletter|cnn-headlines|generic|default/i;
 
                     // 1. Lấy ảnh đại diện bài viết (OG Image)
                     const ogImage = $$('meta[property="og:image"]').attr('content');

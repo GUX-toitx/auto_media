@@ -191,22 +191,29 @@ export async function fetchFromAlJazeeraBot(keyword, type, targetDir, neededCoun
                     const ogVideo = $$('meta[property="og:video"]').attr('content');
                     if (ogVideo && ogVideo.endsWith('.mp4')) mediaUrls.push(ogVideo);
                 } else {
+                    // 🟢 ĐÃ THÊM: Bộ lọc từ khóa rác của Al Jazeera (aj-english_meta, aj-logo...)
+                    const junkRegex = /logo|avatar|icon|tracking|app-?store|play-?store|google-?play|apple|android|badge|placeholder|blank|promo|newsletter|generic|default|aj-english_meta|aj-logo|aj-breaking/i;
+
+                    // 1. Kiểm tra ảnh đại diện (og:image) qua bộ lọc
                     const ogImage = $$('meta[property="og:image"]').attr('content');
-                    if (ogImage) {
+                    if (ogImage && !junkRegex.test(ogImage)) {
                          mediaUrls.push(ogImage);
                     }
 
+                    // 2. Lấy ảnh trong bài viết và quét qua bộ lọc
                     $$('figure img, .wp-block-image img').each((i, el) => {
                         let src = $$(el).attr('src');
                         let srcset = $$(el).attr('srcset');
 
                         if (srcset) {
+                            // Lấy link ảnh nét nhất ở cuối srcset
                             const links = srcset.split(',').map(s => s.trim().split(' ')[0]);
                             src = links[links.length - 1]; 
                         }
 
-                        if (src && src.startsWith('http') && !src.includes('avatar')) {
-                             mediaUrls.push(src.split('?')[0]);
+                        // Kiểm tra chặt chẽ bằng junkRegex
+                        if (src && src.startsWith('http') && !junkRegex.test(src)) {
+                             mediaUrls.push(src.split('?')[0]); // Bỏ các tham số tracking phía sau dấu ?
                         }
                     });
                 }
