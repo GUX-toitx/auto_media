@@ -204,13 +204,16 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
     
     const tasks = providers.map(provider => async () => {
         try {
-            // 🟢 THIẾT QUÂN LUẬT: Ép mỗi Bot chỉ được chạy tối đa 120 giây (2 phút).
-            const got = await withTimeout(
-                provider.fetcher(keyword, type, targetDir, countPerSource), 
-                120000, 
-                provider.name
-            );
-            
+            // 🛑 ĐÃ TẠM TẮT HÀM ĐAO PHỦ (Cất gươm)
+            // const got = await withTimeout(
+            //     provider.fetcher(keyword, type, targetDir, countPerSource),
+            //     120000,
+            //     provider.name
+            // );
+
+            // 🟢 THẢ CỬA: Gọi trực tiếp bot và đợi vô thời hạn đến khi cào xong
+            const got = await provider.fetcher(keyword, type, targetDir, countPerSource);
+
             if (got > 0 || typeof got === 'number') {
                 console.log(`      [${provider.name}] Tải được: ${got}/${countPerSource} ${type}`);
             }
@@ -222,7 +225,7 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
     });
 
     // Chạy đa luồng
-    const results = await runConcurrently(tasks, 5); 
+    const results = await runConcurrently(tasks, 5);
 
     for (const res of results) {
         if (res.status === 'fulfilled') {
@@ -253,7 +256,7 @@ async function getGlobalTheme(fullText) {
     try {
         const response = await openai.chat.completions.create({
             model: "gpt-4o",
-            messages: [{ role: "system", content: `Bạn là Video Editor chuyên nghiệp có 10 năm kinh nghiệm. Tôi gửi cho bạn đầu vào là một kịch bản. Đầu tiên hãy đọc vào hiểu nó,sau đó trả về 3-4 từ tiếng Anh là keyword của kịch bản. Mục đích của việc tìm keyword --> từ keyword tôi có thể dễ dàng tìm nguồn images/videos phục vụ cho mục đích làm videos của tôi, vì vậy hãy bạn hãy làm thật kĩ và chính xác (không dùng từ ngữ trừu tượng cho keyword).` }, { role: "user", content: fullText.slice(0, 2000) }],
+            messages: [{ role: "system", content: `Bạn là Video Editor. Đọc kịch bản và trả về DUY NHẤT 1 CỤM TỪ (2-3 từ tiếng Anh) làm CHỦ ĐỀ CHÍNH. Không dùng từ trừu tượng.` }, { role: "user", content: fullText.slice(0, 2000) }],
             temperature: 0.1
         });
         return response.choices[0].message.content.replace(/[.,"'!]/g, '').trim();
