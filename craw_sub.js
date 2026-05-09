@@ -241,7 +241,7 @@ async function enhanceContent(rawText, targetLang = null) {
     try {
         const langInstruction = targetLang ? `Viết lại bằng ngôn ngữ: ${targetLang}.` : 'Giữ nguyên ngôn ngữ gốc.';
         const response = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
+            model: "gpt-4o",
             messages: [{ role: "system", content: `Bạn là một Copywriter xuất sắc. Viết lại nội dung cho bay bổng, tự nhiên, phù hợp làm Voice-over. ${langInstruction} KHÔNG thêm tiêu đề, chỉ trả về nội dung.` }, { role: "user", content: rawText }],
             temperature: 0.7 
         });
@@ -252,8 +252,8 @@ async function enhanceContent(rawText, targetLang = null) {
 async function getGlobalTheme(fullText) {
     try {
         const response = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
-            messages: [{ role: "system", content: `Bạn là Video Editor. Đọc kịch bản và trả về DUY NHẤT 1 CỤM TỪ (2-3 từ tiếng Anh) làm CHỦ ĐỀ CHÍNH. Không dùng từ trừu tượng.` }, { role: "user", content: fullText.slice(0, 2000) }],
+            model: "gpt-4o",
+            messages: [{ role: "system", content: `Bạn là Video Editor chuyên nghiệp có 10 năm kinh nghiệm. Tôi gửi cho bạn đầu vào là một kịch bản. Đầu tiên hãy đọc vào hiểu nó,sau đó trả về 3-4 từ tiếng Anh là keyword của kịch bản. Mục đích của việc tìm keyword --> từ keyword tôi có thể dễ dàng tìm nguồn images/videos phục vụ cho mục đích làm videos của tôi, vì vậy hãy bạn hãy làm thật kĩ và chính xác (không dùng từ ngữ trừu tượng cho keyword).` }, { role: "user", content: fullText.slice(0, 2000) }],
             temperature: 0.1
         });
         return response.choices[0].message.content.replace(/[.,"'!]/g, '').trim();
@@ -279,7 +279,7 @@ async function analyzeAndGroupScenes(textChunk, globalTheme, targetLang = null) 
         : 'Viết cả "text" và "original_text" bằng tiếng Việt.';
     try {
         const response = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
+            model: "gpt-4o",
             response_format: { type: "json_object" },
             messages: [
                 {
@@ -318,7 +318,7 @@ BẮT BUỘC trả về JSON:
 async function translateText(text, targetLang) {
     try {
         const response = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
+            model: "gpt-4o",
             messages: [{ role: "system", content: `You are a translator. Translate to '${targetLang}'. Return ONLY translated text.` }, { role: "user", content: text }],
             temperature: 0.2
         });

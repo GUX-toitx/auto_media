@@ -13,24 +13,61 @@ const delay = ms => new Promise(res => setTimeout(res, ms));
 
 // Nhận thêm tham số proxy để tải file an toàn
 async function downloadMedia(url, targetDir, ext, proxy = null) {
+    // 🟢 1. CHẶN TỪ VÒNG GỬI XE: Gặp mấy link tải app này thì né luôn, khỏi tải
+    if (url.includes('onelink.me') || url.includes('app-store') || url.includes('play.google')) {
+        return false;
+    }
+
     const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const savePath = path.join(targetDir, `stock_${existing + 1}.${ext}`);
 
     try {
         const fetchOptions = { headers: { 'User-Agent': 'Mozilla/5.0' } };
         
-        // Gắn proxy vào fetch để ẩn danh IP khi tải file
         if (proxy && proxy.dispatcher) {
             fetchOptions.dispatcher = proxy.dispatcher;
         }
 
+        // Ép Timeout 15s để chống treo Bot
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        fetchOptions.signal = controller.signal;
+
         const res = await fetch(url, fetchOptions);
+        clearTimeout(timeoutId); 
+
         if (res.ok) {
-            fs.writeFileSync(savePath, Buffer.from(await res.arrayBuffer()));
+            const contentType = (res.headers.get('content-type') || '').toLowerCase();
+            
+            // 🟢 2. BẢO VỆ CHO VIDEO: Bắt buộc phải là video thật
+            if (ext === 'mp4' && !contentType.includes('video')) {
+                return false;
+            }
+            
+            // 🟢 3. BẢO VỆ CHO ẢNH (Vừa thêm): Bắt buộc phải là ảnh thật (loại trừ HTML từ onelink.me)
+            if (ext === 'jpg' && !contentType.includes('image')) {
+                console.log(`      [Bỏ qua] Server không trả về Ảnh thật! (Bị lỗi giả danh URL: ${url})`);
+                return false;
+            }
+
+            const buffer = await res.arrayBuffer();
+
+            // 🟢 4. BẢO VỆ DUNG LƯỢNG
+            if (ext === 'mp4') {
+                if (buffer.byteLength < 100 * 1024) return false; // Nhỏ hơn 100KB -> Rác
+                if (buffer.byteLength > 35 * 1024 * 1024) return false; // Lớn hơn 35MB -> Treo RAM
+            } else if (ext === 'jpg') {
+                if (buffer.byteLength < 5 * 1024) return false; // Ảnh bé hơn 5KB -> Rác/Icon nhỏ
+            }
+
+            // Vượt qua TẤT CẢ rào cản thì mới được lưu
+            fs.writeFileSync(savePath, Buffer.from(buffer));
             return true;
         }
     } catch (e) {
-        console.error(`      [CNN Lỗi Tải File] URL: ${url} - ${e.message}`);
+        if (e.name !== 'AbortError') {
+             console.error(`      [CNN Lỗi Tải File] URL: ${url} - ${e.message}`);
+        }
     }
     return false;
 }
@@ -113,7 +150,16 @@ export async function fetchFromCnnBot(keyword, type, targetDir, neededCount) {
         // 1. Tìm link bài báo
         $('a').each((i, el) => {
             const href = $(el).attr('href');
+            
+            // 🟢 THÊM LỚP CHẶN LINK RÁC Ở ĐÂY
             if (href && (href.match(/\/\d{4}\/\d{2}\/\d{2}\//) || href.includes('/videos/'))) {
+                
+                // Nếu link chứa các từ khóa cấm kỵ thì BỎ QUA (return)
+                const junkLinkRegex = /cnni-fast|onelink\.me|app-store|google-play/i;
+                if (junkLinkRegex.test(href)) {
+                    return; // Nhảy qua thẻ <a> này, không thèm nhét vào mảng
+                }
+
                 articleLinks.push(href.startsWith('http') ? href : `https://edition.cnn.com${href}`);
             }
         });
@@ -151,10 +197,10 @@ export async function fetchFromCnnBot(keyword, type, targetDir, neededCount) {
                     const ogVideo = $$('meta[property="og:video"]').attr('content');
                     if (ogVideo && ogVideo.endsWith('.mp4')) mediaUrls.push(ogVideo);
                 } else {
-                    // 🟢 BỘ LỌC THẦN THÁNH: Chứa tất cả các từ khóa rác thường gặp trên báo chí
-                    const junkRegex = /logo|avatar|icon|tracking|app-?store|play-?store|google-?play|apple|android|badge|placeholder|blank|promo|newsletter/i;
+                    // 🟢 ĐÃ THÊM: onelink\.me và cnni-fast vào dánh sách cấm
+                    const junkRegex = /cnni-fast|onelink\.me|logo|avatar|icon|tracking|app-?store|play-?store|google-?play|apple|android|badge|placeholder|blank|promo|newsletter/i;
 
-                    // 1. Lấy ảnh đại diện bài viết (OG Image) - Thường là ảnh chuẩn nhất
+                    // 1. Lấy ảnh đại diện bài viết (OG Image)
                     const ogImage = $$('meta[property="og:image"]').attr('content');
                     if (ogImage && !junkRegex.test(ogImage)) {
                         mediaUrls.push(ogImage);
@@ -165,16 +211,15 @@ export async function fetchFromCnnBot(keyword, type, targetDir, neededCount) {
                         const srcset = $$(el).attr('srcset');
                         if (srcset) {
                             const firstLink = srcset.split(',')[0].split(' ')[0];
-                            // Kiểm tra chặt chẽ bằng junkRegex thay vì includes thông thường
                             if (firstLink && firstLink.startsWith('http') && !junkRegex.test(firstLink)) {
                                 mediaUrls.push(firstLink);
                             }
                         }
                     });
                     
-                    // 3. Lấy ảnh trong nội dung bài (mở rộng thêm class 'article__main' và 'figure')
+                    // 3. Lấy ảnh trong nội dung bài
                     $$('.image__container img, .image__light img, .article__main img, figure img').each((i, el) => {
-                        const src = $$(el).attr('src') || $$(el).attr('data-src'); // Lấy thêm data-src phòng lazyload
+                        const src = $$(el).attr('src') || $$(el).attr('data-src'); 
                         if (src && src.startsWith('http') && !junkRegex.test(src)) {
                             mediaUrls.push(src);
                         }

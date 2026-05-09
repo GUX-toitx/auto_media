@@ -12,20 +12,62 @@ puppeteer.use(StealthPlugin());
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
 async function downloadMedia(url, targetDir, ext, proxy = null) {
+    // 🟢 1. CHẶN TỪ VÒNG GỬI XE: Gặp mấy link tải app này thì né luôn, khỏi tải
+    if (url.includes('onelink.me') || url.includes('app-store') || url.includes('play.google')) {
+        return false;
+    }
+
     const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const savePath = path.join(targetDir, `stock_${existing + 1}.${ext}`);
+
     try {
-        if (url.startsWith('data:image')) {
-            const buffer = Buffer.from(url.split(',')[1], 'base64');
-            fs.writeFileSync(savePath, buffer);
-            return true;
+        const fetchOptions = { headers: { 'User-Agent': 'Mozilla/5.0' } };
+        
+        if (proxy && proxy.dispatcher) {
+            fetchOptions.dispatcher = proxy.dispatcher;
         }
-        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 15000 });
+
+        // Ép Timeout 15s để chống treo Bot
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        fetchOptions.signal = controller.signal;
+
+        const res = await fetch(url, fetchOptions);
+        clearTimeout(timeoutId); 
+
         if (res.ok) {
-            fs.writeFileSync(savePath, Buffer.from(await res.arrayBuffer()));
+            const contentType = (res.headers.get('content-type') || '').toLowerCase();
+            
+            // 🟢 2. BẢO VỆ CHO VIDEO: Bắt buộc phải là video thật
+            if (ext === 'mp4' && !contentType.includes('video')) {
+                return false;
+            }
+            
+            // 🟢 3. BẢO VỆ CHO ẢNH (Vừa thêm): Bắt buộc phải là ảnh thật (loại trừ HTML từ onelink.me)
+            if (ext === 'jpg' && !contentType.includes('image')) {
+                console.log(`      [Bỏ qua] Server không trả về Ảnh thật! (Bị lỗi giả danh URL: ${url})`);
+                return false;
+            }
+
+            const buffer = await res.arrayBuffer();
+
+            // 🟢 4. BẢO VỆ DUNG LƯỢNG
+            if (ext === 'mp4') {
+                if (buffer.byteLength < 100 * 1024) return false; // Nhỏ hơn 100KB -> Rác
+                if (buffer.byteLength > 35 * 1024 * 1024) return false; // Lớn hơn 35MB -> Treo RAM
+            } else if (ext === 'jpg') {
+                if (buffer.byteLength < 5 * 1024) return false; // Ảnh bé hơn 5KB -> Rác/Icon nhỏ
+            }
+
+            // Vượt qua TẤT CẢ rào cản thì mới được lưu
+            fs.writeFileSync(savePath, Buffer.from(buffer));
             return true;
         }
-    } catch (e) {}
+    } catch (e) {
+        if (e.name !== 'AbortError') {
+             console.error(`      [Bling Lỗi Tải File] URL: ${url} - ${e.message}`);
+        }
+    }
     return false;
 }
 
