@@ -230,7 +230,7 @@ app.post('/api/download-voice', async (req, res) => {
 
             const totalAssetDuration = Math.ceil(assets.reduce((sum, a) => sum + (a.duration || 0), 0));
 
-            // Xử lý audio theo langOption
+            // Xử lý audio theo langOption - chỉ xử lý nếu có audio
             const audioFiles = [];
             
             // Target language audio
@@ -242,6 +242,9 @@ app.post('/api/download-voice', async (req, res) => {
             if ((langOption === 'vi' || langOption === 'both') && s.original_audio) {
                 audioFiles.push({ path: s.original_audio, suffix: langOption === 'both' ? '_vi' : '' });
             }
+            
+            // Bỏ qua sentence nếu không có audio nào
+            if (audioFiles.length === 0) continue;
             
             for (const audioFile of audioFiles) {
                 const audioSrc = path.join(MEDIA_DIR, audioFile.path);
@@ -269,7 +272,7 @@ app.post('/api/download-voice', async (req, res) => {
                 }
             }
 
-            // Assets
+            // Assets - chỉ thêm nếu có audio
             for (let i = 0; i < assets.length; i++) {
                 const asset = assets[i];
                 const srcPath = path.join(MEDIA_DIR, asset.file_path);
@@ -415,17 +418,26 @@ app.post('/api/create-voice', async (req, res) => {
     try {
         const { videoId, postId, lang, speakerUuid, speakerUuidVi } = req.body;
         const projectDir = path.join(MEDIA_DIR, videoId);
+        
+        // Reset audio trong database trước khi tạo voice mới
+        const db = await getDb();
+        await db.run(
+            'UPDATE Sentence SET audio = NULL, original_audio = NULL WHERE paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?)',
+            [postId]
+        );
+        await db.close();
+        
         const result = await generateAudios(projectDir, postId, lang, speakerUuid, speakerUuidVi);
 
         // Lưu cả 2 batchUuid vào bảng Post (audio_uuid cho target, audio_uuid_vi cho Vietnamese)
-        const db = await getDb();
-        await db.run('UPDATE Post SET audio_uuid = ? WHERE id = ?', [result.batch_uuid, postId]);
+        const db2 = await getDb();
+        await db2.run('UPDATE Post SET audio_uuid = ? WHERE id = ?', [result.batch_uuid, postId]);
         // Lưu batch_uuid_vi vào cột mới (cần thêm cột này)
-        await db.run('ALTER TABLE Post ADD COLUMN audio_uuid_vi TEXT').catch(() => {});
+        await db2.run('ALTER TABLE Post ADD COLUMN audio_uuid_vi TEXT').catch(() => {});
         if (result.batch_uuid_vi) {
-            await db.run('UPDATE Post SET audio_uuid_vi = ? WHERE id = ?', [result.batch_uuid_vi, postId]);
+            await db2.run('UPDATE Post SET audio_uuid_vi = ? WHERE id = ?', [result.batch_uuid_vi, postId]);
         }
-        await db.close();
+        await db2.close();
         
         // Update status để bắt đầu xử lý batch
         console.log('[create-voice] Updating batch status for:', result.batch_uuid);

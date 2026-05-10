@@ -1131,6 +1131,17 @@ createApp({
 
             if (r.batch_uuid) {
                 voiceModal.value.batchUuid = r.batch_uuid;
+                // Reset audio trong UI ngay lập tức
+                if (activePost.value?.paragraphs) {
+                    activePost.value.paragraphs.forEach(para => {
+                        if (para.sentences) {
+                            para.sentences.forEach(s => {
+                                s.audioUrl = null;
+                                s.originalAudioUrl = null;
+                            });
+                        }
+                    });
+                }
                 await loadPosts();
             } else {
                 alert('❌ Tạo không thành công!');

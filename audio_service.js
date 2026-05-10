@@ -77,11 +77,7 @@ export async function getLanguages() {
 }
 
 export async function getReferenceSpeakers() {
-    const condition = JSON.stringify({
-        where: { OR: [{ user_uuid: null }, { user_uuid: '15f22a66-68e7-4367-87c6-02ca4ee76469' }] },
-        orderBy: [{ user_uuid: 'asc' }, { speaker_name: 'asc' }],
-    });
-    return api(`/user/reference-speaker?page=0&limit=-1&condition=${encodeURIComponent(condition)}`).then(r => r.json());
+    return api('/user/reference-speaker?page=0&limit=-1').then(r => r.json());
 }
 
 export async function generateAudios(projectDir, postId, lang, speakerUuid, speakerUuidVi) {
