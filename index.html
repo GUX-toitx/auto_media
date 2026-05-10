@@ -506,6 +506,29 @@
         </div>
     </div>
 
+    <!-- DOWNLOAD LANGUAGE SELECT MODAL -->
+    <div v-if="downloadModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="downloadModal.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[400px] space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-lg font-black text-white">📦 Tải Voice & Media</h3>
+                <button @click="downloadModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+            <p class="text-sm text-gray-400">Chọn ngôn ngữ audio bạn muốn tải:</p>
+            <div class="space-y-2">
+                <button @click="confirmDownloadVoice('target')" class="w-full py-3 rounded-lg text-sm font-bold bg-blue-600 hover:bg-blue-500 transition-all">
+                    🎵 Target Language ({{ activePost?.title?.match(/_([a-z]{2})$/)?.[1]?.toUpperCase() || 'EN' }})
+                </button>
+                <button @click="confirmDownloadVoice('vi')" class="w-full py-3 rounded-lg text-sm font-bold bg-orange-600 hover:bg-orange-500 transition-all">
+                    🇻🇳 Tiếng Việt
+                </button>
+                <button @click="confirmDownloadVoice('both')" class="w-full py-3 rounded-lg text-sm font-bold bg-green-600 hover:bg-green-500 transition-all">
+                    🌐 Cả hai
+                </button>
+            </div>
+            <button @click="downloadModal.open = false" class="w-full py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
+        </div>
+    </div>
+
     <!-- CHROME PROFILE PAGE -->
     <div v-if="page === 'profiles'" class="flex-1 overflow-y-auto px-8 py-8 bg-black/20 space-y-6">
         <div class="flex items-center justify-between">
@@ -594,6 +617,7 @@ createApp({
         const profileModal = ref({ list: [], bulkText: '', cmds: [], addOpen: false, fileName: '' });
         const crawlQueue = ref([]);
         const currentCrawlingPara = ref(null);
+        const downloadModal = ref({ open: false });
 
         async function openProfilePage() {
             const res = await fetch('/api/chrome-profiles');
@@ -1190,12 +1214,17 @@ createApp({
 
         async function downloadVoice() {
             if (!activePost.value) return;
+            downloadModal.value.open = true;
+        }
+        
+        async function confirmDownloadVoice(langOption) {
+            downloadModal.value.open = false;
             showToast('⏳ Đang tải và đóng gói...', 60000);
             try {
                 const res = await fetch('/api/download-voice', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoId: activeProjectId.value, postId: activePostId.value })
+                    body: JSON.stringify({ videoId: activeProjectId.value, postId: activePostId.value, langOption })
                 });
                 if (!res.ok) {
                     const r = await res.json();
@@ -1378,6 +1407,8 @@ createApp({
             refetchMedia,
             crawlQueue,
             currentCrawlingPara,
+            downloadModal,
+            confirmDownloadVoice,
         };
     }
 }).mount('#app');

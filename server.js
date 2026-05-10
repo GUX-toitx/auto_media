@@ -194,7 +194,7 @@ app.post('/api/generate-media', async (req, res) => {
 // API: Chỉ zip audio đã có + assets selected -> trả về browser
 app.post('/api/download-voice', async (req, res) => {
     try {
-        const { videoId, postId } = req.body;
+        const { videoId, postId, langOption } = req.body;
         const db = await getDb();
 
         const post = await db.get('SELECT title, audio_uuid FROM Post WHERE id = ?', [postId]);
@@ -204,14 +204,14 @@ app.post('/api/download-voice', async (req, res) => {
 
         // Lấy tất cả sentences của post theo order
         const sentences = await db.all(
-            `SELECT s.id, s.audio, s."order", s.paragraph_id FROM Sentence s
+            `SELECT s.id, s.audio, s.original_audio, s."order", s.paragraph_id FROM Sentence s
              JOIN Paragraph p ON s.paragraph_id = p.id
              WHERE p.post_id = ? ORDER BY s."order"`,
             [postId]
         );
 
         // Stream thẳng vào zip
-        const zipName = `${videoId}_${lang}.zip`;
+        const zipName = `${videoId}_${langOption === 'vi' ? 'vi' : langOption === 'both' ? 'both' : lang}.zip`;
         res.setHeader('Content-Type', 'application/zip');
         res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
 
@@ -222,8 +222,6 @@ app.post('/api/download-voice', async (req, res) => {
         const { execSync } = await import('child_process');
 
         for (const s of sentences) {
-            const sceneFolder = `cau_${s.order}`;
-
             // Lấy assets của sentence này
             const assets = await db.all(
                 'SELECT file_path, "order", duration FROM Asset WHERE selected = 1 AND sentence_id = ? ORDER BY "order"',
@@ -232,11 +230,23 @@ app.post('/api/download-voice', async (req, res) => {
 
             const totalAssetDuration = Math.ceil(assets.reduce((sum, a) => sum + (a.duration || 0), 0));
 
-            // Xử lý audio
-            if (s.audio) {
-                const audioSrc = path.join(MEDIA_DIR, s.audio);
+            // Xử lý audio theo langOption
+            const audioFiles = [];
+            
+            // Target language audio
+            if ((langOption === 'target' || langOption === 'both') && s.audio) {
+                audioFiles.push({ path: s.audio, suffix: langOption === 'both' ? '_target' : '' });
+            }
+            
+            // Vietnamese audio
+            if ((langOption === 'vi' || langOption === 'both') && s.original_audio) {
+                audioFiles.push({ path: s.original_audio, suffix: langOption === 'both' ? '_vi' : '' });
+            }
+            
+            for (const audioFile of audioFiles) {
+                const audioSrc = path.join(MEDIA_DIR, audioFile.path);
                 if (fs.existsSync(audioSrc)) {
-                    const audioName = `${sceneFolder}/audio.mp3`;
+                    const audioName = `audio/${s.order}${audioFile.suffix}.mp3`;
                     if (totalAssetDuration > 0) {
                         let mp3Duration = 0;
                         try {
@@ -260,12 +270,13 @@ app.post('/api/download-voice', async (req, res) => {
             }
 
             // Assets
-            for (const asset of assets) {
+            for (let i = 0; i < assets.length; i++) {
+                const asset = assets[i];
                 const srcPath = path.join(MEDIA_DIR, asset.file_path);
                 if (fs.existsSync(srcPath)) {
                     const ext = path.extname(asset.file_path);
-                    const durSuffix = asset.duration ? `_${Math.round(asset.duration)}s` : '';
-                    archive.file(srcPath, { name: `${sceneFolder}/${asset.order}${durSuffix}${ext}` });
+                    const assetName = `asset/${s.order}_${i + 1}${ext}`;
+                    archive.file(srcPath, { name: assetName });
                 }
             }
         }
