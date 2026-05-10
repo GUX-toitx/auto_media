@@ -4,23 +4,30 @@ import path from 'path';
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import * as cheerio from 'cheerio';
+import { getOldestProxy } from './proxyManager.js';
 
 puppeteer.use(StealthPlugin());
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-async function downloadMedia(url, targetDir, ext) {
+async function downloadMedia(url, targetDir, ext, proxy = null) {
     const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const savePath = path.join(targetDir, `stock_${existing + 1}.${ext}`);
 
     try {
-        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        const fetchOptions = { headers: { 'User-Agent': 'Mozilla/5.0' } };
+        if (proxy && proxy.dispatcher) fetchOptions.dispatcher = proxy.dispatcher;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        fetchOptions.signal = controller.signal;
+        const res = await fetch(url, fetchOptions);
+        clearTimeout(timeoutId);
         if (res.ok) {
             fs.writeFileSync(savePath, Buffer.from(await res.arrayBuffer()));
             return true;
         }
     } catch (e) {
-        console.error(`      [Reuters Lỗi Tải] URL: ${url} - ${e.message}`);
+        if (e.name !== 'AbortError') console.error(`      [Reuters Lỗi Tải] URL: ${url} - ${e.message}`);
     }
     return false;
 }
@@ -55,20 +62,23 @@ export async function fetchFromReutersBot(keyword, type, targetDir, neededCount)
     // BẮT BUỘC dùng Profile riêng
     const profilePath = path.join(process.cwd(), 'chrome_profile_reuters');
 
-    const browser = await puppeteer.launch({ 
-        headless: "new", 
-        // userDataDir: profilePath,
-        args: [
-            '--no-sandbox', 
-            '--disable-setuid-sandbox', 
-            '--disable-dev-shm-usage', 
-            '--window-size=1366,768', // Màn hình phổ thông để ít bị nghi ngờ
-            '--disable-blink-features=AutomationControlled'
-        ] 
-    });
+    const proxy = await getOldestProxy();
+    const browserArgs = [
+        '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+        '--window-size=1366,768', '--disable-blink-features=AutomationControlled'
+    ];
+    if (proxy) {
+        browserArgs.push(`--proxy-server=${proxy.server}`);
+        console.log(`      [Reuters Bot] Đang ngụy trang bằng IP: ${proxy.server}`);
+    }
+
+    const browser = await puppeteer.launch({ headless: "new", args: browserArgs });
     
     try {
         const page = await browser.newPage();
+        if (proxy && proxy.username && proxy.password) {
+            await page.authenticate({ username: proxy.username, password: proxy.password });
+        }
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
         // Reuters tải bằng React rất nặng, cần chờ networkidle2
@@ -152,7 +162,7 @@ export async function fetchFromReutersBot(keyword, type, targetDir, neededCount)
 
                     const finalUrl = url.startsWith('//') ? `https:${url}` : url;
                     
-                    if (await downloadMedia(finalUrl, targetDir, ext)) {
+                    if (await downloadMedia(finalUrl, targetDir, ext, proxy)) {
                         downloaded++;
                         console.log(`      [Reuters Bot] ---> Đã lấy tin thành công ${downloaded}/${neededCount} ${type}`);
                     }

@@ -31,3 +31,5 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+chrome*
+*.sqlite*

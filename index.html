@@ -48,14 +48,26 @@
                         <h2 class="text-4xl font-black text-white">{{ activePost.title }}</h2>
                     </div>
                 </div>
-                <div v-show="posts.find(p => p.id === activePostId)?.status !== 'crawling'" class="flex gap-3">
+                <div v-show="posts.find(p => p.id === activePostId)?.status !== 'crawling' && !crawlQueue.length" class="flex gap-3">
                     <button @click="createVoice" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
                     <button @click="retryDownloadVoice" class="bg-yellow-600 hover:bg-yellow-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">⬇️ Tải lại Voice</button>
                     <button @click="downloadVoice" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice & Media Selected</button>
                 </div>
-                <div v-if="posts.find(p => p.id === activePostId)?.status === 'crawling'" class="flex items-center gap-2 text-blue-400">
+                <div v-if="posts.find(p => p.id === activePostId)?.status === 'crawling' || crawlQueue.length" class="flex items-center gap-2 text-blue-400">
                     <span class="animate-spin text-2xl">⏳</span>
-                    <span class="text-[13px] font-black uppercase tracking-widest">Crawling...</span>
+                    <div class="text-[13px] font-black uppercase tracking-widest">
+                        <template v-if="posts.find(p => p.id === activePostId)?.status === 'crawling'">
+                            <span>Crawling đoạn {{ currentCrawlingPara }}</span>
+                        </template>
+                        <template v-if="crawlQueue.length > 0">
+                            <span v-if="posts.find(p => p.id === activePostId)?.status === 'crawling'" class="mx-2 text-gray-500">|</span>
+                            <span v-if="crawlQueue[0]?.status === 'inprogress'" class="text-orange-400">Crawling bổ sung đoạn {{ crawlQueue[0].paraIndex }} (inprogress)</span>
+                            <span v-if="crawlQueue.filter(q => q.status === 'queue').length > 0" class="ml-2 text-yellow-400">
+                                → {{ crawlQueue.filter(q => q.status === 'queue').map(q => q.paraIndex).join(', ') }} (queue)
+                            </span>
+                        </template>
+                    </div>
+                    <button @click="restartCrawSub" class="ml-4 bg-red-700 hover:bg-red-600 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔄 Restart Crawl</button>
                 </div>
             </header>
 
@@ -140,6 +152,7 @@
                             </span>
                             <button @click="deleteAll(para, i+1, 'video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
                             <div class="ml-auto flex gap-1.5">
+                                <button @click="refetchMedia(para, 'video')" class="text-[9px] px-2.5 py-1 rounded-md bg-orange-600/80 hover:bg-orange-500 text-white font-black tracking-wide transition-all active:scale-95">🔄 Lấy thêm</button>
                                 <button @click="aiGenerate(para, 'video')" class="text-[9px] px-2.5 py-1 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white font-black tracking-wide transition-all active:scale-95">✨ AI Generate</button>
                                 <button @click="uploadAsset(para, i+1, 'video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95">📤 Upload</button>
                             </div>
@@ -174,6 +187,7 @@
                             </span>
                             <button @click="deleteAll(para, i+1, 'image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
                             <div class="ml-auto flex gap-1.5">
+                                <button @click="refetchMedia(para, 'image')" class="text-[9px] px-2.5 py-1 rounded-md bg-orange-600/80 hover:bg-orange-500 text-white font-black tracking-wide transition-all active:scale-95">🔄 Lấy thêm</button>
                                 <button @click="aiGenerate(para, 'image')" class="text-[9px] px-2.5 py-1 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white font-black tracking-wide transition-all active:scale-95">✨ AI Generate</button>
                                 <button @click="uploadAsset(para, i+1, 'image')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95">📤 Upload</button>
                             </div>
@@ -563,6 +577,8 @@ createApp({
         const sentenceModal = ref({ open: false, asset: null, para: null, type: '', sentences: [] });
         const page = ref('posts');
         const profileModal = ref({ list: [], bulkText: '', cmds: [], addOpen: false, fileName: '' });
+        const crawlQueue = ref([]);
+        const currentCrawlingPara = ref(null);
 
         async function openProfilePage() {
             const res = await fetch('/api/chrome-profiles');
@@ -710,6 +726,34 @@ createApp({
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ videoId: activeProjectId.value, groupId: para.id, keywords })
             });
+        }
+
+        async function refetchMedia(para, type) {
+            if (!para.keywords?.length) return showToast('⚠️ Chưa có keyword!');
+            const paraIndex = activePost.value.paragraphs.findIndex(p => p.id === para.id) + 1;
+            
+            // Thêm vào queue
+            if (crawlQueue.value.length === 0) {
+                crawlQueue.value.push({ paraId: para.id, paraIndex, status: 'inprogress' });
+            } else {
+                crawlQueue.value.push({ paraId: para.id, paraIndex, status: 'queue' });
+            }
+            
+            showToast(`🔄 Đang lấy thêm ${type === 'video' ? 'video' : 'ảnh'}...`);
+            await fetchMedia(para, para.keywords);
+            showToast('✅ Đã gửi lệnh lấy thêm media, chờ vài phút!');
+            
+            // Xóa khỏi queue sau 60s
+            setTimeout(() => {
+                const idx = crawlQueue.value.findIndex(q => q.paraId === para.id);
+                if (idx !== -1) {
+                    crawlQueue.value.splice(idx, 1);
+                    // Nếu còn queue thì chuyển cái đầu tiên thành inprogress
+                    if (crawlQueue.value.length > 0 && crawlQueue.value[0].status === 'queue') {
+                        crawlQueue.value[0].status = 'inprogress';
+                    }
+                }
+            }, 60000);
         }
 
         async function deleteAsset(asset, para) {
@@ -1002,6 +1046,13 @@ createApp({
             editModal.value.saving = false;
         }
 
+        async function restartCrawSub() {
+            if (!confirm('Restart dịch vụ craw-sub?')) return;
+            const res = await fetch('/api/restart-craw-sub', { method: 'POST' });
+            const data = await res.json();
+            alert(data.message);
+        }
+
         async function createVoice() {
             voiceModal.value = {
                 open: true,
@@ -1162,6 +1213,10 @@ createApp({
                             curPara.images = updPara.images || [];
                         }
                     });
+                    // Cập nhật ước tính đoạn đang crawl
+                    if (posts.value.find(p => p.id === activePostId.value)?.status === 'crawling') {
+                        estimateCurrentCrawlingPara();
+                    }
                 }
             } catch (error) {
                 console.error("Lỗi khi update media ngầm:", error);
@@ -1188,12 +1243,37 @@ createApp({
             (newStatus) => {
                 if (newStatus === 'crawling') {
                     startMediaPolling();
+                    // Ước tính đoạn đang crawl dựa vào số lượng asset
+                    estimateCurrentCrawlingPara();
                 } else {
                     stopMediaPolling();
+                    currentCrawlingPara.value = null;
                 }
             },
             { immediate: true }
         );
+
+        async function estimateCurrentCrawlingPara() {
+            if (!activePost.value?.paragraphs) return;
+            // Tìm đoạn đầu tiên có asset > 0 (đang crawl) hoặc đoạn đầu tiên có asset = 0 (chưa crawl)
+            for (let i = 0; i < activePost.value.paragraphs.length; i++) {
+                const para = activePost.value.paragraphs[i];
+                const assetCount = (para.videos?.length || 0) + (para.images?.length || 0);
+                
+                // Nếu đoạn này có asset > 0 mà đoạn sau = 0 → đây là đoạn đang crawl
+                if (assetCount > 0) {
+                    const nextPara = activePost.value.paragraphs[i + 1];
+                    if (!nextPara || ((nextPara.videos?.length || 0) + (nextPara.images?.length || 0)) === 0) {
+                        currentCrawlingPara.value = i + 1;
+                        console.log(`[DEBUG] Crawling para: ${i + 1}, assets: ${assetCount}`);
+                        return;
+                    }
+                }
+            }
+            // Nếu tất cả = 0 → đang crawl đoạn 1
+            currentCrawlingPara.value = 1;
+            console.log(`[DEBUG] All empty, crawling para: 1`);
+        }
         // ==========================================
 
         loadPosts();
@@ -1247,6 +1327,7 @@ createApp({
             startCropResize,
             submitEdit,
             createVoice,
+            restartCrawSub,
             retryDownloadVoice,
             submitCreateVoice,
             genAudio,
@@ -1273,6 +1354,9 @@ createApp({
             onDropFiles,
             onSelectFiles,
             submitUpload,
+            refetchMedia,
+            crawlQueue,
+            currentCrawlingPara,
         };
     }
 }).mount('#app');

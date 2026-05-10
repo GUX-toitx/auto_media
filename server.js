@@ -26,6 +26,10 @@ app.use(express.json()); // BẮT BUỘC PHẢI CÓ DÒNG NÀY Ở ĐÂY
 const DB_PATH = path.join(DB_DIR, 'media_system.sqlite');
 const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 
+// Queue lock cho single crawl jobs
+let singleCrawlRunning = false;
+const singleCrawlQueue = [];
+
 // API: Lấy danh sách posts
 app.get('/api/posts', async (req, res) => {
     try {
@@ -116,20 +120,30 @@ app.post('/api/save-content', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Cập nhật API lấy Media
-app.post('/api/generate-media', (req, res) => {
+// Cập nhật API lấy Media với queue riêng cho single jobs
+app.post('/api/generate-media', async (req, res) => {
     const { videoId, groupId, keywords } = req.body;
     
     if (!keywords || keywords.length === 0) {
         return res.status(400).json({ error: "Không có từ khóa để tìm kiếm" });
     }
 
-    console.log(`\n[HỆ THỐNG] Bắt đầu lấy Media cho: Dự án ${videoId} | Nhóm ${groupId}`);
-    console.log(`[HỆ THỐNG] Từ khóa: ${keywords.join(', ')}`);
+    // Kiểm tra xem có single job nào đang chạy không
+    if (singleCrawlRunning) {
+        singleCrawlQueue.push({ videoId, groupId, keywords });
+        return res.json({ 
+            success: true, 
+            message: `Đã thêm vào hàng đợi (${singleCrawlQueue.length} job đang chờ)` 
+        });
+    }
+
+    console.log(`\n[SINGLE JOB] Bắt đầu lấy Media cho: Dự án ${videoId} | Nhóm ${groupId}`);
+    console.log(`[SINGLE JOB] Từ khóa: ${keywords.join(', ')}`);
+
+    singleCrawlRunning = true;
 
     // Chạy file craw_sub.js như một tiến trình riêng
-    // Chúng ta truyền thêm các tham số để script biết chỉ crawl cho 1 nhóm cụ thể
-    const pythonProcess = spawn('node', [
+    const crawlProcess = spawn('node', [
         'craw_sub.js',
         '--mode', 'single',
         '--videoId', videoId,
@@ -137,16 +151,31 @@ app.post('/api/generate-media', (req, res) => {
         '--keywords', keywords.join(',')
     ]);
 
-    pythonProcess.stdout.on('data', (data) => {
-        console.log(`[CRAWLER LOG]: ${data}`);
+    crawlProcess.stdout.on('data', (data) => {
+        console.log(`[SINGLE JOB]: ${data}`);
     });
 
-    pythonProcess.stderr.on('data', (data) => {
-        console.error(`[CRAWLER ERROR]: ${data}`);
+    crawlProcess.stderr.on('data', (data) => {
+        console.error(`[SINGLE JOB ERROR]: ${data}`);
     });
 
-    pythonProcess.on('close', (code) => {
-        console.log(`[HỆ THỐNG] Script Crawl đã hoàn thành với mã thoát: ${code}`);
+    crawlProcess.on('close', (code) => {
+        console.log(`[SINGLE JOB] Hoàn thành với mã thoát: ${code}`);
+        singleCrawlRunning = false;
+        
+        // Xử lý job tiếp theo trong queue
+        if (singleCrawlQueue.length > 0) {
+            const nextJob = singleCrawlQueue.shift();
+            console.log(`[SINGLE JOB] Xử lý job tiếp theo trong queue (còn ${singleCrawlQueue.length})`);
+            // Gọi lại API này với job tiếp theo
+            setTimeout(() => {
+                fetch(`http://localhost:${PORT}/api/generate-media`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(nextJob)
+                }).catch(err => console.error('[Queue] Lỗi xử lý job:', err));
+            }, 2000); // Nghỉ 2s trước khi chạy job tiếp
+        }
     });
 
     // Trả về phản hồi ngay lập tức cho Web để người dùng không phải chờ lâu
@@ -323,6 +352,12 @@ app.post('/api/create-voice', async (req, res) => {
 });
 
 // API: Xóa toàn bộ project
+app.post('/api/restart-craw-sub', (req, res) => {
+    const pm2 = spawn('pm2', ['restart', 'craw-sub', '--update-env'], { detached: true, stdio: 'ignore' });
+    pm2.unref();
+    res.json({ message: 'Đã gửi lệnh restart craw-sub. Vui lòng chờ vài giây.' });
+});
+
 app.post('/api/delete-project', async (req, res) => {
     const { videoId } = req.body;
     try {

@@ -17,6 +17,8 @@ import { fetchFromCnnBot } from './cnnCrawler.js';
 import { fetchFromGoogleImageBot } from './googleImageCrawler.js';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const EXEC_ENV = { ...process.env, PATH: `/home/gux/.deno/bin:${process.env.PATH}` };
+
 
 // ==========================================
 // 1. CẤU HÌNH API KEYS VÀ ĐƯỜNG DẪN
@@ -184,54 +186,46 @@ const withTimeout = (promise, ms, name) => {
     return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
 };
 
-async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 5) {
-    if (!keyword) return 0;
-    let totalDownloaded = 0;
-    
-    const providers = [
-        { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
-        { name: 'Pexels', fetcher: fetchFromPexels },
-        { name: 'DVIDS (Bot)', fetcher: fetchFromDvidsBot },
-        { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot },
-        { name: 'Reuters (Bot)', fetcher: fetchFromReutersBot },
-        { name: 'AP News (Bot)', fetcher: fetchFromApnewsBot },
-        { name: 'Al Jazeera (Bot)', fetcher: fetchFromAlJazeeraBot },
-        { name: 'CNN (Bot)', fetcher: fetchFromCnnBot },
-        { name: 'Google Image (Bot)', fetcher: fetchFromGoogleImageBot },
-    ];
-    
-    console.log(`   -> [${type.toUpperCase()}] Tìm "${keyword}" | Mỗi nguồn: ${countPerSource}`);
-    
-    const tasks = providers.map(provider => async () => {
+const PROVIDERS = [
+    { name: 'Pexels',             fetcher: fetchFromPexels,          timeout: 20000  },
+    { name: 'Google Image (Bot)', fetcher: fetchFromGoogleImageBot,  timeout: 60000  },
+    { name: 'DVIDS (Bot)',        fetcher: fetchFromDvidsBot,        timeout: 90000  },
+    { name: 'Bellingcat (Bot)',   fetcher: fetchFromBellingcatBot,   timeout: 90000  },
+    { name: 'AP News (Bot)',      fetcher: fetchFromApnewsBot,       timeout: 60000  },
+    { name: 'Al Jazeera (Bot)',   fetcher: fetchFromAlJazeeraBot,    timeout: 180000 },
+    { name: 'CNN (Bot)',          fetcher: fetchFromCnnBot,          timeout: 180000 },
+    // Storyblocks: key "test_" -> không có quyền gọi API thực
+    // Reuters: DataDome block 100%
+];
+
+// Trả về array of tasks (không tự chạy) để caller gom lại chạy chung
+function buildStockTasks(keyword, type, targetDir, countPerSource = 5) {
+    if (!keyword) return [];
+    return PROVIDERS.map(provider => async () => {
         try {
-            // 🟢 THIẾT QUÂN LUẬT: Ép mỗi Bot chỉ được chạy tối đa 120 giây (2 phút).
             const got = await withTimeout(
-                provider.fetcher(keyword, type, targetDir, countPerSource), 
-                120000, 
+                provider.fetcher(keyword, type, targetDir, countPerSource),
+                provider.timeout,
                 provider.name
             );
-            
-            if (got > 0 || typeof got === 'number') {
-                console.log(`      [${provider.name}] Tải được: ${got}/${countPerSource} ${type}`);
-            }
-            return typeof got === 'number' ? got : 0;
+            const n = typeof got === 'number' ? got : 0;
+            console.log(`      [${provider.name}] Tải được: ${n}/${countPerSource} ${type} ("${keyword}")`);
+            return n;
         } catch (e) {
             console.log(`      [${provider.name}] ⚠️ Lỗi: ${e.message}`);
             return 0;
         }
     });
+}
 
-    // Chạy đa luồng
-    const results = await runConcurrently(tasks, 5); 
-
-    for (const res of results) {
-        if (res.status === 'fulfilled') {
-            totalDownloaded += (res.value || 0);
-        }
-    }
-    
-    console.log(`   -> [${type.toUpperCase()}] "${keyword}" xong: ${totalDownloaded} ${type}`);
-    return totalDownloaded;
+async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 5) {
+    if (!keyword) return 0;
+    console.log(`   -> [${type.toUpperCase()}] Tìm "${keyword}" | Mỗi nguồn: ${countPerSource}`);
+    const tasks = buildStockTasks(keyword, type, targetDir, countPerSource);
+    const results = await runConcurrently(tasks, 5);
+    const total = results.reduce((s, r) => s + (r.status === 'fulfilled' ? (r.value || 0) : 0), 0);
+    console.log(`   -> [${type.toUpperCase()}] "${keyword}" xong: ${total} ${type}`);
+    return total;
 }
 
 // ==========================================
@@ -381,12 +375,11 @@ async function runSingleCrawl(videoId, paragraphId, keywordsArray) {
     // Gom toàn bộ nhiệm vụ tải Video và Ảnh của tất cả Keywords vào 1 mảng
     // SỬA kws -> keywordsArray
     for (const kw of keywordsArray) { 
-        mediaTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, 5));
-        mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, 5));
+        mediaTasks.push(...buildStockTasks(kw, 'video', vFolder, 5));
+        mediaTasks.push(...buildStockTasks(kw, 'image', iFolder, 5));
     }
 
-    // CHẠY ĐA LUỒNG: Chạy 2 Keyword/Type cùng lúc
-    await runConcurrently(mediaTasks, 2);
+    await runConcurrently(mediaTasks, 15);
 
     // Sync asset mới vào DB
     const syncAssets = async (folderPath, assetType) => {
@@ -449,10 +442,9 @@ async function processNextInQueue() {
             dbPostTitle = projectId;
             
             // 🟢 LỚP KHIÊN: Ép yt-dlp chỉ tải video <= 300 giây (5 phút)
-            execSync(`yt-dlp --cookies ./youtube.com_cookies.txt --match-filter "duration <= 300" -f "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/mp4" -o "${targetDir}/original.%(ext)s" "${projectId}"`, { stdio: 'inherit' });
+            execSync(`yt-dlp --cookies ./youtube.com_cookies.txt --match-filter "duration <= 300" -f "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/mp4" -o "${targetDir}/original.%(ext)s" "${projectId}"`, { stdio: 'inherit', env: EXEC_ENV });
             
-            // Lệnh lấy Subtitle giữ nguyên
-            execSync(`yt-dlp --cookies ./youtube.com_cookies.txt --write-sub --write-auto-subs --sub-lang ${lang} --convert-subs srt --skip-download -o "${targetDir}/original.%(ext)s" "${projectId}" --ignore-errors`, { stdio: 'inherit' });
+            execSync(`yt-dlp --cookies ./youtube.com_cookies.txt --write-sub --write-auto-subs --sub-lang ${lang} --convert-subs srt --skip-download -o "${targetDir}/original.%(ext)s" "${projectId}" --ignore-errors`, { stdio: 'inherit', env: EXEC_ENV });
 
             const srtFile = fs.readdirSync(targetDir).find(f => f.endsWith('.srt') && f.includes(`.${lang.toLowerCase()}.`));
             if (srtFile) fs.renameSync(path.join(targetDir, srtFile), path.join(targetDir, 'sub.srt'));
@@ -569,10 +561,11 @@ async function processNextInQueue() {
                     const vFolder = path.join(targetDir, 'assets', '_raw_videos', scene.gid);
                     const iFolder = path.join(targetDir, 'assets', '_raw_images', scene.gid);
                     
+                    // Gom tất cả bot của mọi keyword thành 1 pool task phẳng
                     const mediaTasks = [];
                     for (const kw of scene.kws) {
-                        mediaTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, 5));
-                        mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, 5));
+                        mediaTasks.push(...buildStockTasks(kw, 'video', vFolder, 5));
+                        mediaTasks.push(...buildStockTasks(kw, 'image', iFolder, 5));
                     }
 
                     // Định nghĩa hàm Sync DB trước
@@ -616,8 +609,8 @@ async function processNextInQueue() {
                     // Kích hoạt vòng lặp chạy song song (Lưu ý: KHÔNG dùng chữ await ở đây)
                     const syncPromise = liveSyncTask();
 
-                    // 🟢 BẮT ĐẦU CHẠY ĐA LUỒNG TẢI MEDIA
-                    await runConcurrently(mediaTasks, 2);
+                    // 🟢 BẮT ĐẦU CHẠY ĐA LUỒNG TẢI MEDIA — tất cả bot chạy song song, limit 10
+                    await runConcurrently(mediaTasks, 4);
 
                     // Khi hàm tải xong, báo hiệu cho vòng lặp Live Sync dừng lại
                     isSceneDownloading = false;
@@ -662,8 +655,94 @@ async function processNextInQueue() {
 // ==========================================
 // 5. KHỞI CHẠY HỆ THỐNG
 // ==========================================
+// Resume các project bị dở dang dựa vào DB
+async function recoverFromDB() {
+    const db = await initDB();
+    const crawlingPosts = await db.all(`SELECT id, title FROM Post WHERE status = 'crawling'`);
+    if (crawlingPosts.length === 0) { await db.close(); return; }
+
+    console.log(`[RECOVERY] Phát hiện ${crawlingPosts.length} dự án bị dở. Đang resume...`);
+
+    for (const post of crawlingPosts) {
+        const projectId = post.title.replace(/_[a-z]{2}$/, '');
+        console.log(`[RECOVERY] Resume: ${post.title} (project: ${projectId})`);
+
+        const pendingScenes = await db.all(`
+            SELECT p.id as dbParagraphId, p."order" as gid,
+                   GROUP_CONCAT(k.content, '||') as keywords
+            FROM Paragraph p
+            LEFT JOIN Keyword k ON k.paragraph_id = p.id
+            WHERE p.post_id = ? AND p.id NOT IN (SELECT DISTINCT paragraph_id FROM Asset WHERE paragraph_id IS NOT NULL)
+            GROUP BY p.id
+            ORDER BY p."order"
+        `, [post.id]);
+
+        if (pendingScenes.length === 0) {
+            console.log(`[RECOVERY] ${post.title}: tất cả cảnh đã có asset. Đánh dấu DONE.`);
+            await db.run(`UPDATE Post SET status = NULL WHERE id = ?`, [post.id]);
+            continue;
+        }
+
+        console.log(`[RECOVERY] ${post.title}: có ${pendingScenes.length} cảnh chưa có asset. Bắt đầu tải...`);
+        const targetDir = path.join(BASE_DIR, projectId);
+
+        for (const scene of pendingScenes) {
+            const kws = (scene.keywords || 'cinematic b-roll').split('||').filter(Boolean);
+            const gid = String(scene.gid);
+            const vFolder = path.join(targetDir, 'assets', '_raw_videos', gid);
+            const iFolder = path.join(targetDir, 'assets', '_raw_images', gid);
+            [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+
+            console.log(`   - [RECOVERY Cảnh ${gid}] Keywords: ${kws.join(', ')}`);
+
+            const mediaTasks = [];
+            for (const kw of kws) {
+                mediaTasks.push(...buildStockTasks(kw, 'video', vFolder, 5));
+                mediaTasks.push(...buildStockTasks(kw, 'image', iFolder, 5));
+            }
+
+            let isDownloading = true;
+            const syncAssets = async (folderPath, assetType) => {
+                const videoExts = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm']);
+                const imageExts = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif']);
+                const validExts = assetType === 'video' ? videoExts : imageExts;
+                const subDir = assetType === 'video' ? '_raw_videos' : '_raw_images';
+                if (!fs.existsSync(folderPath)) return;
+                const files = fs.readdirSync(folderPath).filter(f => f.startsWith('stock_') && validExts.has(path.extname(f).toLowerCase()));
+                for (const file of files) {
+                    const relativePath = path.join(projectId, 'assets', subDir, gid, file);
+                    const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
+                    if (!exists) {
+                        console.log(`      [LIVE SYNC] Vừa lưu ngay 1 ${assetType} vào DB cho Cảnh ${gid}`);
+                        await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [scene.dbParagraphId, assetType, relativePath]);
+                    }
+                }
+            };
+
+            const liveSyncTask = async () => {
+                while (isDownloading) {
+                    try { await syncAssets(vFolder, 'video'); await syncAssets(iFolder, 'image'); } catch (e) {}
+                    await sleep(2000);
+                }
+            };
+            const syncPromise = liveSyncTask();
+            await runConcurrently(mediaTasks, 4);
+            isDownloading = false;
+            await syncPromise;
+            await syncAssets(vFolder, 'video');
+            await syncAssets(iFolder, 'image');
+            await sleep(2000);
+        }
+
+        await db.run(`UPDATE Post SET status = NULL WHERE id = ?`, [post.id]);
+        console.log(`[RECOVERY] Xong: ${post.title}`);
+    }
+    await db.close();
+}
+
 async function startQueueManager() {
     console.log("=== HỆ THỐNG QUẢN LÝ HÀNG ĐỢI (CÓ SYNC DATABASE) ĐÃ CHẠY ===");
+    await recoverFromDB();
     while (true) {
         const hasWork = await processNextInQueue();
         if (hasWork) {
@@ -675,6 +754,20 @@ async function startQueueManager() {
         }
     }
 }
+
+// Global error handler - chống crash im lặng
+process.on('uncaughtException', (err) => {
+    console.error(`[CRASH] uncaughtException: ${err.message}`, err.stack);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error(`[CRASH] unhandledRejection:`, reason);
+});
+
+// Graceful shutdown - giải phóng Chrome khi PM2 restart
+process.on('SIGINT', async () => {
+    console.log('\n[SHUTDOWN] Nhận tín hiệu restart, đang dọn dẹp...');
+    process.exit(0);
+});
 
 // KHỞI CHẠY
 const args = process.argv.slice(2);

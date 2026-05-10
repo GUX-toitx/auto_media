@@ -203,13 +203,15 @@ export async function fetchFromApnewsBot(keyword, type, targetDir, neededCount) 
                     if (ogImage) mediaUrls.push(ogImage.split('?')[0]);
 
                     // Quét toàn diện thẻ img trong bài báo (mở rộng vùng tìm kiếm)
+                    const adDomains = /ad\.gt|adnxs\.com|doubleclick\.net|pubmatic\.com|adsrvr\.org|tapad\.com|openx\.net|360yield\.com|moatads\.com|scorecardresearch|googletagmanager|facebook\.net|twitter\.com\/i\/|pixel\.|tracking\.|analytics\./i;
                     $$('img').each((i, el) => {
                         const src = $$(el).attr('src') || $$(el).attr('data-src');
-                        // Bỏ qua các icon, logo rác
-                        if (src && src.startsWith('http') && !src.match(/logo|avatar|icon|tracking/i)) {
+                        if (src && src.startsWith('http') && !src.match(/logo|avatar|icon|tracking/i) && !adDomains.test(src)) {
                             mediaUrls.push(src.split('?')[0]);
                         }
                     });
+                    // Lọc thêm lần cuối toàn bộ mediaUrls
+                    mediaUrls = mediaUrls.filter(u => !adDomains.test(u));
                 }
 
                 mediaUrls = [...new Set(mediaUrls)];
