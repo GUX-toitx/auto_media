@@ -90,9 +90,17 @@
                                             <div class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap">{{ s.content }}</div>
                                         </div>
                                     </div>
-                                    <div v-if="s.audioUrl" class="flex items-center gap-2 bg-gray-800/40 rounded-lg px-2 py-1">
-                                        <span class="text-[9px] font-black text-green-400 shrink-0">🎵</span>
-                                        <audio controls :src="s.audioUrl" class="h-7 flex-1" preload="metadata"></audio>
+                                    <div v-if="s.originalAudioUrl || s.audioUrl" class="grid grid-cols-2 gap-2">
+                                        <div v-if="s.originalAudioUrl" class="flex items-center gap-2 bg-gray-800/40 rounded-lg px-2 py-1">
+                                            <span class="text-[9px] font-black text-orange-400 shrink-0">🇻🇳</span>
+                                            <audio controls :src="s.originalAudioUrl" class="h-7 flex-1" preload="metadata"></audio>
+                                        </div>
+                                        <div v-else class="bg-gray-800/20 rounded-lg px-2 py-1 flex items-center justify-center text-[9px] text-gray-600">Chưa có audio Vi</div>
+                                        <div v-if="s.audioUrl" class="flex items-center gap-2 bg-gray-800/40 rounded-lg px-2 py-1">
+                                            <span class="text-[9px] font-black text-green-400 shrink-0">🎵</span>
+                                            <audio controls :src="s.audioUrl" class="h-7 flex-1" preload="metadata"></audio>
+                                        </div>
+                                        <div v-else class="bg-gray-800/20 rounded-lg px-2 py-1 flex items-center justify-center text-[9px] text-gray-600">Chưa có audio target</div>
                                     </div>
                                     <!-- Video selected của câu này -->
                                     <div v-if="(para.videos || []).filter(v => v.selected && v.sentenceId == s.id).length">
@@ -376,10 +384,17 @@
                     </select>
                 </div>
                 <div>
-                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Giọng mẫu</label>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Giọng mẫu ({{ voiceModal.lang || 'Target' }})</label>
                     <select v-model="voiceModal.speakerUuid" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
                         <option value="">-- Chọn giọng mẫu --</option>
-                        <option v-for="s in voiceModal.speakers" :key="s.uuid" :value="s.uuid">{{ s.speaker_name }}</option>
+                        <option v-for="s in voiceModal.speakers.filter(sp => sp.language === voiceModal.lang)" :key="s.uuid" :value="s.uuid">{{ s.speaker_name }}</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Giọng mẫu (Tiếng Việt)</label>
+                    <select v-model="voiceModal.speakerUuidVi" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
+                        <option value="">-- Chọn giọng mẫu tiếng Việt --</option>
+                        <option v-for="s in voiceModal.speakers.filter(sp => sp.language === 'vi')" :key="s.uuid" :value="s.uuid">{{ s.speaker_name }}</option>
                     </select>
                 </div>
                 <div class="flex gap-3 justify-end pt-2">
@@ -664,6 +679,11 @@ createApp({
             localStorage.setItem('activePostId', post.id);
             const res = await fetch(`/api/posts/${post.id}`);
             const data = await res.json();
+            if (!data.paragraphs) {
+                console.error('API error:', data);
+                alert('Lỗi tải dữ liệu: ' + (data.error || 'Unknown error'));
+                return;
+            }
             // thêm reactive state cho từng paragraph
             data.paragraphs = data.paragraphs.map(p => ({
                 ...p,
@@ -1059,6 +1079,7 @@ createApp({
                 postId: activePostId.value,
                 lang: activePost.value?.title?.match(/_([a-z]{2})$/)?.[1] || 'en',
                 speakerUuid: '',
+                speakerUuidVi: '',
                 langs: [],
                 speakers: [],
                 batchUuid: ''
@@ -1074,13 +1095,13 @@ createApp({
         }
 
         async function submitCreateVoice() {
-            const { lang, speakerUuid, postId } = voiceModal.value;
-            if (!lang || !speakerUuid) return alert('Vui lòng chọn đủ!');
+            const { lang, speakerUuid, speakerUuidVi, postId } = voiceModal.value;
+            if (!lang || !speakerUuid || !speakerUuidVi) return alert('Vui lòng chọn đủ ngôn ngữ và 2 giọng!');
 
             const res = await fetch('/api/create-voice', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ videoId: activeProjectId.value, postId, lang, speakerUuid })
+                body: JSON.stringify({ videoId: activeProjectId.value, postId, lang, speakerUuid, speakerUuidVi })
             });
             const r = await res.json();
 

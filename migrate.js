@@ -40,6 +40,7 @@ export async function initDB() {
             content TEXT,
             original_content TEXT,
             audio TEXT,
+            original_audio TEXT,
             "order" INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY(paragraph_id) REFERENCES Paragraph(id)
         );

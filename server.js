@@ -61,9 +61,13 @@ app.get('/api/posts/:postId', async (req, res) => {
 
             // Sentences kèm audio
             para.sentences = (await db.all(
-                'SELECT id, content, original_content, audio, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"',
+                'SELECT id, content, original_content, audio, original_audio, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"',
                 [para.id]
-            )).map(s => ({ ...s, audioUrl: s.audio ? `/${s.audio}` : null }));
+            )).map(s => ({ 
+                ...s, 
+                audioUrl: s.audio ? `/${s.audio}` : null,
+                originalAudioUrl: s.original_audio ? `/${s.original_audio}` : null
+            }));
 
             // Keywords từ DB
             para.keywords = (await db.all(
@@ -282,22 +286,44 @@ app.post('/api/update-batch-status', async (req, res) => {
 app.post('/api/check-download-voice', async (req, res) => {
     try {
         const { batchUuid, postId, videoId } = req.body;
+        
+        if (!batchUuid || !postId || !videoId) {
+            return res.status(400).json({ error: 'Missing required parameters' });
+        }
+        
         const batchData = await fetch(`${process.env.VOICE_API}/user/batch/${batchUuid}`, {
             headers: { 'x-api-key': process.env.API_KEY, 'x-tenant': process.env.TENANT }
-        }).then(r => r.json());
+        }).then(r => r.json()).catch(err => {
+            console.error('[check-download-voice] Error fetching batch:', err.message);
+            return { status: 'ERROR' };
+        });
+        
         const status = batchData.data?.status || batchData.status;
+        console.log('[check-download-voice] Batch status:', status);
 
         if (status === 'OK' && postId && videoId) {
             const db = await getDb();
-            const post = await db.get('SELECT title FROM Post WHERE id = ?', [postId]);
+            const post = await db.get('SELECT title, audio_uuid_vi FROM Post WHERE id = ?', [postId]);
+            
+            if (!post) {
+                await db.close();
+                return res.status(404).json({ error: 'Post not found' });
+            }
+            
             const lang = post?.title?.match(/_([a-z]{2})$/)?.[1] || 'unknown';
             const sentences = await db.all(
                 'SELECT id, "order" FROM Sentence WHERE paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?) ORDER BY "order"',
                 [postId]
             );
+            
+            console.log('[check-download-voice] Found', sentences.length, 'sentences for post', postId);
+            
+            // Tải audio target language
             const baseDir = path.join(MEDIA_DIR, videoId, 'output', lang, 'audios');
+            console.log('[check-download-voice] Downloading target audio to:', baseDir);
             const result = await downloadBatchAudios(batchUuid, baseDir, sentences.map(s => String(s.order)), sentences.map(s => s.id));
             console.log('[Voice] downloadBatchAudios result:', result ? result.total : 'null');
+            
             if (result) {
                 for (const r of result.results) {
                     if (r.paragraphId) {
@@ -306,11 +332,49 @@ app.post('/api/check-download-voice', async (req, res) => {
                     }
                 }
             }
+            
+            // Tải audio Vietnamese (original) nếu có
+            if (post?.audio_uuid_vi) {
+                console.log('[check-download-voice] Checking Vietnamese batch:', post.audio_uuid_vi);
+                const batchDataVi = await fetch(`${process.env.VOICE_API}/user/batch/${post.audio_uuid_vi}`, {
+                    headers: { 'x-api-key': process.env.API_KEY, 'x-tenant': process.env.TENANT }
+                }).then(r => r.json()).catch(err => {
+                    console.error('[check-download-voice] Error fetching Vi batch:', err.message);
+                    return { status: 'ERROR' };
+                });
+                
+                const statusVi = batchDataVi.data?.status || batchDataVi.status;
+                console.log('[check-download-voice] Vietnamese batch status:', statusVi);
+                
+                if (statusVi === 'OK') {
+                    const baseDirVi = path.join(MEDIA_DIR, videoId, 'output', 'vi_original', 'audios');
+                    console.log('[check-download-voice] Downloading Vietnamese audio to:', baseDirVi);
+                    const resultVi = await downloadBatchAudios(post.audio_uuid_vi, baseDirVi, sentences.map(s => String(s.order)), sentences.map(s => s.id));
+                    console.log('[Voice] downloadBatchAudios Vi result:', resultVi ? resultVi.total : 'null');
+                    
+                    if (resultVi) {
+                        for (const r of resultVi.results) {
+                            if (r.paragraphId) {
+                                await db.run('UPDATE Sentence SET original_audio = ? WHERE id = ?', [r.relativePath, r.paragraphId]);
+                                console.log(`[Voice] Saved original audio for sentence ${r.paragraphId}: ${r.relativePath}`);
+                            }
+                        }
+                    }
+                } else {
+                    console.log('[check-download-voice] Vietnamese batch not ready yet:', statusVi);
+                }
+            } else {
+                console.log('[check-download-voice] No Vietnamese batch UUID found');
+            }
+            
             await db.close();
         }
 
         res.json({ status });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { 
+        console.error('[check-download-voice] Error:', e.message, e.stack);
+        res.status(500).json({ error: e.message }); 
+    }
 });
 
 app.post('/api/generate-media-video', async (req, res) => {
@@ -338,16 +402,29 @@ app.get('/api/reference-speakers', async (req, res) => {
 
 app.post('/api/create-voice', async (req, res) => {
     try {
-        const { videoId, postId, lang, speakerUuid } = req.body;
+        const { videoId, postId, lang, speakerUuid, speakerUuidVi } = req.body;
         const projectDir = path.join(MEDIA_DIR, videoId);
-        const result = await generateAudios(projectDir, postId, lang, speakerUuid);
+        const result = await generateAudios(projectDir, postId, lang, speakerUuid, speakerUuidVi);
 
-        // Lưu batchUuid vào bảng Post
+        // Lưu cả 2 batchUuid vào bảng Post (audio_uuid cho target, audio_uuid_vi cho Vietnamese)
         const db = await getDb();
         await db.run('UPDATE Post SET audio_uuid = ? WHERE id = ?', [result.batch_uuid, postId]);
+        // Lưu batch_uuid_vi vào cột mới (cần thêm cột này)
+        await db.run('ALTER TABLE Post ADD COLUMN audio_uuid_vi TEXT').catch(() => {});
+        if (result.batch_uuid_vi) {
+            await db.run('UPDATE Post SET audio_uuid_vi = ? WHERE id = ?', [result.batch_uuid_vi, postId]);
+        }
         await db.close();
+        
+        // Update status để bắt đầu xử lý batch
+        console.log('[create-voice] Updating batch status for:', result.batch_uuid);
+        await updateBatchStatus(result.batch_uuid);
+        if (result.batch_uuid_vi) {
+            console.log('[create-voice] Updating batch status for Vi:', result.batch_uuid_vi);
+            await updateBatchStatus(result.batch_uuid_vi);
+        }
 
-        res.json({ batch_uuid: result.batch_uuid, folderNames: result.folderNames, paragraphIds: result.paragraphIds });
+        res.json({ batch_uuid: result.batch_uuid, batch_uuid_vi: result.batch_uuid_vi, folderNames: result.folderNames, paragraphIds: result.paragraphIds });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

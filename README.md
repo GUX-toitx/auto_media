@@ -23,12 +23,18 @@ sudo apt install python3-websockets -y
     npm install -g pm2
 - Khởi động:
     pm2 start ecosystem.config.cjs
+    pm2 save  # LƯU LẠI để tự động khởi động khi PM2 daemon restart
+- Setup tự khởi động khi boot (chỉ chạy 1 lần):
+    pm2 startup
+    # Copy lệnh mà PM2 đưa ra và chạy với sudo
+    pm2 save
 - Mở dashboard: http://localhost:3000
 - Xem log:
     pm2 logs auto-media
     pm2 logs craw-sub
 - Restart:
     pm2 restart auto-media
+    pm2 save  # Nhớ save sau khi thay đổi
 - Dừng:
     pm2 stop auto-media
 - Khởi động lại sau khi dừng:
@@ -36,7 +42,7 @@ sudo apt install python3-websockets -y
 - Xóa khỏi pm2:
     pm2 delete auto-media
 - Xóa và start lại:
-    pm2 delete all && pm2 start ecosystem.config.cjs
+    pm2 delete all && pm2 start ecosystem.config.cjs && pm2 save
 
 # Lưu ý khi chạy lần đầu với Playwright:
 1. chạy npx playwright install chromium để tải chromium 
