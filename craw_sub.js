@@ -31,6 +31,9 @@ const PRIVATE_KEY = process.env.STORYBLOCKS_PRIVATE_KEY;
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY; 
 const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY;
 
+const VIDEOS_PER_SOURCE = 15;
+const IMAGES_PER_SOURCE = 10;
+
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
 const parser = new Parser();
 const creds = JSON.parse(fs.readFileSync('./google_sheet.json', 'utf8'));
@@ -101,7 +104,7 @@ async function fetchFromStoryblocks(keyword, type, targetDir, neededCount) {
     const ext = type === 'video' ? 'mp4' : 'jpg';
     const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const resource = type === 'video' ? '/api/v2/videos/search' : '/api/v2/images/search';
-    const url = buildStoryblocksUrlV2(resource, { keywords: keyword, results_per_page: neededCount * 2, sort: 'most_relevant' });
+    const url = buildStoryblocksUrlV2(resource, { keywords: keyword, results_per_page: neededCount * 2, framerate: 'all', has_people: 'ignore', sort: 'most_relevant' });
     try {
         const response = await fetch(url);
         if (!response.ok) return 0;
@@ -184,7 +187,7 @@ const withTimeout = (promise, ms, name) => {
     return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
 };
 
-async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 5) {
+async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = VIDEOS_PER_SOURCE) {
     if (!keyword) return 0;
     let totalDownloaded = 0;
     
@@ -207,7 +210,7 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
             // 🟢 THIẾT QUÂN LUẬT: Ép mỗi Bot chỉ được chạy tối đa 120 giây (2 phút).
             const got = await withTimeout(
                 provider.fetcher(keyword, type, targetDir, countPerSource), 
-                120000, 
+                300000, 
                 provider.name
             );
             
@@ -381,8 +384,8 @@ async function runSingleCrawl(videoId, paragraphId, keywordsArray) {
     // Gom toàn bộ nhiệm vụ tải Video và Ảnh của tất cả Keywords vào 1 mảng
     // SỬA kws -> keywordsArray
     for (const kw of keywordsArray) { 
-        mediaTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, 5));
-        mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, 5));
+        mediaTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, VIDEOS_PER_SOURCE));
+        mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, IMAGES_PER_SOURCE));
     }
 
     // CHẠY ĐA LUỒNG: Chạy 2 Keyword/Type cùng lúc
@@ -571,8 +574,8 @@ async function processNextInQueue() {
                     
                     const mediaTasks = [];
                     for (const kw of scene.kws) {
-                        mediaTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, 5));
-                        mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, 5));
+                        mediaTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, VIDEOS_PER_SOURCE));
+                        mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, IMAGES_PER_SOURCE));
                     }
 
                     // Định nghĩa hàm Sync DB trước

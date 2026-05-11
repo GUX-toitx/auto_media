@@ -77,8 +77,8 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
 
     // ĐỊNH TUYẾN TÌM KIẾM
     const searchUrl = type === 'video' 
-        ? `https://www.bing.com/videos/search?q=${encodeURIComponent(keyword)}`
-        : `https://www.bing.com/images/search?q=${encodeURIComponent(keyword)}&form=HDRSC3`;
+        ? `https://www.bing.com/videos/search?q=${encodeURIComponent(keyword)}&safesearch=off`
+        : `https://www.bing.com/images/search??q=${encodeURIComponent(keyword)}&safesearch=off&form=HDRSC3`;
 
     const proxy = await getOldestProxy();
     let anonymizedProxyUrl = null;
@@ -108,38 +108,7 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
         let mediaUrls = [];
 
         if (type === 'video') {
-            // 🟢 THUẬT TOÁN BÓC VIDEO 3.0: Săn tìm các link OVP (Online Video Preview) của Bing
-            
-            // Cuộn trang để Bing nạp thêm video
-            await page.evaluate(() => window.scrollBy(0, 1500));
-            await delay(2500);
-            
-            const html = await page.content();
-            const $ = cheerio.load(html);
-
-            // 1. Lọc từ thuộc tính data-metadata (JSON chuẩn)
-            $('[data-metadata]').each((i, el) => {
-                const meta = $(el).attr('data-metadata');
-                if (meta) {
-                    try {
-                        const parsed = JSON.parse(meta);
-                        // Bing lưu link video xem trước vào biến videoUrl
-                        if (parsed.videoUrl && parsed.videoUrl.includes('OVP')) {
-                            mediaUrls.push(parsed.videoUrl);
-                        }
-                    } catch (e) {}
-                }
-            });
-
-            // 2. Vét cạn bằng Regex để không lọt lưới (Tìm mọi link có chứa OVP)
-            const ovpRegex = /https:\/\/th\.bing\.com\/th\/id\/OVP\.[a-zA-Z0-9_-]+(?:[^\s"'<>\\]*)?/g;
-            const matches = html.match(ovpRegex) || [];
-            
-            // Xử lý chuỗi Unicode nếu có (\u0026 -> &)
-            matches.forEach(url => {
-                mediaUrls.push(url.replace(/\\u0026/g, '&'));
-            });
-
+            return 0;
         } else {
             // BÓC ẢNH (Giữ nguyên thuật toán bóc ảnh Full HD cực tốt)
             await page.evaluate(() => window.scrollBy(0, 1000));
