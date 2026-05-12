@@ -416,6 +416,214 @@ async function runSingleCrawl(videoId, paragraphId, keywordsArray) {
 // 5. HỆ THỐNG QUẢN LÝ HÀNG ĐỢI (SERIAL QUEUE MANAGER)
 // ==========================================
 
+// Hàm khôi phục và chạy tiếp các project đang dở dạng
+async function recoverTaskFromDB() {
+    console.log('[RECOVERY] Kiểm tra các project đang dở dạng trong DB...');
+    const db = await initDB();
+    
+    // Tìm tất cả các post đang ở trạng thái 'crawling'
+    const unfinishedPosts = await db.all('SELECT id, title FROM Post WHERE status = ?', ['crawling']);
+    
+    if (unfinishedPosts.length === 0) {
+        console.log('[RECOVERY] Không có project nào đang dở dạng.');
+        await db.close();
+        return null;
+    }
+    
+    console.log(`[RECOVERY] Tìm thấy ${unfinishedPosts.length} project đang dở dạng:`);
+    unfinishedPosts.forEach(p => console.log(`  - ${p.title} (ID: ${p.id})`));
+    
+    // Lấy project đầu tiên để tiếp tục
+    const post = unfinishedPosts[0];
+    console.log(`[RECOVERY] Tiếp tục project: ${post.title}`);
+    
+    // Lấy thông tin project từ title
+    const projectId = post.title.replace(/_[a-z]{2}$/, '');
+    const targetLang = post.title.match(/_([a-z]{2})$/)?.[1] || null;
+    
+    // Lấy tất cả paragraphs của project
+    const paragraphs = await db.all(
+        'SELECT id, content, original_content FROM Paragraph WHERE post_id = ? ORDER BY id',
+        [post.id]
+    );
+    
+    console.log(`[RECOVERY] Project có ${paragraphs.length} paragraphs`);
+    
+    // Kiểm tra paragraph nào chưa có media (hoặc có ít media)
+    const targetDir = path.join(BASE_DIR, projectId);
+    const incompleteParagraphs = [];
+    
+    for (let i = 0; i < paragraphs.length; i++) {
+        const para = paragraphs[i];
+        const gid = String(i + 1);
+        
+        // Kiểm tra số lượng asset trong DB
+        const assetCount = await db.get(
+            'SELECT COUNT(*) as count FROM Asset WHERE paragraph_id = ?',
+            [para.id]
+        );
+        
+        // Lấy keywords
+        const keywords = await db.all(
+            'SELECT content FROM Keyword WHERE paragraph_id = ?',
+            [para.id]
+        );
+        
+        // Nếu chưa có asset hoặc có ít hơn 5 asset và có keywords thì coi như chưa xong
+        if (keywords.length > 0 && assetCount.count < 5) {
+            incompleteParagraphs.push({
+                ...para,
+                gid,
+                keywords: keywords.map(k => k.content),
+                currentAssetCount: assetCount.count
+            });
+        }
+    }
+    
+    await db.close();
+    
+    if (incompleteParagraphs.length === 0) {
+        console.log('[RECOVERY] Tất cả paragraphs đã có media, chuyển sang DONE');
+        const db2 = await initDB();
+        await db2.run('UPDATE Post SET status = NULL WHERE id = ?', [post.id]);
+        await db2.close();
+        
+        // Cập nhật Google Sheet nếu có
+        try {
+            const doc = new GoogleSpreadsheet(SPREADSHEET_ID, serviceAccountAuth);
+            await doc.loadInfo();
+            const rows = await doc.sheetsByIndex[0].getRows();
+            const targetRow = rows.find(row => row.get('Video ID') === projectId);
+            if (targetRow && targetRow.get('Trạng thái') === 'PROCESSING') {
+                targetRow.set('Trạng thái', 'DONE');
+                targetRow.set('Thư mục Lưu trữ', targetDir);
+                await targetRow.save();
+            }
+        } catch (e) {
+            console.log('[RECOVERY] Không thể cập nhật Google Sheet:', e.message);
+        }
+        
+        return null;
+    }
+    
+    console.log(`[RECOVERY] Còn ${incompleteParagraphs.length} paragraphs chưa hoàn thành:`);
+    incompleteParagraphs.forEach(p => {
+        console.log(`  - Paragraph ${p.gid}: ${p.currentAssetCount} assets, keywords: ${p.keywords.join(', ')}`);
+    });
+    
+    return {
+        projectId,
+        targetLang,
+        postId: post.id,
+        postTitle: post.title,
+        incompleteParagraphs
+    };
+}
+
+// Hàm tiếp tục tải media cho project dở dạng
+async function continueUnfinishedProject(recoveryData) {
+    const { projectId, postId, postTitle, incompleteParagraphs } = recoveryData;
+    const targetDir = path.join(BASE_DIR, projectId);
+    const db = await initDB();
+    
+    console.log(`\n[RECOVERY] Tiếp tục tải media cho project: ${projectId}`);
+    console.log(`[RECOVERY] Số paragraphs cần hoàn thành: ${incompleteParagraphs.length}`);
+    
+    try {
+        for (const para of incompleteParagraphs) {
+            console.log(`\n   - [Cảnh ${para.gid}] Đang tải media (Chế độ Đa Luồng)...`);
+            
+            const vFolder = path.join(targetDir, 'assets', '_raw_videos', para.gid);
+            const iFolder = path.join(targetDir, 'assets', '_raw_images', para.gid);
+            
+            // Tạo folder nếu chưa có
+            [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+            
+            const mediaTasks = [];
+            for (const kw of para.keywords) {
+                mediaTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, VIDEOS_PER_SOURCE));
+                mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, IMAGES_PER_SOURCE));
+            }
+            
+            // Hàm sync assets vào DB
+            const syncAssetsToDB = async (folderPath, assetType, paragraphIdToLink) => {
+                const videoExts = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm']);
+                const imageExts = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif']);
+                const validExts = assetType === 'video' ? videoExts : imageExts;
+                const subDir = assetType === 'video' ? '_raw_videos' : '_raw_images';
+                
+                if (!fs.existsSync(folderPath)) return;
+                
+                const files = fs.readdirSync(folderPath).filter(f => f.startsWith('stock_') && validExts.has(path.extname(f).toLowerCase()));
+                for (const file of files) {
+                    const relativePath = path.join(projectId, 'assets', subDir, para.gid, file);
+                    const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
+                    if (!exists) {
+                        console.log(`      [LIVE SYNC] Vừa lưu ngay 1 ${assetType} vào DB cho Cảnh ${para.gid}`);
+                        await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [paragraphIdToLink, assetType, relativePath]);
+                    }
+                }
+            };
+            
+            // Live sync trong lúc tải
+            let isSceneDownloading = true;
+            const liveSyncTask = async () => {
+                while (isSceneDownloading) {
+                    try {
+                        await syncAssetsToDB(vFolder, 'video', para.id);
+                        await syncAssetsToDB(iFolder, 'image', para.id);
+                    } catch (err) {
+                        // Bỏ qua lỗi DB locked
+                    }
+                    await sleep(2000);
+                }
+            };
+            
+            const syncPromise = liveSyncTask();
+            await runConcurrently(mediaTasks, 2);
+            isSceneDownloading = false;
+            await syncPromise;
+            
+            // Quét vết cuối cùng
+            await syncAssetsToDB(vFolder, 'video', para.id);
+            await syncAssetsToDB(iFolder, 'image', para.id);
+            
+            await sleep(2000);
+        }
+        
+        // Hoàn thành project
+        console.log(`\n[RECOVERY] Đã hoàn thành project: ${projectId}`);
+        await db.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]);
+        
+        // Cập nhật Google Sheet
+        try {
+            const doc = new GoogleSpreadsheet(SPREADSHEET_ID, serviceAccountAuth);
+            await doc.loadInfo();
+            const rows = await doc.sheetsByIndex[0].getRows();
+            const targetRow = rows.find(row => row.get('Video ID') === projectId);
+            if (targetRow && targetRow.get('Trạng thái') === 'PROCESSING') {
+                targetRow.set('Trạng thái', 'DONE');
+                targetRow.set('Thư mục Lưu trữ', targetDir);
+                await targetRow.save();
+            }
+        } catch (e) {
+            console.log('[RECOVERY] Không thể cập nhật Google Sheet:', e.message);
+        }
+        
+        // Notify dashboard
+        fetch(`http://localhost:${PORT}/api/crawl-status/notify`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postTitle, status: null })
+        }).catch(() => {});
+        
+    } catch (e) {
+        console.error(`[RECOVERY ERROR] ${projectId}:`, e.message);
+        await db.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]);
+    }
+    
+    await db.close();
+}
+
 async function processNextInQueue() {
     const doc = new GoogleSpreadsheet(SPREADSHEET_ID, serviceAccountAuth);
     await doc.loadInfo();
@@ -667,6 +875,15 @@ async function processNextInQueue() {
 // ==========================================
 async function startQueueManager() {
     console.log("=== HỆ THỐNG QUẢN LÝ HÀNG ĐỢI (CÓ SYNC DATABASE) ĐÃ CHẠY ===");
+    
+    // Kiểm tra và khôi phục project dở dạng trước khi chạy queue mới
+    const recoveryData = await recoverTaskFromDB();
+    if (recoveryData) {
+        console.log('[RECOVERY] Bắt đầu khôi phục project dở dạng...');
+        await continueUnfinishedProject(recoveryData);
+        console.log('[RECOVERY] Hoàn thành khôi phục, chuyển sang xử lý queue mới');
+    }
+    
     while (true) {
         const hasWork = await processNextInQueue();
         if (hasWork) {
