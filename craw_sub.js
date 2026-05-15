@@ -10,8 +10,7 @@ import OpenAI from 'openai';
 import { initDB } from './migrate.js';
 import { fetchFromDvidsBot } from './dvidsCrawler.js';
 import { fetchFromBellingcatBot } from './bellingcatCrawler.js';
-import { fetchFromReutersBot } from './reutersCrawler.js';
-import { fetchFromApnewsBot } from './apnewsCrawler.js';
+// import { fetchFromApnewsBot } from './apnewsCrawler.js';
 import { fetchFromAlJazeeraBot } from './aljazeeraCrawler.js';
 import { fetchFromCnnBot } from './cnnCrawler.js';
 import { fetchFromGoogleImageBot } from './googleImageCrawler.js';
@@ -31,8 +30,8 @@ const PRIVATE_KEY = process.env.STORYBLOCKS_PRIVATE_KEY;
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY; 
 const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY;
 
-const VIDEOS_PER_SOURCE = 15;
-const IMAGES_PER_SOURCE = 10;
+const VIDEOS_PER_SOURCE = 4;
+const IMAGES_PER_SOURCE = 4;
 
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
 const parser = new Parser();
@@ -196,10 +195,9 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
         { name: 'Pexels', fetcher: fetchFromPexels },
         { name: 'DVIDS (Bot)', fetcher: fetchFromDvidsBot },
         { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot },
-        { name: 'Reuters (Bot)', fetcher: fetchFromReutersBot },
-        { name: 'AP News (Bot)', fetcher: fetchFromApnewsBot },
+        // { name: 'AP News (Bot)', fetcher: fetchFromApnewsBot },
         { name: 'Al Jazeera (Bot)', fetcher: fetchFromAlJazeeraBot },
-        { name: 'CNN (Bot)', fetcher: fetchFromCnnBot },
+        // { name: 'CNN (Bot)', fetcher: fetchFromCnnBot },
         { name: 'Google Image (Bot)', fetcher: fetchFromGoogleImageBot },
     ];
     
