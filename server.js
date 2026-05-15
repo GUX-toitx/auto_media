@@ -606,7 +606,7 @@ app.post('/api/ai-generate', async (req, res) => {
 app.post('/api/chrome-profiles/:id/login', async (req, res) => {
     try {
         const db = await getDb();
-        const profile = await db.get('SELECT id, email, password, proxy FROM ChromeProfile WHERE id = ?', [req.params.id]);
+        const profile = await db.get('SELECT id, email, password FROM ChromeProfile WHERE id = ?', [req.params.id]);
         await db.close();
         if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
@@ -620,7 +620,7 @@ app.post('/api/chrome-profiles/:id/login', async (req, res) => {
         await db2.run('UPDATE ChromeProfile SET profile_dir = ? WHERE id = ?', [profileDirName, profile.id]);
         await db2.close();
 
-        const child = spawn('node', args, { stdio: 'inherit' });
+        const child = spawn('node', args, { detached: false, stdio: 'inherit' });
         child.unref();
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
