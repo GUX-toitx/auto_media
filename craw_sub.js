@@ -1,3 +1,6 @@
+import { fetchIPv4 as fetch } from './fetchIPv4.js';
+import dns from 'dns';
+dns.setDefaultResultOrder('ipv4first');
 import 'dotenv/config';
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 import path from 'path';
@@ -101,13 +104,18 @@ function buildStoryblocksUrlV2(resource, params = {}) {
 async function fetchFromStoryblocks(keyword, type, targetDir, neededCount) {
     let downloaded = 0;
     const ext = type === 'video' ? 'mp4' : 'jpg';
+    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
     const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const resource = type === 'video' ? '/api/v2/videos/search' : '/api/v2/images/search';
     const url = buildStoryblocksUrlV2(resource, { keywords: keyword, results_per_page: neededCount * 2, framerate: 'all', has_people: 'ignore', sort: 'most_relevant' });
     try {
         const response = await fetch(url);
-        if (!response.ok) return 0;
+        if (!response.ok) {
+            console.log(`      [${keyword}][Storyblocks] ❌ HTTP ${response.status}`);
+            return 0;
+        }
         const data = await response.json();
+        console.log(`      [${keyword}][Storyblocks] Tìm thấy ${data.results?.length || 0} kết quả ${type}`);
         for (const item of (data.results || [])) {
             if (downloaded >= neededCount) break;
             let downloadUrl = type === 'video' ? (item.preview_url || (item.preview_urls && (item.preview_urls.mp4 || Object.values(item.preview_urls)[0]))) : (item.preview_url || item.thumbnail_url);
@@ -115,11 +123,13 @@ async function fetchFromStoryblocks(keyword, type, targetDir, neededCount) {
                 const savePath = path.join(targetDir, `stock_${existing + downloaded + 1}.${ext}`);
                 try {
                     const res = await fetch(downloadUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-                    if (res.ok) { fs.writeFileSync(savePath, Buffer.from(await res.arrayBuffer())); downloaded++; }
-                } catch (e) { console.error('Lỗi tải Storyblocks:', e.message); }
+                    if (res.ok) { fs.writeFileSync(savePath, Buffer.from(await res.arrayBuffer())); downloaded++;
+                        console.log(`\x1b[33m      [${keyword}][Storyblocks] \ud83d\udce5 ${type.toUpperCase()} bốc từ: ${downloadUrl}\x1b[0m`);
+                    }
+                } catch (e) { console.error(`      [${keyword}][Storyblocks] Lỗi tải:`, e.message); }
             }
         }
-    } catch (e) { console.log('Lỗi Storyblocks:', e.message); }
+    } catch (e) { console.log(`      [${keyword}][Storyblocks] Lỗi:`, e.message); }
     return downloaded;
 }
 

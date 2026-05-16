@@ -1,3 +1,6 @@
+import { fetchIPv4 as fetch } from './fetchIPv4.js';
+import dns from 'dns';
+dns.setDefaultResultOrder('ipv4first');
 // File: bellingcatCrawler.js
 import fs from 'fs';
 import path from 'path';
@@ -12,12 +15,13 @@ puppeteer.use(StealthPlugin());
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
 // Nhận thêm tham số proxy để tải file ẩn danh
-async function downloadMedia(url, targetDir, ext, proxy = null) {
+async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
     // 🟢 1. CHẶN TỪ VÒNG GỬI XE: Gặp mấy link tải app này thì né luôn, khỏi tải
     if (url.includes('onelink.me') || url.includes('app-store') || url.includes('play.google')) {
         return false;
     }
 
+    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
     const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const savePath = path.join(targetDir, `stock_${existing + 1}.${ext}`);
 
@@ -198,8 +202,9 @@ export async function fetchFromBellingcatBot(keyword, type, targetDir, neededCou
 
                     const finalUrl = url.startsWith('//') ? `https:${url}` : url;
                     
-                    if (await downloadMedia(finalUrl, targetDir, ext, proxy)) {
+                    if (await downloadMedia(finalUrl, targetDir, ext, proxy, keyword)) {
                         downloaded++;
+                        console.log(`\x1b[33m      [${keyword}][Bellingcat Bot] 📥 ${type.toUpperCase()} bốc từ: ${link}\x1b[0m`);
                         console.log(`      [${keyword}][Bellingcat Bot] ---> Đã lấy OSINT thành công ${downloaded}/${neededCount} ${type}`);
                     }
                 }

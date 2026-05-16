@@ -1,8 +1,11 @@
+import { fetchIPv4 as fetch } from './fetchIPv4.js';
 import crypto from 'crypto';
+import dns from 'dns';
+dns.setDefaultResultOrder('ipv4first');
 
 // Copy nguyên cặp key của bạn vào đây
-const PUBLIC_KEY = 'test_9cb0c8fde8b26045c96741419208b3375aaa29be8a7cb53bdcdd014c9cf'; 
-const PRIVATE_KEY = 'test_642f2b19c5e574d3f189f28b78a1d1c802f0802ab385be61ed6c6a5bafc';
+const PUBLIC_KEY = 'test_977ec1f6be07a66229b434a575890b06caf21b5d1c727a27e53a9ab35ad'; 
+const PRIVATE_KEY = 'test_d32754f41533fe7e0d467675e8438e72321bcebbce1375f1f00c4f162fd';
 
 function buildStoryblocksUrlV2(resource, params = {}) {
     const expires = Math.floor(Date.now() / 1000) + 3600;
@@ -34,7 +37,7 @@ async function testVideoAPI() {
         console.log("\nKết quả thô từ Server (Giới hạn 500 ký tự):");
         console.log(text.substring(0, 500)); 
     } catch (e) {
-        console.log("Lỗi mạng:", e.message);
+        console.log("Lỗi mạng:", e);
     }
 }
 

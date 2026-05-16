@@ -1,3 +1,6 @@
+import { fetchIPv4 as fetch } from './fetchIPv4.js';
+import dns from 'dns';
+dns.setDefaultResultOrder('ipv4first');
 import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';

@@ -1,3 +1,6 @@
+import { fetchIPv4 as fetch } from './fetchIPv4.js';
+import dns from 'dns';
+dns.setDefaultResultOrder('ipv4first');
 // File: reutersCrawler.js
 import fs from 'fs';
 import path from 'path';
@@ -154,6 +157,7 @@ export async function fetchFromReutersBot(keyword, type, targetDir, neededCount)
                     
                     if (await downloadMedia(finalUrl, targetDir, ext)) {
                         downloaded++;
+                        console.log(`\x1b[33m      [Reuters Bot] 📥 ${type.toUpperCase()} bốc từ: ${link}\x1b[0m`);
                         console.log(`      [Reuters Bot] ---> Đã lấy tin thành công ${downloaded}/${neededCount} ${type}`);
                     }
                 }

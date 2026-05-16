@@ -1,3 +1,6 @@
+import { fetchIPv4 as fetch } from './fetchIPv4.js';
+import dns from 'dns';
+dns.setDefaultResultOrder('ipv4first');
 // File: aljazeeraCrawler.js
 import fs from 'fs';
 import path from 'path';
@@ -12,41 +15,28 @@ puppeteer.use(StealthPlugin());
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
 // Nhận thêm tham số proxy để tải file an toàn
-async function downloadMedia(url, targetDir, ext, proxy = null) {
-    // 🟢 1. CHẶN TỪ VÒNG GỬI XE: Gặp mấy link tải app này thì né luôn, khỏi tải
+async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
     if (url.includes('onelink.me') || url.includes('app-store') || url.includes('play.google')) {
         return false;
     }
 
+    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
     const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const savePath = path.join(targetDir, `stock_${existing + 1}.${ext}`);
 
     try {
         const fetchOptions = { headers: { 'User-Agent': 'Mozilla/5.0' } };
-        
-        if (proxy && proxy.dispatcher) {
-            fetchOptions.dispatcher = proxy.dispatcher;
-        }
-
-        // Ép Timeout 15s để chống treo Bot
+        if (proxy && proxy.dispatcher) fetchOptions.dispatcher = proxy.dispatcher;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000);
         fetchOptions.signal = controller.signal;
-
         const res = await fetch(url, fetchOptions);
-        clearTimeout(timeoutId); 
-
+        clearTimeout(timeoutId);
         if (res.ok) {
             const contentType = (res.headers.get('content-type') || '').toLowerCase();
-            
-            // 🟢 2. BẢO VỆ CHO VIDEO: Bắt buộc phải là video thật
-            if (ext === 'mp4' && !contentType.includes('video')) {
-                return false;
-            }
-            
-            // 🟢 3. BẢO VỆ CHO ẢNH (Vừa thêm): Bắt buộc phải là ảnh thật (loại trừ HTML từ onelink.me)
+            if (ext === 'mp4' && !contentType.includes('video')) return false;
             if (ext === 'jpg' && !contentType.includes('image')) {
-                console.log(`      [${keyword}][Aljazeera][Bỏ qua] Server không trả về Ảnh thật! (Bị lỗi giả danh URL: ${url})`);
+                console.log(`      [${keyword}][Aljazeera][Bỏ qua] Server không trả về Ảnh thật! (URL: ${url})`);
                 return false;
             }
 
@@ -226,8 +216,9 @@ export async function fetchFromAlJazeeraBot(keyword, type, targetDir, neededCoun
 
                     const finalUrl = url.startsWith('//') ? `https:${url}` : url;
                     
-                    if (await downloadMedia(finalUrl, targetDir, ext, proxy)) {
+                    if (await downloadMedia(finalUrl, targetDir, ext, proxy, keyword)) {
                         downloaded++;
+                        console.log(`\x1b[33m      [${keyword}][AlJazeera Bot] 📥 ${type.toUpperCase()} bốc từ: ${link}\x1b[0m`);
                         console.log(`      [${keyword}][AlJazeera Bot] ---> Đã lấy tin thành công ${downloaded}/${neededCount} ${type}`);
                     }
                 }

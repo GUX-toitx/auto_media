@@ -1,3 +1,6 @@
+import { fetchIPv4 as fetch } from './fetchIPv4.js';
+import dns from 'dns';
+dns.setDefaultResultOrder('ipv4first');
 // File: apnewsCrawler.js
 import fs from 'fs';
 import path from 'path';
@@ -54,6 +57,7 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
         return false;
     }
 
+    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
     const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const savePath = path.join(targetDir, `stock_${existing + 1}.${ext}`);
 

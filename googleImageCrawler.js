@@ -1,3 +1,6 @@
+import { fetchIPv4 as fetch } from './fetchIPv4.js';
+import dns from 'dns';
+dns.setDefaultResultOrder('ipv4first');
 // File: googleImageCrawler.js (Bản 3.0 - Săn Video OVP của Bing)
 import fs from 'fs';
 import path from 'path';
@@ -11,12 +14,12 @@ puppeteer.use(StealthPlugin());
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-async function downloadMedia(url, targetDir, ext, proxy = null) {
-    // 🟢 1. CHẶN TỪ VÒNG GỬI XE: Gặp mấy link tải app này thì né luôn, khỏi tải
+async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
     if (url.includes('onelink.me') || url.includes('app-store') || url.includes('play.google')) {
         return false;
     }
 
+    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
     const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const savePath = path.join(targetDir, `stock_${existing + 1}.${ext}`);
 
@@ -65,7 +68,7 @@ async function downloadMedia(url, targetDir, ext, proxy = null) {
         }
     } catch (e) {
         if (e.name !== 'AbortError') {
-             console.error(`      [${keyword}][Bling Lỗi Tải File] URL: ${url} - ${e.message}`);
+             console.error(`      [${keyword}][Bing Lỗi Tải File] URL: ${url} - ${e.message}`);
         }
     }
     return false;
@@ -147,8 +150,9 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
         for (const url of mediaUrls) {
             if (downloaded >= neededCount) break;
             // Hàm downloadMedia sẽ tự động thêm đuôi .mp4 vào cuối file khi lưu
-            if (await downloadMedia(url, targetDir, ext, proxy)) {
+            if (await downloadMedia(url, targetDir, ext, proxy, keyword)) {
                 downloaded++;
+                console.log(`\x1b[33m      [${keyword}][Web ${type.toUpperCase()} Bot] 📥 ${type.toUpperCase()} bốc từ: ${url}\x1b[0m`);
                 console.log(`      [${keyword}][Web ${type.toUpperCase()} Bot] ---> Đã lấy thành công ${downloaded}/${neededCount}`);
             }
         }

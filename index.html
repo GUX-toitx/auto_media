@@ -1169,12 +1169,25 @@ createApp({
                 const updatedData = await res.json();
                 
                 if (updatedData && updatedData.paragraphs) {
+                    // Nếu số paragraph tăng (crawl xong cảnh mới) thì thêm vào
+                    if (updatedData.paragraphs.length > activePost.value.paragraphs.length) {
+                        for (let i = activePost.value.paragraphs.length; i < updatedData.paragraphs.length; i++) {
+                            const newPara = updatedData.paragraphs[i];
+                            activePost.value.paragraphs.push({
+                                ...newPara,
+                                videoOpen: false,
+                                imageOpen: false,
+                                sentencesOpen: true,
+                            });
+                        }
+                    }
+                    // Cập nhật videos/images cho tất cả paragraph hiện có
                     activePost.value.paragraphs.forEach((curPara, index) => {
                         const updPara = updatedData.paragraphs[index];
                         if (updPara) {
-                            // Chỉ cập nhật mảng videos và images, không chạm vào UI State (videoOpen, imageOpen...)
                             curPara.videos = updPara.videos || [];
                             curPara.images = updPara.images || [];
+                            curPara.sentences = updPara.sentences || curPara.sentences;
                         }
                     });
                 }
