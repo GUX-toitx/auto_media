@@ -191,14 +191,14 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
     let totalDownloaded = 0;
     
     const providers = [
-        // { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
-        // { name: 'Pexels', fetcher: fetchFromPexels },
-        // { name: 'DVIDS (Bot)', fetcher: fetchFromDvidsBot },
-        // { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot },
+        { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
+        { name: 'Pexels', fetcher: fetchFromPexels },
+        { name: 'DVIDS (Bot)', fetcher: fetchFromDvidsBot },
+        { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot },
         { name: 'AP News (Bot)', fetcher: fetchFromApnewsBot },
-        // { name: 'Al Jazeera (Bot)', fetcher: fetchFromAlJazeeraBot },
+        { name: 'Al Jazeera (Bot)', fetcher: fetchFromAlJazeeraBot },
         // { name: 'CNN (Bot)', fetcher: fetchFromCnnBot },
-        // { name: 'Google Image (Bot)', fetcher: fetchFromGoogleImageBot },
+        { name: 'Google Image (Bot)', fetcher: fetchFromGoogleImageBot },
     ];
     
     console.log(`   -> [${type.toUpperCase()}] Tìm "${keyword}" | Mỗi nguồn: ${countPerSource}`);

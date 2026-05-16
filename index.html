@@ -94,7 +94,7 @@
                                                 <div class="flex gap-1">
                                                     <button class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</button>
                                                     <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-green-600 uppercase">✓</button>
-                                                    <button @click="openEdit(v, 'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                    <button @click="openEdit(v, 'video', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -111,7 +111,7 @@
                                                 <div class="flex gap-1">
                                                     <button class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</button>
                                                     <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-green-600 uppercase">✓</button>
-                                                    <button @click="openEdit(img, 'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                    <button @click="openEdit(img, 'image', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -157,7 +157,7 @@
                                     <span v-if="v.selected" class="text-[9px] font-black py-1 px-2 rounded bg-blue-600 text-white min-w-[24px] text-center">#{{ v.order }}</span>
                                     <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-1 rounded uppercase transition-colors"
                                         :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openEdit(v, 'video')" :disabled="!v.selected"
+                                    <button @click="openEdit(v, 'video', para)" :disabled="!v.selected"
                                         class="text-[9px] font-black py-1 px-2 rounded transition-colors"
                                         :class="v.selected ? 'bg-yellow-500 hover:bg-yellow-400 text-black' : 'bg-gray-800 text-gray-700 cursor-not-allowed'">Edit</button>
                                 </div>
@@ -192,7 +192,7 @@
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white min-w-[20px] text-center">#{{ img.order }}</span>
                                     <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
                                         :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openEdit(img, 'image')" :disabled="!img.selected"
+                                    <button @click="openEdit(img, 'image', para)" :disabled="!img.selected"
                                         class="text-[9px] font-black py-0.5 px-1.5 rounded transition-colors"
                                         :class="img.selected ? 'bg-yellow-500 hover:bg-yellow-400 text-black' : 'bg-gray-800 text-gray-700 cursor-not-allowed'">Edit</button>
                                 </div>
@@ -868,9 +868,9 @@ createApp({
             return m + ':' + String(sec).padStart(2, '0');
         }
 
-        function openEdit(asset, type) {
+        function openEdit(asset, type, para) {
             editModal.value = {
-                open: true, type, asset,
+                open: true, type, asset, _para: para,
                 start: 0, end: 0, duration: 0, currentTime: 0,
                 order: asset.order || 0,
                 duration_val: asset.duration || 0,
@@ -994,7 +994,7 @@ createApp({
 
         async function submitEdit() {
             editModal.value.saving = true;
-            const { type, asset, start, end, cropX, cropY, cropW, cropH, scaleX, scaleY } = editModal.value;
+            const { type, asset, start, end, cropX, cropY, cropW, cropH, scaleX, scaleY, _para } = editModal.value;
             try {
                 let res;
                 if (type === 'video') {
@@ -1006,9 +1006,12 @@ createApp({
                 if (r.success) {
                     showToast('✅ Đã lưu!');
                     editModal.value.open = false;
-                    // Force reload bằng timestamp để bust cache browser, áp dụng cho cả video và ảnh
-                    const baseUrl = asset.url.split('?')[0];
-                    asset.url = baseUrl + '?t=' + Date.now();
+                    const ts = '?t=' + Date.now();
+                    await reloadParaAssets(_para);
+                    // Bust cache cho tất cả assets vừa reload
+                    [...(_para.videos || []), ...(_para.images || [])].forEach(a => {
+                        a.url = a.url.split('?')[0] + ts;
+                    });
                 } else alert('❌ ' + r.error);
             } catch(e) { alert('❌ ' + e.message); }
             editModal.value.saving = false;

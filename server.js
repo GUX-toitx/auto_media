@@ -514,15 +514,12 @@ app.post('/api/crop', async (req, res) => {
     try {
         const { execSync } = await import('child_process');
         execSync(`ffmpeg -i "${fullPath}" -vf "crop=${width}:${height}:${x}:${y}" -y "${outPath}"`);
-        const newRelativePath = relativePath.replace(ext, `_cropped${ext}`);
+        // Ghi đè lên file gốc
+        fs.renameSync(outPath, fullPath);
         const db = await getDb();
-        const asset = await db.get('SELECT id, paragraph_id, type FROM Asset WHERE file_path = ?', [relativePath]);
-        if (asset) {
-            await db.run('UPDATE Asset SET duration = ? WHERE id = ?', [duration || null, asset.id]);
-            await db.run('INSERT OR IGNORE INTO Asset (paragraph_id, type, selected, duration, file_path) VALUES (?, ?, 0, ?, ?)', [asset.paragraph_id, asset.type, duration || null, newRelativePath]);
-        }
+        await db.run('UPDATE Asset SET duration = ? WHERE file_path = ?', [duration || null, relativePath]);
         await db.close();
-        res.json({ success: true, newRelativePath });
+        res.json({ success: true, newRelativePath: relativePath });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -531,20 +528,62 @@ app.post('/api/trim', async (req, res) => {
     const fullPath = path.join(MEDIA_DIR, relativePath);
     if (!fs.existsSync(fullPath)) return res.status(404).json({ error: '404' });
     const ext = path.extname(fullPath);
-    const tmpPath = fullPath.replace(ext, `_tmp${ext}`);
+    const base = fullPath.slice(0, -ext.length);
+    const ts = Date.now();
+    const trimmedPath = `${base}_trim_${ts}${ext}`;
+    const trimmedRelative = path.relative(MEDIA_DIR, trimmedPath);
     try {
         const { execSync } = await import('child_process');
         const dur = end - start;
-        execSync(`ffmpeg -ss ${start} -t ${dur} -i "${fullPath}" -c copy -y "${tmpPath}"`);
-        fs.renameSync(tmpPath, fullPath);
-        if (duration != null) {
-            const db = await getDb();
-            await db.run('UPDATE Asset SET duration = ? WHERE file_path = ?', [duration, relativePath]);
-            await db.close();
+        execSync(`ffmpeg -ss ${start} -t ${dur} -i "${fullPath}" -c copy -y "${trimmedPath}"`);
+
+        const db = await getDb();
+        const orig = await db.get('SELECT id, paragraph_id, sentence_id, type, selected, "order" FROM Asset WHERE file_path = ?', [relativePath]);
+        if (orig) {
+            // Unselect file gốc
+            await db.run('UPDATE Asset SET selected = 0, "order" = 0 WHERE id = ?', [orig.id]);
+            // File trim chính - kế thừa selected/order của file gốc
+            await db.run(
+                'INSERT INTO Asset (paragraph_id, sentence_id, type, selected, "order", duration, file_path) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [orig.paragraph_id, orig.sentence_id, orig.type, orig.selected, orig.order, duration || null, trimmedRelative]
+            );
+            // Phần trước [0, start]
+            if (start > 0.5) {
+                const beforePath = `${base}_trim_before_${ts}${ext}`;
+                const beforeRelative = path.relative(MEDIA_DIR, beforePath);
+                try {
+                    execSync(`ffmpeg -ss 0 -t ${start} -i "${fullPath}" -c copy -y "${beforePath}"`);
+                    await db.run(
+                        'INSERT INTO Asset (paragraph_id, sentence_id, type, selected, "order", duration, file_path) VALUES (?, NULL, ?, 0, 0, ?, ?)',
+                        [orig.paragraph_id || await db.get('SELECT paragraph_id FROM Sentence WHERE id = ?', [orig.sentence_id]).then(r => r?.paragraph_id), orig.type, Math.round(start * 10) / 10, beforeRelative]
+                    );
+                } catch(e) { /* bỏ qua nếu lỗi */ }
+            }
+            // Phần sau [end, total]
+            const totalDur = await (async () => {
+                try {
+                    const { execSync } = await import('child_process');
+                    const out = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${fullPath}"`);
+                    return parseFloat(out.toString().trim());
+                } catch(e) { return orig.duration || 0; }
+            })();
+            if (totalDur && (totalDur - end) > 0.5) {
+                const afterPath = `${base}_trim_after_${ts}${ext}`;
+                const afterRelative = path.relative(MEDIA_DIR, afterPath);
+                try {
+                    execSync(`ffmpeg -ss ${end} -i "${fullPath}" -c copy -y "${afterPath}"`);
+                    const paraId = orig.paragraph_id || await db.get('SELECT paragraph_id FROM Sentence WHERE id = ?', [orig.sentence_id]).then(r => r?.paragraph_id);
+                    await db.run(
+                        'INSERT INTO Asset (paragraph_id, sentence_id, type, selected, "order", duration, file_path) VALUES (?, NULL, ?, 0, 0, ?, ?)',
+                        [paraId, orig.type, Math.round((totalDur - end) * 10) / 10, afterRelative]
+                    );
+                } catch(e) { /* bỏ qua nếu lỗi */ }
+            }
         }
-        res.json({ success: true });
+        await db.close();
+        res.json({ success: true, newRelativePath: trimmedRelative });
     } catch (e) {
-        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+        if (fs.existsSync(trimmedPath)) fs.unlinkSync(trimmedPath);
         res.status(500).json({ error: e.message });
     }
 });
