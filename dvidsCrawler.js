@@ -34,7 +34,7 @@ function getNextProfilePath() {
         });
 
     if (profiles.length === 0) {
-        console.error("      [DVIDS Bot] ⚠️ Không tìm thấy profile nào trong thư mục /settings");
+        console.error("      [${keyword}][DVIDS Bot] ⚠️ Không tìm thấy profile nào trong thư mục /settings");
         return null;
     }
 
@@ -52,7 +52,7 @@ function getNextProfilePath() {
     // 4. Lưu lại index cho lần chạy sau
     fs.writeFileSync(COUNTER_FILE, (nextIndex + 1).toString(), 'utf8');
 
-    console.log(`      [DVIDS Bot] 🔄 Xoay vòng Profile: Sử dụng [${selectedProfile}]`);
+    console.log(`      [${keyword}][DVIDS Bot] 🔄 Xoay vòng Profile: Sử dụng [${selectedProfile}]`);
     return profilePath;
 }
 
@@ -117,7 +117,7 @@ async function downloadMedia(url, targetDir, ext, proxy = null) {
         if (e.name === 'AbortError') {
              console.log(`      [Cảnh báo] Mạng quá chậm, file tải hơn ${ext==='mp4'?'3 phút':'15 giây'} nên bị hủy!`);
         } else {
-             console.error(`      [Dvids Lỗi Tải File] URL: ${url} - ${e.message}`);
+             console.error(`      [${keyword}][Dvids Lỗi Tải File] URL: ${url} - ${e.message}`);
         }
     }
     return false;
@@ -129,7 +129,7 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
     const searchType = type === 'video' ? 'video' : 'image';
     const searchUrl = `https://www.dvidshub.net/search?q=${encodeURIComponent(keyword)}&filter%5Btype%5D=${searchType}`;
 
-    console.log(`      [DVIDS Bot] Đang bí mật cào: ${searchUrl}`);
+    console.log(`      [${keyword}][DVIDS Bot] Đang bí mật cào: ${searchUrl}`);
 
     // Lấy Profile theo cơ chế xoay vòng
     const profilePath = getNextProfilePath();
@@ -152,7 +152,7 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
     // Gắn IP Proxy vào trình duyệt nếu có
     if (proxy) {
         browserArgs.push(`--proxy-server=${proxy.server}`);
-        console.log(`      [DVIDS Bot] Đang ngụy trang bằng IP: ${proxy.server}`);
+        console.log(`      [${keyword}][DVIDS Bot] Đang ngụy trang bằng IP: ${proxy.server}`);
     }
 
     const browser = await puppeteer.launch({ 
@@ -190,7 +190,7 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
             await page.goto('https://www.dvidshub.net/', { waitUntil: 'domcontentloaded', timeout: 60000 });
         } catch (e) {
             if (e.message.includes('ERR_INVALID_AUTH_CREDENTIALS') || e.message.includes('ERR_TUNNEL_CONNECTION_FAILED')) {
-                console.log(`      [DVIDS Bot] ⛔ Proxy ${proxy.server} bị lỗi xác thực hoặc đã chết. Đang bỏ qua luồng này!`);
+                console.log(`      [${keyword}][DVIDS Bot] ⛔ Proxy ${proxy.server} bị lỗi xác thực hoặc đã chết. Đang bỏ qua luồng này!`);
                 return 0; // Proxy tạch thì trả về 0 cho hệ thống chạy tiếp, không crash tool
             }
             throw e; 
@@ -203,7 +203,7 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
         });
 
         if (!isLoggedIn) {
-            // console.log(`      [DVIDS Bot] ⚠️ Profile chưa login. Vui lòng login tay vào profile này!`);
+            // console.log(`      [${keyword}][DVIDS Bot] ⚠️ Profile chưa login. Vui lòng login tay vào profile này!`);
             // Vẫn có thể cào tiếp vì DVIDS cho phép khách xem, hoặc bạn cho return 0 tùy logic dự án
         }
 
@@ -229,17 +229,17 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
 
         if (detailLinks.length === 0) {
             const pageTitle = await page.title();
-            console.log(`      [DVIDS Bot] ⚠️ Không có kết quả. (Page Title: "${pageTitle}")`);
+            console.log(`      [${keyword}][DVIDS Bot] ⚠️ Không có kết quả. (Page Title: "${pageTitle}")`);
             
             // Nếu bị dính Cloudflare Challenge
             if (pageTitle.includes('Just a moment') || pageTitle.includes('Cloudflare')) {
-                console.log(`      [DVIDS Bot] ⛔ Đã bị Cloudflare chặn!`);
+                console.log(`      [${keyword}][DVIDS Bot] ⛔ Đã bị Cloudflare chặn!`);
                 await delay(5000); 
             }
             return 0; 
         }
 
-        console.log(`      [DVIDS Bot] Đã moi được ${detailLinks.length} bài. Đang bóc file mp4/jpg...`);
+        console.log(`      [${keyword}][DVIDS Bot] Đã moi được ${detailLinks.length} bài. Đang bóc file mp4/jpg...`);
 
         // 2. Chui vào từng bài để bóc file
         for (const link of detailLinks) {
@@ -272,7 +272,7 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
                         // Tìm link embed từ thẻ twitter:player
                         const embedLink = $$('meta[name="twitter:player"]').attr('content');
                         if (embedLink) {
-                            console.log(`      [DVIDS Bot] 🔍 Video bị giấu MP4, đang luồn vào trang Embed: ${embedLink}`);
+                            console.log(`      [${keyword}][DVIDS Bot] 🔍 Video bị giấu MP4, đang luồn vào trang Embed: ${embedLink}`);
                             try {
                                 await page.goto(embedLink, { waitUntil: 'domcontentloaded', timeout: 30000 });
                                 const embedHtml = await page.content();
@@ -297,7 +297,7 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
                     const finalUrl = downloadUrl.startsWith('//') ? `https:${downloadUrl}` : downloadUrl;
                     if (await downloadMedia(finalUrl, targetDir, ext, proxy)) {
                         downloaded++;
-                        console.log(`      [DVIDS Bot] ---> Đã bế thành công ${downloaded}/${neededCount} ${type}`);
+                        console.log(`      [${keyword}][DVIDS Bot] ---> Đã bế thành công ${downloaded}/${neededCount} ${type}`);
                     }
                 }
             } catch (err) {
@@ -305,7 +305,7 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
             }
         }
     } catch (error) {
-        console.error(`      [DVIDS Lỗi Tổng] ${error.message}`);
+        console.error(`      [${keyword}][DVIDS Lỗi Tổng] ${error.message}`);
     } finally {
         await browser.close();
     }

@@ -65,7 +65,7 @@ async function downloadMedia(url, targetDir, ext, proxy = null) {
         }
     } catch (e) {
         if (e.name !== 'AbortError') {
-             console.error(`      [Bling Lỗi Tải File] URL: ${url} - ${e.message}`);
+             console.error(`      [${keyword}][Bling Lỗi Tải File] URL: ${url} - ${e.message}`);
         }
     }
     return false;
@@ -102,7 +102,7 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0');
 
-        console.log(`      [Web ${type.toUpperCase()} Bot] Đang thâm nhập Bing: ${keyword}`);
+        console.log(`      [${keyword}][Web ${type.toUpperCase()} Bot] Đang thâm nhập Bing: ${keyword}`);
         await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
         let mediaUrls = [];
@@ -137,23 +137,23 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
         mediaUrls = [...new Set(mediaUrls)];
 
         if (mediaUrls.length === 0) {
-            console.log(`      [Web ${type.toUpperCase()} Bot] ⚠️ Không thấy ${type}.`);
+            console.log(`      [${keyword}][Web ${type.toUpperCase()} Bot] ⚠️ Không thấy ${type}.`);
             await page.screenshot({ path: path.join(targetDir, `debug_bing_${type}_${Date.now()}.jpg`) });
             return 0;
         }
 
-        console.log(`      [Web ${type.toUpperCase()} Bot] Tìm thấy ${mediaUrls.length} tài nguyên. Đang tải...`);
+        console.log(`      [${keyword}][Web ${type.toUpperCase()} Bot] Tìm thấy ${mediaUrls.length} tài nguyên. Đang tải...`);
 
         for (const url of mediaUrls) {
             if (downloaded >= neededCount) break;
             // Hàm downloadMedia sẽ tự động thêm đuôi .mp4 vào cuối file khi lưu
             if (await downloadMedia(url, targetDir, ext, proxy)) {
                 downloaded++;
-                console.log(`      [Web ${type.toUpperCase()} Bot] ---> Đã lấy thành công ${downloaded}/${neededCount}`);
+                console.log(`      [${keyword}][Web ${type.toUpperCase()} Bot] ---> Đã lấy thành công ${downloaded}/${neededCount}`);
             }
         }
     } catch (error) {
-        console.error(`      [Web Lỗi Tổng] ${error.message}`);
+        console.error(`      [${keyword}][Web Lỗi Tổng] ${error.message}`);
     } finally {
         await browser.close().catch(() => {});
         if (anonymizedProxyUrl) await proxyChain.closeAnonymizedProxy(anonymizedProxyUrl, true).catch(() => {});

@@ -66,7 +66,7 @@ async function downloadMedia(url, targetDir, ext, proxy = null) {
         }
     } catch (e) {
         if (e.name !== 'AbortError') {
-             console.error(`      [CNN Lỗi Tải File] URL: ${url} - ${e.message}`);
+             console.error(`      [${keyword}][CNN Lỗi Tải File] URL: ${url} - ${e.message}`);
         }
     }
     return false;
@@ -96,7 +96,7 @@ export async function fetchFromCnnBot(keyword, type, targetDir, neededCount) {
     
     const searchUrl = `https://edition.cnn.com/search?q=${encodeURIComponent(keyword)}&size=10`;
 
-    console.log(`      [CNN Bot] Đang thâm nhập CNN: ${searchUrl}`);
+    console.log(`      [${keyword}][CNN Bot] Đang thâm nhập CNN: ${searchUrl}`);
 
     const profilePath = path.join(process.cwd(), 'chrome_profile_cnn');
 
@@ -115,7 +115,7 @@ export async function fetchFromCnnBot(keyword, type, targetDir, neededCount) {
     // Gắn IP Proxy vào trình duyệt
     if (proxy) {
         browserArgs.push(`--proxy-server=${proxy.server}`);
-        console.log(`      [CNN Bot] Đang ngụy trang bằng IP: ${proxy.server}`);
+        console.log(`      [${keyword}][CNN Bot] Đang ngụy trang bằng IP: ${proxy.server}`);
     }
 
     // Khởi tạo trình duyệt VỚI các cờ đã setup
@@ -168,11 +168,11 @@ export async function fetchFromCnnBot(keyword, type, targetDir, neededCount) {
 
         if (articleLinks.length === 0) {
             const pageTitle = await page.title();
-            console.log(`      [CNN Bot] ⚠️ Không thấy bài báo. (Page Title: "${pageTitle}")`);
+            console.log(`      [${keyword}][CNN Bot] ⚠️ Không thấy bài báo. (Page Title: "${pageTitle}")`);
             return 0;
         }
 
-        console.log(`      [CNN Bot] Tìm thấy ${articleLinks.length} tin tức. Đang bóc file...`);
+        console.log(`      [${keyword}][CNN Bot] Tìm thấy ${articleLinks.length} tin tức. Đang bóc file...`);
 
         // 2. Chui vào bài báo lấy Media
         for (const link of articleLinks) {
@@ -248,7 +248,7 @@ export async function fetchFromCnnBot(keyword, type, targetDir, neededCount) {
                     // Truyền object proxy vào hàm để ẩn IP lúc tải file
                     if (await downloadMedia(finalUrl, targetDir, ext, proxy)) {
                         downloaded++;
-                        console.log(`      [CNN Bot] ---> Đã lấy tin thành công ${downloaded}/${neededCount} ${type}`);
+                        console.log(`      [${keyword}][CNN Bot] ---> Đã lấy tin thành công ${downloaded}/${neededCount} ${type}`);
                     }
                 }
             } catch (err) {
@@ -256,7 +256,7 @@ export async function fetchFromCnnBot(keyword, type, targetDir, neededCount) {
             }
         }
     } catch (error) {
-        console.error(`      [CNN Lỗi Tổng] ${error.message}`);
+        console.error(`      [${keyword}][CNN Lỗi Tổng] ${error.message}`);
     } finally {
         await browser.close();
     }
