@@ -9,6 +9,7 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import * as cheerio from 'cheerio';
 // Import trình quản lý Proxy xoay vòng
 import { getOldestProxy } from './proxyManager.js';
+import { claimNextStockPath } from './stockNaming.js';
 
 puppeteer.use(StealthPlugin());
 
@@ -21,13 +22,12 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
         return false;
     }
 
-    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-    const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
-    const savePath = path.join(targetDir, `stock_${existing + 1}.${ext}`);
+    const savePath = claimNextStockPath(targetDir, ext);
+    let success = false;
 
     try {
         const fetchOptions = { headers: { 'User-Agent': 'Mozilla/5.0' } };
-        
+
         if (proxy && proxy.dispatcher) {
             fetchOptions.dispatcher = proxy.dispatcher;
         }
@@ -38,16 +38,16 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
         fetchOptions.signal = controller.signal;
 
         const res = await fetch(url, fetchOptions);
-        clearTimeout(timeoutId); 
+        clearTimeout(timeoutId);
 
         if (res.ok) {
             const contentType = (res.headers.get('content-type') || '').toLowerCase();
-            
+
             // 🟢 2. BẢO VỆ CHO VIDEO: Bắt buộc phải là video thật
             if (ext === 'mp4' && !contentType.includes('video')) {
                 return false;
             }
-            
+
             // 🟢 3. BẢO VỆ CHO ẢNH (Vừa thêm): Bắt buộc phải là ảnh thật (loại trừ HTML từ onelink.me)
             if (ext === 'jpg' && !contentType.includes('image')) {
                 console.log(`      [${keyword}][Bỏ qua] Server không trả về Ảnh thật! (Bị lỗi giả danh URL: ${url})`);
@@ -66,11 +66,16 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
 
             // Vượt qua TẤT CẢ rào cản thì mới được lưu
             fs.writeFileSync(savePath, Buffer.from(buffer));
+            success = true;
             return true;
         }
     } catch (e) {
         if (e.name !== 'AbortError') {
              console.error(`      [${keyword}][Bellingcat Lỗi Tải File] URL: ${url} - ${e.message}`);
+        }
+    } finally {
+        if (!success) {
+            try { fs.unlinkSync(savePath); } catch (_) {}
         }
     }
     return false;

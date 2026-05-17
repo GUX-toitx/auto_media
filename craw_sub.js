@@ -8,7 +8,6 @@ import { JWT } from 'google-auth-library';
 import fs from 'fs';
 import Parser from 'srt-parser-2';
 import { execSync } from 'child_process';
-import crypto from 'crypto';
 import OpenAI from 'openai';
 import { initDB } from './migrate.js';
 import { fetchFromDvidsBot } from './dvidsCrawler.js';
@@ -17,6 +16,8 @@ import { fetchFromApnewsBot } from './apnewsCrawler.js';
 import { fetchFromAlJazeeraBot } from './aljazeeraCrawler.js';
 import { fetchFromCnnBot } from './cnnCrawler.js';
 import { fetchFromGoogleImageBot } from './googleImageCrawler.js';
+import { fetchFromStoryblocksBot } from './storyblocksCrawler.js';
+import { claimNextStockPath } from './stockNaming.js';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -27,10 +28,8 @@ const BASE_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
 const PORT = process.env.PORT || 3000;
 const SPREADSHEET_ID = '1K596bCoqZcNx0hvZbJitwHhIYTANpgsI8KqrWsvkRSs';
 
-const OPENAI_KEY = process.env.OPENAI_KEY; 
-const PUBLIC_KEY = process.env.STORYBLOCKS_PUBLIC_KEY;
-const PRIVATE_KEY = process.env.STORYBLOCKS_PRIVATE_KEY;
-const PEXELS_API_KEY = process.env.PEXELS_API_KEY; 
+const OPENAI_KEY = process.env.OPENAI_KEY;
+const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
 const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY;
 
 const VIDEOS_PER_SOURCE = 4;
@@ -50,58 +49,54 @@ const serviceAccountAuth = new JWT({
 // 2. HÀM TẢI STOCK (ĐA NGUỒN)
 // ==========================================
 async function downloadFileHelper(url, targetDir, ext) {
-    const existingFiles = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext));
-    const nextIndex = existingFiles.length + 1;
-    const savePath = path.join(targetDir, `stock_${nextIndex}.${ext}`);
+    const savePath = claimNextStockPath(targetDir, ext);
+    let success = false;
 
-    if (!fs.existsSync(savePath)) {
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 15000);
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-            const res = await fetch(url, { 
-                headers: { 'User-Agent': 'Mozilla/5.0' },
-                signal: controller.signal 
-            });
-            
-            clearTimeout(timeoutId);
+        const res = await fetch(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            signal: controller.signal
+        });
 
-            if (res.ok) {
-                const size = res.headers.get('content-length');
-                // 1. Chặn file quá TO (Treo máy)
-                if (ext === 'mp4' && size && parseInt(size) > 35 * 1024 * 1024) {
-                    return false;
-                }
+        clearTimeout(timeoutId);
 
-                const buffer = await res.arrayBuffer();
-                
-                // 🟢 2. CHẶN FILE QUÁ NHỎ (FILE RÁC/LỖI HTML)
-                // Đảm bảo file MP4 phải lớn hơn 50KB (50 * 1024 bytes)
-                if (ext === 'mp4' && buffer.byteLength < 50 * 1024) {
-                    console.log(`      [Bỏ qua] Video rác/lỗi rỗng (${(buffer.byteLength/1024).toFixed(1)}KB)`);
-                    return false;
-                }
-
-                // Nếu qua được các bài test thì mới cho lưu vào ổ cứng
-                fs.writeFileSync(savePath, Buffer.from(buffer));
-                return true;
+        if (res.ok) {
+            const size = res.headers.get('content-length');
+            // 1. Chặn file quá TO (Treo máy)
+            if (ext === 'mp4' && size && parseInt(size) > 35 * 1024 * 1024) {
+                return false;
             }
-        } catch (error) { 
-            // Bỏ qua lỗi
+
+            const buffer = await res.arrayBuffer();
+
+            // 🟢 2. CHẶN FILE QUÁ NHỎ (FILE RÁC/LỖI HTML)
+            // Đảm bảo file MP4 phải lớn hơn 50KB (50 * 1024 bytes)
+            if (ext === 'mp4' && buffer.byteLength < 50 * 1024) {
+                console.log(`      [Bỏ qua] Video rác/lỗi rỗng (${(buffer.byteLength/1024).toFixed(1)}KB)`);
+                return false;
+            }
+
+            // Nếu qua được các bài test thì mới cho lưu vào ổ cứng
+            fs.writeFileSync(savePath, Buffer.from(buffer));
+            success = true;
+            return true;
+        }
+    } catch (error) {
+        // Bỏ qua lỗi
+    } finally {
+        if (!success) {
+            try { fs.unlinkSync(savePath); } catch (_) {}
         }
     }
     return false;
 }
 
-function buildStoryblocksUrlV2(resource, params = {}) {
-    const expires = Math.floor(Date.now() / 1000) + 3600;
-    const hmacKey = PRIVATE_KEY + expires;
-    const hmac = crypto.createHmac('sha256', hmacKey).update(resource).digest('hex');
-    const queryParams = new URLSearchParams({ ...params, APIKEY: PUBLIC_KEY, EXPIRES: expires, HMAC: hmac, project_id: 'cory_corner_auto', user_id: 'khaitm_dev' });
-    return `https://api.storyblocks.com${resource}?${queryParams.toString()}`;
-}
-
-async function fetchFromStoryblocks(keyword, type, targetDir, neededCount) {
+// Storyblocks giờ được crawl qua Playwright (xem ./storyblocksCrawler.js).
+// eslint-disable-next-line no-unused-vars
+async function fetchFromStoryblocks_LEGACY_UNUSED(keyword, type, targetDir, neededCount) {
     let downloaded = 0;
     const ext = type === 'video' ? 'mp4' : 'jpg';
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
@@ -137,7 +132,6 @@ async function fetchFromPexels(keyword, type, targetDir, neededCount) {
     if (!PEXELS_API_KEY || PEXELS_API_KEY.includes('ĐIỀN_KEY')) return 0;
     let downloaded = 0;
     const ext = type === 'video' ? 'mp4' : 'jpg';
-    const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const url = type === 'video' ? `https://api.pexels.com/videos/search?query=${encodeURIComponent(keyword)}&per_page=${neededCount * 2}` : `https://api.pexels.com/v1/search?query=${encodeURIComponent(keyword)}&per_page=${neededCount * 2}`;
     try {
         const response = await fetch(url, { headers: { Authorization: PEXELS_API_KEY } });
@@ -154,11 +148,19 @@ async function fetchFromPexels(keyword, type, targetDir, neededCount) {
                 downloadUrl = item.src.large;
             }
             if (downloadUrl) {
-                const savePath = path.join(targetDir, `stock_${existing + downloaded + 1}.${ext}`);
+                const savePath = claimNextStockPath(targetDir, ext);
+                let ok = false;
                 try {
                     const res = await fetch(downloadUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-                    if (res.ok) { fs.writeFileSync(savePath, Buffer.from(await res.arrayBuffer())); downloaded++; }
+                    if (res.ok) {
+                        fs.writeFileSync(savePath, Buffer.from(await res.arrayBuffer()));
+                        downloaded++;
+                        ok = true;
+                    }
                 } catch (e) { console.error('Lỗi tải Pexels:', e.message); }
+                if (!ok) {
+                    try { fs.unlinkSync(savePath); } catch (_) {}
+                }
             }
         }
     } catch (e) { console.log('Lỗi Pexels:', e.message); }
@@ -201,7 +203,7 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
     let totalDownloaded = 0;
     
     const providers = [
-        { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
+        { name: 'Storyblocks (Bot)', fetcher: fetchFromStoryblocksBot },
         { name: 'Pexels', fetcher: fetchFromPexels },
         { name: 'DVIDS (Bot)', fetcher: fetchFromDvidsBot },
         { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot },
@@ -394,6 +396,7 @@ Nhiệm vụ:
 🔥 "ĐỘNG TỪ HÓA": Dùng V-ing hoặc tính từ sự kiện (vd: "stock market crashing", "military helicopter flying").
 🔥 VIẾT TẮT: KHÔNG thêm space vào giữa các chữ viết tắt. Ví dụ: U.S.A không phải U. S. A, U.K không phải U. K. KHÔNG dùng dạng có dấu chấm cuối như U.S. hay U.K.
 🔥 TÊN QUỐC GIA: KHÔNG viết tắt tên quốc gia, viết rõ tên đầy đủ. America hoặc United States thay vì US/USA, United Kingdom thay vì UK.
+🔥 TÊN NGƯỜI: Không được viết tắt tên người, viết rõ đầy đủ họ tên. Ví dụ: JFK -> John Fitzgerald Kennedy
 
 BẮT BUỘC trả về JSON:
 {

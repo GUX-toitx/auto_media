@@ -3,13 +3,13 @@ import dns from 'dns';
 dns.setDefaultResultOrder('ipv4first');
 // File: apnewsCrawler.js
 import fs from 'fs';
-import path from 'path';
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import * as cheerio from 'cheerio';
 import { getOldestProxy } from './proxyManager.js';
-import { exec } from 'child_process'; 
+import { exec } from 'child_process';
 import util from 'util';
+import { claimNextStockPath } from './stockNaming.js';
 
 const execPromise = util.promisify(exec);
 puppeteer.use(StealthPlugin());
@@ -57,17 +57,23 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
         return false;
     }
 
-    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-    const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
-    const savePath = path.join(targetDir, `stock_${existing + 1}.${ext}`);
+    const savePath = claimNextStockPath(targetDir, ext);
+    let success = false;
 
     if (ext === 'mp4' && url.includes('.m3u8')) {
-        return await downloadHlsStream(url, savePath, keyword);
+        try {
+            success = await downloadHlsStream(url, savePath, keyword);
+            return success;
+        } finally {
+            if (!success) {
+                try { fs.unlinkSync(savePath); } catch (_) {}
+            }
+        }
     }
 
     try {
         const fetchOptions = { headers: { 'User-Agent': 'Mozilla/5.0' } };
-        
+
         if (proxy && proxy.dispatcher) {
             fetchOptions.dispatcher = proxy.dispatcher;
         }
@@ -78,28 +84,33 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
         fetchOptions.signal = controller.signal;
 
         const res = await fetch(url, fetchOptions);
-        clearTimeout(timeoutId); 
+        clearTimeout(timeoutId);
 
         if (res.ok) {
             const contentType = (res.headers.get('content-type') || '').toLowerCase();
-            
+
             if (ext === 'mp4' && !contentType.includes('video')) return false;
             if (ext === 'jpg' && !contentType.includes('image')) return false;
 
             const buffer = await res.arrayBuffer();
 
             if (ext === 'mp4') {
-                if (buffer.byteLength < 100 * 1024) return false; 
-                if (buffer.byteLength > 50 * 1024 * 1024) return false; 
+                if (buffer.byteLength < 100 * 1024) return false;
+                if (buffer.byteLength > 50 * 1024 * 1024) return false;
             } else if (ext === 'jpg') {
-                if (buffer.byteLength < 5 * 1024) return false; 
+                if (buffer.byteLength < 5 * 1024) return false;
             }
 
             fs.writeFileSync(savePath, Buffer.from(buffer));
+            success = true;
             return true;
         }
     } catch (e) {
         // Bỏ qua lỗi ngầm
+    } finally {
+        if (!success) {
+            try { fs.unlinkSync(savePath); } catch (_) {}
+        }
     }
     return false;
 }
