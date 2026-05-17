@@ -306,6 +306,7 @@ Nhiệm vụ:
 🔥 "ĐỘNG TỪ HÓA": Dùng V-ing hoặc tính từ sự kiện (vd: "stock market crashing", "military helicopter flying").
 🔥 VIẾT TẮT: KHÔNG thêm space vào giữa các chữ viết tắt. Ví dụ: U.S.A không phải U. S. A, U.K không phải U. K. KHÔNG dùng dạng có dấu chấm cuối như U.S. hay U.K.
 🔥 TÊN QUỐC GIA: KHÔNG viết tắt tên quốc gia, viết rõ tên đầy đủ. Ví dụ: America hoặc United States thay vì US/USA, United Kingdom thay vì UK.
+🔥 KHÔNG LẶP Ý: Mỗi câu trong cảnh phải mang ý MỚI, KHÔNG được tóm tắt lại ý của câu trước, KHÔNG viết câu kết luận lặp lại nội dung đã nói.
 
 BẮT BUỘC trả về JSON:
 {
@@ -324,6 +325,55 @@ BẮT BUỘC trả về JSON:
         });
         return JSON.parse(response.choices[0].message.content).scenes || [];
     } catch (e) { return [{ original_text: textChunk, text: textChunk, keywords: ["cinematic b-roll", "professional background", "slow motion footage"] }]; }
+}
+
+async function splitAndTranslateSentences(originalText, targetLang) {
+    const SPLIT_REGEX = /(?<=[.!?]\s)|(?<=[\u3002\uff01\uff1f])|\n+/;
+
+    // Dedup: loại câu trùng sau khi split
+    const seen = new Set();
+    const viSentences = originalText.split(SPLIT_REGEX)
+        .map(s => s && s.trim()).filter(Boolean)
+        .filter(s => {
+            const key = s.toLowerCase().replace(/\s+/g, ' ');
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+
+    if (!targetLang || viSentences.length === 0) {
+        return viSentences.map(s => ({ vi: s, target: s }));
+    }
+
+    try {
+        const numbered = viSentences.map((s, i) => (i + 1) + '. ' + s).join('\n');
+        const response = await openai.chat.completions.create({
+            model: 'gpt-4o',
+            response_format: { type: 'json_object' },
+            messages: [
+                {
+                    role: 'system',
+                    content: 'Ban la phien dich chuyen nghiep. Dich tung cau sang ngon ngu: ' + targetLang + '. GIU NGUYEN so thu tu va so luong cau. Phai tra ve dung ' + viSentences.length + ' cau. Tra ve JSON: { "sentences": ["cau 1", "cau 2"] }'
+                },
+                { role: 'user', content: numbered }
+            ],
+            temperature: 0.2
+        });
+        const result = JSON.parse(response.choices[0].message.content);
+        const translated = result.sentences || [];
+
+        // Dedup bên target language
+        const seenTarget = new Set();
+        return viSentences.map((vi, i) => {
+            let t = (translated[i] || vi).trim();
+            const key = t.toLowerCase().replace(/\s+/g, ' ');
+            if (seenTarget.has(key)) t = vi; // fallback sang vi nếu target bị trùng
+            seenTarget.add(key);
+            return { vi, target: t };
+        });
+    } catch (e) {
+        return viSentences.map(vi => ({ vi, target: vi }));
+    }
 }
 
 async function translateText(text, targetLang) {
@@ -760,12 +810,14 @@ async function processNextInQueue() {
                         await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [scene.dbParagraphId, kw]);
                     }
 
-                    // 5. Insert Sentences
-                    const sentences = scene.text.split(/(?<=\.{1,3} )|(?<=[!?] )|(?<=[。！？])|\n+/).map(s => s.trim()).filter(Boolean);
-                    const originalSentences = (scene.original_text || scene.text).split(/(?<=\.{1,3} )|(?<=[!?] )|(?<=[。！？])|\n+/).map(s => s.trim()).filter(Boolean);
-                    for (let si = 0; si < sentences.length; si++) {
+                    // 5. Insert Sentences - split tu tieng Viet roi dich sang target
+                    const sentencePairs = await splitAndTranslateSentences(
+                        scene.original_text || scene.text,
+                        processLang
+                    );
+                    for (const pair of sentencePairs) {
                         sentenceOrder++;
-                        await db.run('INSERT INTO Sentence (paragraph_id, content, original_content, "order") VALUES (?, ?, ?, ?)', [scene.dbParagraphId, sentences[si], originalSentences[si] || scene.original_text || sentences[si], sentenceOrder]);
+                        await db.run('INSERT INTO Sentence (paragraph_id, content, original_content, "order") VALUES (?, ?, ?, ?)', [scene.dbParagraphId, pair.target, pair.vi, sentenceOrder]);
                     }
                 }
                 await db.run('COMMIT');
@@ -914,3 +966,5 @@ if (args.includes('--mode') && args[args.indexOf('--mode') + 1] === 'single') {
 } else {
     startQueueManager();
 }
+
+// PLACEHOLDER - will be replaced
