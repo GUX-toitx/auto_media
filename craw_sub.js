@@ -260,17 +260,6 @@ async function enhanceContent(rawText, targetLang = null) {
     } catch (e) { return rawText; }
 }
 
-async function getGlobalTheme(fullText) {
-    try {
-        const response = await openai.chat.completions.create({
-            model: "gpt-4o",
-            messages: [{ role: "system", content: `Bạn là Video Editor chuyên nghiệp có 10 năm kinh nghiệm. Tôi gửi cho bạn đầu vào là một kịch bản. Đầu tiên hãy đọc vào hiểu nó,sau đó trả về 3-4 từ tiếng Anh là keyword của kịch bản. Mục đích của việc tìm keyword --> từ keyword tôi có thể dễ dàng tìm nguồn images/videos phục vụ cho mục đích làm videos của tôi, vì vậy hãy bạn hãy làm thật kĩ và chính xác (không dùng từ ngữ trừu tượng cho keyword).` }, { role: "user", content: fullText.slice(0, 2000) }],
-            temperature: 0.1
-        });
-        return response.choices[0].message.content.replace(/[.,"'!]/g, '').trim();
-    } catch (e) { return "cinematic b-roll"; }
-}
-
 function chunkTextToParagraphs(rawText, maxChars = 3000) {
     const sentences = rawText.split(/(?<=\.)/); 
     const chunks = [];
@@ -284,50 +273,8 @@ function chunkTextToParagraphs(rawText, maxChars = 3000) {
     return chunks;
 }
 
-async function analyzeAndGroupScenes(textChunk, globalTheme, targetLang = null) {
-    const langInstruction = targetLang
-        ? `Viết "text" bằng ngôn ngữ: ${targetLang}. Viết "original_text" bằng tiếng Việt.`
-        : 'Viết cả "text" và "original_text" bằng tiếng Việt.';
-    try {
-        const response = await openai.chat.completions.create({
-            model: "gpt-4o",
-            response_format: { type: "json_object" },
-            messages: [
-                {
-                    role: "system",
-                    content: `Bạn là Đạo diễn Hình ảnh. Kịch bản có chủ đề chung là: "${globalTheme}".
-Nhiệm vụ:
-1. ĐỌC HIỂU toàn bộ nội dung, sau đó TỰ ĐỘNG CHIA thành các "Cảnh" dựa theo ngữ cảnh và ý nghĩa (mỗi cảnh 2-4 câu liên quan).
-2. Làm mịn từng cảnh cho tự nhiên, phù hợp Voice-over.
-3. ${langInstruction}
-4. Cấp cho MỖI CẢNH đúng 3 từ khóa tiếng Anh (3-5 từ/khóa) để tìm Video Stock.
-
-🔥 ĐỊA DANH ƯU TIÊN SỐ 1: Nếu có địa danh (Trung Đông, Mỹ...), BẮT BUỘC dịch sang tiếng Anh và đưa vào Keyword.
-🔥 "ĐỘNG TỪ HÓA": Dùng V-ing hoặc tính từ sự kiện (vd: "stock market crashing", "military helicopter flying").
-🔥 VIẾT TẮT: KHÔNG thêm space vào giữa các chữ viết tắt. Ví dụ: U.S.A không phải U. S. A, U.K không phải U. K. KHÔNG dùng dạng có dấu chấm cuối như U.S. hay U.K.
-🔥 TÊN QUỐC GIA: KHÔNG viết tắt tên quốc gia, viết rõ tên đầy đủ. Ví dụ: America hoặc United States thay vì US/USA, United Kingdom thay vì UK.
-🔥 KHÔNG LẶP Ý: Mỗi câu trong cảnh phải mang ý MỚI, KHÔNG được tóm tắt lại ý của câu trước, KHÔNG viết câu kết luận lặp lại nội dung đã nói.
-
-BẮT BUỘC trả về JSON:
-{
-  "scenes": [
-    {
-      "original_text": "Đoạn đã làm mịn bằng tiếng Việt...",
-      "text": "Đoạn đã làm mịn theo ngôn ngữ đích...",
-      "keywords": ["keyword 1", "keyword 2", "keyword 3"]
-    }
-  ]
-}`
-                },
-                { role: "user", content: textChunk }
-            ],
-            temperature: 0.5
-        });
-        return JSON.parse(response.choices[0].message.content).scenes || [];
-    } catch (e) { return [{ original_text: textChunk, text: textChunk, keywords: ["cinematic b-roll", "professional background", "slow motion footage"] }]; }
-}
-
-async function splitAndTranslateSentences(originalText, targetLang) {
+// eslint-disable-next-line no-unused-vars
+async function splitAndTranslateSentences_DEPRECATED(originalText, targetLang) { // legacy, replaced by splitSentencesAndTranslateToVi
     const SPLIT_REGEX = /(?<=[.!?]\s)|(?<=[\u3002\uff01\uff1f])|\n+/;
 
     // Dedup: loại câu trùng sau khi split
@@ -385,6 +332,138 @@ async function translateText(text, targetLang) {
         });
         return response.choices[0].message.content.trim();
     } catch (e) { return text; }
+}
+
+// Map mã ngôn ngữ ISO sang tên tiếng Việt để build prompt
+function getLangName(code) {
+    const map = {
+        'ja': 'tiếng Nhật', 'ko': 'tiếng Hàn', 'en': 'tiếng Anh',
+        'zh': 'tiếng Trung', 'zh-cn': 'tiếng Trung', 'zh-tw': 'tiếng Trung phồn thể',
+        'fr': 'tiếng Pháp', 'es': 'tiếng Tây Ban Nha', 'de': 'tiếng Đức',
+        'it': 'tiếng Ý', 'pt': 'tiếng Bồ Đào Nha', 'ru': 'tiếng Nga',
+        'th': 'tiếng Thái', 'id': 'tiếng Indonesia', 'ms': 'tiếng Malaysia',
+        'hi': 'tiếng Hindi', 'ar': 'tiếng Ả Rập', 'vi': 'tiếng Việt',
+        'tr': 'tiếng Thổ Nhĩ Kỳ', 'nl': 'tiếng Hà Lan', 'pl': 'tiếng Ba Lan'
+    };
+    return map[(code || '').toLowerCase()] || code;
+}
+
+// BƯỚC 2: Viết lại toàn bộ nội dung bằng ngôn ngữ đích theo phong cách nhà báo
+async function rewriteAsJournalist(rawText, targetLang) {
+    if (!targetLang) return rawText;
+    const langName = getLangName(targetLang);
+    try {
+        const response = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "system",
+                    content: `Bạn là một nhà báo, phóng viên chuyên nghiệp với 20 năm kinh nghiệm phân tích về tin tức chính trị thế giới và thông thạo nhiều ngôn ngữ. Hãy viết lại cho tôi đoạn văn bản này bằng ${langName} dựa theo quan điểm của chính bạn.
+- KHÔNG LẶP Ý: mỗi câu phải mang ý mới, không tóm tắt lại ý câu trước.
+- CHỈ trả về nội dung viết lại, KHÔNG thêm tiêu đề, KHÔNG thêm ghi chú/giải thích.`
+                },
+                { role: "user", content: rawText }
+            ],
+            temperature: 0.7
+        });
+        return response.choices[0].message.content.trim();
+    } catch (e) {
+        console.log(`[rewriteAsJournalist] Lỗi: ${e.message}`);
+        return rawText;
+    }
+}
+
+// BƯỚC 3 + 4a: Chia văn bản (đã ở ngôn ngữ đích) thành các đoạn,
+// mỗi đoạn chứa nhiều câu liên quan + đúng 3 từ khóa tiếng Anh.
+async function splitIntoScenesWithKeywords(targetText, targetLang) {
+    const langName = targetLang ? getLangName(targetLang) : 'tiếng Việt';
+    try {
+        const response = await openai.chat.completions.create({
+            model: "gpt-4o",
+            response_format: { type: "json_object" },
+            messages: [
+                {
+                    role: "system",
+                    content: `Bạn là Đạo diễn Hình ảnh.
+Nhiệm vụ:
+1. ĐỌC HIỂU toàn bộ nội dung (đang ở ${langName}), sau đó TỰ ĐỘNG CHIA thành các "Đoạn/Cảnh" - mỗi đoạn chứa NHIỀU CÂU cùng nói về một nội dung chung liên quan đến nhau (2-5 câu/đoạn).
+2. GIỮ NGUYÊN văn bản gốc của ${langName} (KHÔNG sửa từ, KHÔNG tóm tắt, KHÔNG thay đổi câu chữ), CHỈ làm nhiệm vụ chia đoạn.
+3. Cấp cho MỖI ĐOẠN đúng 3 từ khóa tiếng Anh (3-5 từ/khóa) để tìm Video Stock.
+
+🔥 ĐỊA DANH ƯU TIÊN SỐ 1: Nếu có địa danh (Trung Đông, Mỹ...), BẮT BUỘC dịch sang tiếng Anh và đưa vào Keyword.
+🔥 "ĐỘNG TỪ HÓA": Dùng V-ing hoặc tính từ sự kiện (vd: "stock market crashing", "military helicopter flying").
+🔥 VIẾT TẮT: KHÔNG thêm space vào giữa các chữ viết tắt. Ví dụ: U.S.A không phải U. S. A, U.K không phải U. K. KHÔNG dùng dạng có dấu chấm cuối như U.S. hay U.K.
+🔥 TÊN QUỐC GIA: KHÔNG viết tắt tên quốc gia, viết rõ tên đầy đủ. America hoặc United States thay vì US/USA, United Kingdom thay vì UK.
+
+BẮT BUỘC trả về JSON:
+{
+  "scenes": [
+    {
+      "text": "Đoạn nguyên văn ở ${langName}...",
+      "keywords": ["keyword 1", "keyword 2", "keyword 3"]
+    }
+  ]
+}`
+                },
+                { role: "user", content: targetText }
+            ],
+            temperature: 0.3
+        });
+        return JSON.parse(response.choices[0].message.content).scenes || [];
+    } catch (e) {
+        console.log(`[splitIntoScenesWithKeywords] Lỗi: ${e.message}`);
+        return [{ text: targetText, keywords: ["cinematic b-roll", "professional background", "slow motion footage"] }];
+    }
+}
+
+// BƯỚC 4b: Tách đoạn (ngôn ngữ đích) thành các câu, dịch từng câu sang tiếng Việt.
+// Trả về mảng { target, vi }.
+async function splitSentencesAndTranslateToVi(sceneText, targetLang) {
+    const SPLIT_REGEX = /(?<=[.!?]\s)|(?<=[。！？])|\n+/;
+
+    const seen = new Set();
+    const targetSentences = sceneText.split(SPLIT_REGEX)
+        .map(s => s && s.trim()).filter(Boolean)
+        .filter(s => {
+            const key = s.toLowerCase().replace(/\s+/g, ' ');
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+
+    if (!targetLang || targetLang === 'vi' || targetSentences.length === 0) {
+        return targetSentences.map(s => ({ vi: s, target: s }));
+    }
+
+    try {
+        const numbered = targetSentences.map((s, i) => (i + 1) + '. ' + s).join('\n');
+        const response = await openai.chat.completions.create({
+            model: 'gpt-4o',
+            response_format: { type: 'json_object' },
+            messages: [
+                {
+                    role: 'system',
+                    content: 'Bạn là phiên dịch chuyên nghiệp. Dịch từng câu sang tiếng Việt một cách tự nhiên. GIỮ NGUYÊN số thứ tự và số lượng câu. Phải trả về đúng ' + targetSentences.length + ' câu. Trả về JSON: { "sentences": ["câu 1", "câu 2"] }'
+                },
+                { role: 'user', content: numbered }
+            ],
+            temperature: 0.2
+        });
+        const result = JSON.parse(response.choices[0].message.content);
+        const translated = result.sentences || [];
+
+        const seenVi = new Set();
+        return targetSentences.map((target, i) => {
+            let vi = (translated[i] || target).trim();
+            const key = vi.toLowerCase().replace(/\s+/g, ' ');
+            if (seenVi.has(key)) vi = target;
+            seenVi.add(key);
+            return { vi, target };
+        });
+    } catch (e) {
+        console.log(`[splitSentencesAndTranslateToVi] Lỗi: ${e.message}`);
+        return targetSentences.map(target => ({ vi: target, target }));
+    }
 }
 
 // ==========================================
@@ -737,9 +816,6 @@ async function processNextInQueue() {
             fs.writeFileSync(path.join(targetDir, 'original_content.txt'), rawInputContent);
         }
 
-        const globalTheme = await getGlobalTheme(fullRawText);
-        const textChunks = chunkTextToParagraphs(fullRawText);
-
         const langsToProcess = targetLangs.length > 0 ? targetLangs : [null];
 
         for (const processLang of langsToProcess) {
@@ -753,13 +829,25 @@ async function processNextInQueue() {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ postTitle, status: 'crawling' })
             }).catch(() => {});
-            
+
             const postRecord = await db.get('SELECT id FROM Post WHERE title = ?', [postTitle]);
             const dbPostId = postRecord.id;
 
+            // BƯỚC 2: Viết lại nội dung bằng ngôn ngữ đích theo phong cách nhà báo
+            let processText = fullRawText;
+            if (processLang) {
+                console.log(`   [BƯỚC 2] Viết lại nội dung bằng ${getLangName(processLang)} (phong cách nhà báo)...`);
+                processText = await rewriteAsJournalist(fullRawText, processLang);
+                fs.writeFileSync(path.join(targetDir, `rewritten_${processLang}.txt`), processText);
+            }
+
+            // BƯỚC 3 + 4a: Tách văn bản đã ở ngôn ngữ đích thành các đoạn,
+            // mỗi đoạn nhiều câu liên quan + đúng 3 từ khóa tiếng Anh
+            console.log(`   [BƯỚC 3+4a] Tách đoạn và lấy từ khóa tiếng Anh...`);
+            const textChunks = chunkTextToParagraphs(processText, 4000);
             let allScenes = [];
             for (const chunk of textChunks) {
-                allScenes = allScenes.concat(await analyzeAndGroupScenes(chunk, globalTheme, processLang));
+                allScenes = allScenes.concat(await splitIntoScenesWithKeywords(chunk, processLang));
             }
 
             // ========================================================
@@ -793,28 +881,30 @@ async function processNextInQueue() {
                         fs.writeFileSync(path.join(iFolder, 'original_content.txt'), fullRawText);
                     }
 
-                    // 3. Insert Cảnh vào DB
+                    // 3. BƯỚC 4b: Tách đoạn (ngôn ngữ đích) thành câu + dịch từng câu sang tiếng Việt
+                    const sentencePairs = await splitSentencesAndTranslateToVi(scene.text, processLang);
+                    const viParagraph = sentencePairs.length > 0
+                        ? sentencePairs.map(p => p.vi).join(' ')
+                        : scene.text;
+
+                    // 4. Insert Cảnh vào DB (content = ngôn ngữ đích, original_content = tiếng Việt)
                     const maxOrder = await db.get('SELECT COALESCE(MAX("order"), 0) as max FROM Paragraph WHERE post_id = ?', [dbPostId]);
                     const paraRes = await db.run(
                         'INSERT INTO Paragraph (post_id, content, original_content, "order") VALUES (?, ?, ?, ?)',
-                        [dbPostId, scene.text, scene.original_text || scene.text, maxOrder.max + 1]
+                        [dbPostId, scene.text, viParagraph, maxOrder.max + 1]
                     );
-                    
+
                     // Lưu ID thật của Cảnh trong DB vào object scene để Lát nữa xài
                     scene.dbParagraphId = paraRes.lastID;
                     scene.gid = gid;
                     scene.kws = kws; // Lưu keyword lại
 
-                    // 4. Insert Keywords
+                    // 5. Insert Keywords (3 từ khóa tiếng Anh)
                     for (const kw of kws) {
                         await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [scene.dbParagraphId, kw]);
                     }
 
-                    // 5. Insert Sentences - split tu tieng Viet roi dich sang target
-                    const sentencePairs = await splitAndTranslateSentences(
-                        scene.original_text || scene.text,
-                        processLang
-                    );
+                    // 6. Insert Sentences (content = câu ở ngôn ngữ đích, original_content = câu tiếng Việt)
                     for (const pair of sentencePairs) {
                         sentenceOrder++;
                         await db.run('INSERT INTO Sentence (paragraph_id, content, original_content, "order") VALUES (?, ?, ?, ?)', [scene.dbParagraphId, pair.target, pair.vi, sentenceOrder]);

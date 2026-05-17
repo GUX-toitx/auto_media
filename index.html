@@ -90,7 +90,7 @@
                                         <div v-if="s._videoOpen" class="grid grid-cols-4 gap-1 mt-1">
                                             <div v-for="v in (para.videos || []).filter(v => v.selected && v.sentenceId == s.id).sort((a,b) => a.order - b.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
                                                 <button @click="unselectAsset(v, para, 0, 'video')" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
-                                                <video muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" class="w-full h-20 object-cover rounded mb-1 bg-black"></video>
+                                                <video muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v, 'video', para)" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                                 <div class="flex gap-1">
                                                     <button class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</button>
                                                     <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-green-600 uppercase">✓</button>
@@ -107,7 +107,7 @@
                                         <div v-if="s._imageOpen" class="grid grid-cols-6 gap-1 mt-1">
                                             <div v-for="img in (para.images || []).filter(img => img.selected && img.sentenceId == s.id).sort((a,b) => a.order - b.order)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
                                                 <button @click="unselectAsset(img, para, 0, 'image')" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
-                                                <img :src="img.url" class="w-full h-14 object-cover rounded mb-1">
+                                                <img :src="img.url" @click="openPreview(img, 'image', para)" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
                                                 <div class="flex gap-1">
                                                     <button class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</button>
                                                     <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-green-600 uppercase">✓</button>
@@ -152,7 +152,8 @@
                                 <button @click="deleteAsset(v, para)" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
                                 <video muted loop preload="metadata" :src="v.url"
                                     @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()"
-                                    class="w-full h-24 object-cover rounded mb-1 bg-black"></video>
+                                    @click="openPreview(v, 'video', para)"
+                                    class="w-full h-24 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                 <div class="flex gap-1">
                                     <span v-if="v.selected" class="text-[9px] font-black py-1 px-2 rounded bg-blue-600 text-white min-w-[24px] text-center">#{{ v.order }}</span>
                                     <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-1 rounded uppercase transition-colors"
@@ -185,7 +186,7 @@
                             <div v-for="img in (para.images || []).filter(img => img.sentenceId === null)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border"
                                 :class="img.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
                                 <div class="relative">
-                                    <img :src="img.url" class="w-full h-16 object-cover rounded mb-1">
+                                    <img :src="img.url" @click="openPreview(img, 'image', para)" class="w-full h-16 object-cover rounded mb-1 cursor-pointer">
                                     <button @click="deleteAsset(img, para)" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
                                 </div>
                                 <div class="flex gap-1">
@@ -312,6 +313,32 @@
                     class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-yellow-500 hover:bg-yellow-400 text-black transition-all">
                     {{ editModal.saving ? 'Đang xử lý...' : '✅ Lưu' }}
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PREVIEW MODAL -->
+    <div v-if="previewModal.open" class="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-6" @click.self="closePreview">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-4 max-w-[95vw] max-h-[95vh] flex flex-col">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-sm font-black text-white truncate">
+                    {{ previewModal.type === 'video' ? '🎬' : '🖼️' }} Preview
+                    <span class="text-gray-500 font-normal ml-2 text-[11px]">{{ previewModal.asset?.relativePath }}</span>
+                </h3>
+                <button @click="closePreview" class="text-gray-500 hover:text-white text-2xl leading-none ml-4">×</button>
+            </div>
+            <div class="flex-1 overflow-auto flex items-center justify-center bg-black rounded-lg">
+                <video v-if="previewModal.type === 'video' && previewModal.asset" :src="previewModal.asset.url" controls autoplay
+                    class="max-w-full max-h-[75vh] rounded"></video>
+                <img v-else-if="previewModal.asset" :src="previewModal.asset.url" class="max-w-full max-h-[75vh] object-contain rounded">
+            </div>
+            <div class="flex gap-2 mt-3 justify-end items-center">
+                <span v-if="previewModal.asset?.selected" class="text-[11px] font-black py-1.5 px-3 rounded bg-blue-600 text-white">#{{ previewModal.asset.order }}</span>
+                <button @click="togglePreviewSelect" class="text-[11px] font-black py-2 px-5 rounded uppercase transition-colors"
+                    :class="previewModal.asset?.selected ? 'bg-green-600 hover:bg-green-500 text-white' : 'bg-gray-800 hover:bg-blue-600 text-white'">
+                    {{ previewModal.asset?.selected ? '✓ Đã chọn' : 'Chọn' }}
+                </button>
+                <button @click="closePreview" class="text-[11px] font-bold py-2 px-4 rounded uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Đóng</button>
             </div>
         </div>
     </div>
@@ -563,6 +590,7 @@ createApp({
         const uploadModal = ref({ open: false, type: '', para: null, files: [], dragging: false, uploading: false });
         const aiModal = ref({ open: false, type: '', para: null, gid: '', count: 2, content: '', keywords: [], prompt: '', ratio: '16:9', videoMode: 'Frames', veo: 'Fast' });
         const sentenceModal = ref({ open: false, asset: null, para: null, type: '', sentences: [] });
+        const previewModal = ref({ open: false, type: '', asset: null, para: null });
         const page = ref('posts');
         const profileModal = ref({ list: [], bulkText: '', cmds: [], addOpen: false, fileName: '' });
 
@@ -878,6 +906,24 @@ createApp({
                 scaleX: 1, scaleY: 1, cropReady: false,
                 ratio: '16:9', saving: false
             };
+        }
+
+        function openPreview(asset, type, para) {
+            previewModal.value = { open: true, type, asset, para };
+        }
+
+        function closePreview() {
+            previewModal.value = { open: false, type: '', asset: null, para: null };
+        }
+
+        async function togglePreviewSelect() {
+            const { asset, para, type } = previewModal.value;
+            if (!asset || !para) return;
+            await toggleSelect(asset, para, type);
+            // Cập nhật asset trong modal khỏi mảng đã reload
+            const list = type === 'video' ? (para.videos || []) : (para.images || []);
+            const fresh = list.find(a => a.relativePath === asset.relativePath);
+            if (fresh) previewModal.value.asset = fresh;
         }
 
         const editVideoRef = ref(null);
@@ -1302,6 +1348,10 @@ createApp({
             onDropFiles,
             onSelectFiles,
             submitUpload,
+            previewModal,
+            openPreview,
+            closePreview,
+            togglePreviewSelect,
         };
     }
 }).mount('#app');
