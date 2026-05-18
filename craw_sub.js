@@ -235,7 +235,7 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
     });
 
     // Chạy đa luồng
-    const results = await runConcurrently(tasks, 5); 
+    const results = await runConcurrently(tasks, 10); 
 
     for (const res of results) {
         if (res.status === 'fulfilled') {
@@ -352,6 +352,8 @@ function getLangName(code) {
 
 // BƯỚC 2: Viết lại toàn bộ nội dung bằng ngôn ngữ đích theo phong cách nhà báo
 async function rewriteAsJournalist(rawText, targetLang) {
+    console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+    console.log(rawText)
     if (!targetLang) return rawText;
     const langName = getLangName(targetLang);
     try {
@@ -368,6 +370,8 @@ async function rewriteAsJournalist(rawText, targetLang) {
             ],
             temperature: 0.7
         });
+        console.log("-----------------------------------------------------------------------------------------------")
+        console.log(response.choices[0].message.content.trim())
         return response.choices[0].message.content.trim();
     } catch (e) {
         console.log(`[rewriteAsJournalist] Lỗi: ${e.message}`);
@@ -379,6 +383,30 @@ async function rewriteAsJournalist(rawText, targetLang) {
 // mỗi đoạn chứa nhiều câu liên quan + đúng 3 từ khóa tiếng Anh.
 async function splitIntoScenesWithKeywords(targetText, targetLang) {
     const langName = targetLang ? getLangName(targetLang) : 'tiếng Việt';
+    const prompt = [
+        'Bạn là Đạo diễn Hình ảnh chuyên tạo scene cho video stock footage.',
+        '',
+        '# MỤC TIÊU',
+        '1. Đọc hiểu TOÀN BỘ nội dung bằng ngôn ngữ ' + langName + '.',
+        '2. TỰ ĐỘNG chia nội dung thành các scene.',
+        '3. Mỗi scene gồm 2-5 câu có cùng chủ đề/ngữ nghĩa.',
+        '4. GIỮ NGUYÊN 100% văn bản gốc: KHÔNG sửa từ, KHÔNG paraphrase, KHÔNG tóm tắt, KHÔNG đổi dấu câu, CHỈ được phép chia đoạn.',
+        '5. Với mỗi scene, tạo đúng 3 keyword tiếng Anh để tìm video stock.',
+        '',
+        '# QUY TẮC KEYWORD',
+        '- Mỗi keyword gồm 3-5 từ tiếng Anh, dạng cinematic/stock footage search.',
+        '- Ưu tiên V-ing hoặc event adjective. Ví dụ: stock market crashing, military helicopter flying.',
+        '',
+        '## ĐỊA DANH = ƯU TIÊN CAO NHẤT',
+        'Nếu scene có địa danh/quốc gia: BẮT BUỘC đưa vào keyword bằng tiếng Anh.',
+        'Trung Đông → Middle East, Mỹ → United States, Anh → United Kingdom, Nga → Russia.',
+        '',
+        '',
+        '# OUTPUT FORMAT - Chỉ trả về JSON hợp lệ:',
+        '{ "scenes": [ { "text": "Nguyên văn ' + langName + '", "keywords": ["keyword 1", "keyword 2", "keyword 3"] } ] }',
+        '',
+        'Không markdown, không giải thích, không text ngoài JSON.',
+    ].join('\n')
     try {
         const response = await openai.chat.completions.create({
             model: "gpt-4o",
@@ -386,27 +414,7 @@ async function splitIntoScenesWithKeywords(targetText, targetLang) {
             messages: [
                 {
                     role: "system",
-                    content: `Bạn là Đạo diễn Hình ảnh.
-Nhiệm vụ:
-1. ĐỌC HIỂU toàn bộ nội dung (đang ở ${langName}), sau đó TỰ ĐỘNG CHIA thành các "Đoạn/Cảnh" - mỗi đoạn chứa NHIỀU CÂU cùng nói về một nội dung chung liên quan đến nhau (2-5 câu/đoạn).
-2. GIỮ NGUYÊN văn bản gốc của ${langName} (KHÔNG sửa từ, KHÔNG tóm tắt, KHÔNG thay đổi câu chữ), CHỈ làm nhiệm vụ chia đoạn.
-3. Cấp cho MỖI ĐOẠN đúng 3 từ khóa tiếng Anh (3-5 từ/khóa) để tìm Video Stock.
-
-🔥 ĐỊA DANH ƯU TIÊN SỐ 1: Nếu có địa danh (Trung Đông, Mỹ...), BẮT BUỘC dịch sang tiếng Anh và đưa vào Keyword.
-🔥 "ĐỘNG TỪ HÓA": Dùng V-ing hoặc tính từ sự kiện (vd: "stock market crashing", "military helicopter flying").
-🔥 VIẾT TẮT: KHÔNG thêm space vào giữa các chữ viết tắt. Ví dụ: U.S.A không phải U. S. A, U.K không phải U. K. KHÔNG dùng dạng có dấu chấm cuối như U.S. hay U.K.
-🔥 TÊN QUỐC GIA: KHÔNG viết tắt tên quốc gia, viết rõ tên đầy đủ. America hoặc United States thay vì US/USA, United Kingdom thay vì UK.
-🔥 TÊN NGƯỜI: Không được viết tắt tên người, viết rõ đầy đủ họ tên. Ví dụ: JFK -> John Fitzgerald Kennedy
-
-BẮT BUỘC trả về JSON:
-{
-  "scenes": [
-    {
-      "text": "Đoạn nguyên văn ở ${langName}...",
-      "keywords": ["keyword 1", "keyword 2", "keyword 3"]
-    }
-  ]
-}`
+                    content: prompt
                 },
                 { role: "user", content: targetText }
             ],
@@ -422,11 +430,21 @@ BẮT BUỘC trả về JSON:
 // BƯỚC 4b: Tách đoạn (ngôn ngữ đích) thành các câu, dịch từng câu sang tiếng Việt.
 // Trả về mảng { target, vi }.
 async function splitSentencesAndTranslateToVi(sceneText, targetLang) {
-    const SPLIT_REGEX = /(?<=[.!?]\s)|(?<=[。！？])|\n+/;
+
+    console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+    console.log(sceneText)
+
+    // Bảo vệ abbreviation: U.S. Mr. Dr. etc. trước khi split
+    const ABBREV_RE = /\b([A-Z]\.){1,}([A-Z]\.?)?|\b(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|approx|dept|inc|corp|ltd|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\.(?=\s)/gi;
+    const PH = '\x00';
+    const protectedText = sceneText.replace(ABBREV_RE, m => m.replace(/\./g, PH));
+
+    // Chia câu theo: xuống dòng, hoặc dấu kết thúc câu + space (EN/VI/JP/CN/KR)
+    const SPLIT_REGEX = /\n+|(?<=[.!?;]\s)|(?<=[。！？；।॥۔])/;
 
     const seen = new Set();
-    const targetSentences = sceneText.split(SPLIT_REGEX)
-        .map(s => s && s.trim()).filter(Boolean)
+    const targetSentences = protectedText.split(SPLIT_REGEX)
+        .map(s => s && s.trim().replace(/\x00/g, '.')).filter(Boolean)
         .filter(s => {
             const key = s.toLowerCase().replace(/\s+/g, ' ');
             if (seen.has(key)) return false;
@@ -452,6 +470,8 @@ async function splitSentencesAndTranslateToVi(sceneText, targetLang) {
             ],
             temperature: 0.2
         });
+        console.log("-----------------------------------------------------------------------------------------------")
+        console.log(response.choices[0].message.content)
         const result = JSON.parse(response.choices[0].message.content);
         const translated = result.sentences || [];
 
@@ -529,7 +549,7 @@ async function runSingleCrawl(videoId, paragraphId, keywordsArray) {
     }
 
     // CHẠY ĐA LUỒNG: Chạy 2 Keyword/Type cùng lúc
-    await runConcurrently(mediaTasks, 2);
+    await runConcurrently(mediaTasks, 4);
 
     // Sync asset mới vào DB
     const syncAssets = async (folderPath, assetType) => {
@@ -720,7 +740,7 @@ async function continueUnfinishedProject(recoveryData) {
             };
             
             const syncPromise = liveSyncTask();
-            await runConcurrently(mediaTasks, 2);
+            await runConcurrently(mediaTasks, 4);
             isSceneDownloading = false;
             await syncPromise;
             
@@ -865,24 +885,24 @@ async function processNextInQueue() {
                     const scene = allScenes[i];
                     const gid = String(i + 1);
 
-                    // 1. Tạo sẵn Folder trống
-                    const vFolder = path.join(targetDir, 'assets', '_raw_videos', gid);
-                    const iFolder = path.join(targetDir, 'assets', '_raw_images', gid);
-                    [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+                    // // 1. Tạo sẵn Folder trống
+                    // const vFolder = path.join(targetDir, 'assets', '_raw_videos', gid);
+                    // const iFolder = path.join(targetDir, 'assets', '_raw_images', gid);
+                    // [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 
-                    // 2. Ghi Context Text File
+                    // // 2. Ghi Context Text File
                     const kws = scene.keywords && scene.keywords.length > 0 ? scene.keywords : ["cinematic b-roll footage"];
-                    const ctxLang = processLang || lang;
-                    fs.writeFileSync(path.join(vFolder, 'keywords.txt'), kws.join(', '));
-                    fs.writeFileSync(path.join(iFolder, 'keywords.txt'), kws.join(', '));
-                    fs.writeFileSync(path.join(vFolder, `${ctxLang}.context.txt`), scene.text);
-                    fs.writeFileSync(path.join(iFolder, `${ctxLang}.context.txt`), scene.text);
-                    if (!processLang) {
-                        fs.writeFileSync(path.join(vFolder, 'context.txt'), scene.text);
-                        fs.writeFileSync(path.join(iFolder, 'context.txt'), scene.text);
-                        fs.writeFileSync(path.join(vFolder, 'original_content.txt'), fullRawText);
-                        fs.writeFileSync(path.join(iFolder, 'original_content.txt'), fullRawText);
-                    }
+                    // const ctxLang = processLang || lang;
+                    // fs.writeFileSync(path.join(vFolder, 'keywords.txt'), kws.join(', '));
+                    // fs.writeFileSync(path.join(iFolder, 'keywords.txt'), kws.join(', '));
+                    // fs.writeFileSync(path.join(vFolder, `${ctxLang}.context.txt`), scene.text);
+                    // fs.writeFileSync(path.join(iFolder, `${ctxLang}.context.txt`), scene.text);
+                    // if (!processLang) {
+                    //     fs.writeFileSync(path.join(vFolder, 'context.txt'), scene.text);
+                    //     fs.writeFileSync(path.join(iFolder, 'context.txt'), scene.text);
+                    //     fs.writeFileSync(path.join(vFolder, 'original_content.txt'), fullRawText);
+                    //     fs.writeFileSync(path.join(iFolder, 'original_content.txt'), fullRawText);
+                    // }
 
                     // 3. BƯỚC 4b: Tách đoạn (ngôn ngữ đích) thành câu + dịch từng câu sang tiếng Việt
                     const sentencePairs = await splitSentencesAndTranslateToVi(scene.text, processLang);
@@ -981,7 +1001,7 @@ async function processNextInQueue() {
                     const syncPromise = liveSyncTask();
 
                     // 🟢 BẮT ĐẦU CHẠY ĐA LUỒNG TẢI MEDIA
-                    await runConcurrently(mediaTasks, 2);
+                    await runConcurrently(mediaTasks, 4);
 
                     // Khi hàm tải xong, báo hiệu cho vòng lặp Live Sync dừng lại
                     isSceneDownloading = false;
