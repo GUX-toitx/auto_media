@@ -362,9 +362,8 @@ async function rewriteAsJournalist(rawText, targetLang) {
             messages: [
                 {
                     role: "system",
-                    content: `Bạn là một nhà báo, phóng viên chuyên nghiệp với 20 năm kinh nghiệm phân tích về tin tức chính trị thế giới và thông thạo nhiều ngôn ngữ. Hãy viết lại cho tôi đoạn văn bản này bằng ${langName} dựa theo quan điểm của chính bạn.
-- KHÔNG LẶP Ý: mỗi câu phải mang ý mới, không tóm tắt lại ý câu trước.
-- CHỈ trả về nội dung viết lại, KHÔNG thêm tiêu đề, KHÔNG thêm ghi chú/giải thích.`
+                    content: `Bạn là một nhà báo, phóng viên chuyên nghiệp với 20 năm kinh nghiệm phân tích về tin tức chính trị thế giới và thông thạo nhiều ngôn ngữ. Đầu tiên hãy đọc hiểu (hiểu rõ nội dung, hiểu lỗi chính tả, lỗi sai cơ bản, lỗi danh từ riêng...), sau đó hãy VIẾT LẠI cho tôi đoạn bằng ngôn ngữ ${langName}.
+                                - CHỈ trả về nội dung viết lại, KHÔNG thêm tiêu đề, KHÔNG thêm ghi chú/giải thích.`
                 },
                 { role: "user", content: rawText }
             ],
@@ -867,7 +866,7 @@ async function processNextInQueue() {
             // BƯỚC 3 + 4a: Tách văn bản đã ở ngôn ngữ đích thành các đoạn,
             // mỗi đoạn nhiều câu liên quan + đúng 3 từ khóa tiếng Anh
             console.log(`   [BƯỚC 3+4a] Tách đoạn và lấy từ khóa tiếng Anh...`);
-            const textChunks = chunkTextToParagraphs(processText, 4000);
+            const textChunks = chunkTextToParagraphs(processText, 125000);
             let allScenes = [];
             for (const chunk of textChunks) {
                 allScenes = allScenes.concat(await splitIntoScenesWithKeywords(chunk, processLang));
