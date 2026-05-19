@@ -15,6 +15,7 @@ import { getLanguages, getReferenceSpeakers, generateAudios, updateBatchStatus, 
 import { processAll } from './video_service.js';
 import { generateFlowImage } from './browser.js';
 import archiver from 'archiver';
+import { downloadWithYtDlp } from './ytDlpDownloader.js'; // Nhúng con Bot vừa viết
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -473,6 +474,35 @@ app.post('/api/toggle', async (req, res) => {
 });
 
 const upload = multer({ dest: path.join(MEDIA_DIR, '_tmp_uploads') });
+
+app.post('/api/download-url', async (req, res) => {
+    try {
+        const { url, videoId, paragraphId } = req.body;
+        if (!url) return res.status(400).json({ error: 'URL is required' });
+
+        const targetDir = path.join(MEDIA_DIR, videoId, 'assets', '_raw_videos', String(paragraphId));
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+        const fileName = `dl_social_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.mp4`;
+        const destPath = path.join(targetDir, fileName);
+
+        // 🟢 UY THÁC VIỆC TẢI CHO MODULE YT-DLP
+        await downloadWithYtDlp(url, destPath);
+
+        // 🟢 NẾU HÀM TRÊN KHÔNG BÁO LỖI (THROW ERROR), TIẾP TỤC LƯU DB
+        const relativePath = path.relative(MEDIA_DIR, destPath);
+        const db = await getDb();
+        await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [paragraphId, 'video', relativePath]);
+        await db.close();
+
+        res.json({ success: true, path: relativePath });
+
+    } catch (e) { 
+        // Lỗi sẽ tự động văng xuống đây và trả về cho Frontend
+        console.error('[API DL Lỗi]', e.message);
+        res.status(500).json({ error: e.message }); 
+    }
+});
 
 app.post('/api/upload', upload.array('files'), async (req, res) => {
     try {

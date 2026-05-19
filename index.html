@@ -48,14 +48,14 @@
                         <h2 class="text-4xl font-black text-white">{{ activePost.title }}</h2>
                     </div>
                 </div>
-                <div v-show="posts.find(p => p.id === activePostId)?.status !== 'crawling'" class="flex gap-3">
+                <div class="flex gap-3 items-center">
                     <button @click="createVoice" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
                     <button @click="retryDownloadVoice" class="bg-yellow-600 hover:bg-yellow-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">⬇️ Tải lại Voice</button>
                     <button @click="downloadVoice" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice & Media Selected</button>
-                </div>
-                <div v-if="posts.find(p => p.id === activePostId)?.status === 'crawling'" class="flex items-center gap-2 text-blue-400">
-                    <span class="animate-spin text-2xl">⏳</span>
-                    <span class="text-[13px] font-black uppercase tracking-widest">Crawling...</span>
+                    <div v-if="posts.find(p => p.id === activePostId)?.status === 'crawling'" class="flex items-center gap-2 text-blue-400 ml-2">
+                        <span class="animate-spin text-2xl">⏳</span>
+                        <span class="text-[13px] font-black uppercase tracking-widest">Crawling...</span>
+                    </div>
                 </div>
             </header>
 
@@ -350,6 +350,18 @@
                 <h3 class="text-lg font-black text-white">📤 Upload {{ uploadModal.type === 'video' ? 'Videos' : 'Images' }}</h3>
                 <button @click="uploadModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
             </div>
+            <!-- Download from URL -->
+            <div v-if="uploadModal.type === 'video'" class="space-y-2">
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">🔗 Tải từ link</label>
+                <div class="flex gap-2">
+                    <input v-model="uploadModal.url" type="text" placeholder="Dán link video (YouTube, TikTok, ...)" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-blue-500">
+                    <button @click="submitDownloadUrl" :disabled="!uploadModal.url || uploadModal.downloading"
+                        class="px-4 py-2 rounded-lg text-[11px] font-bold uppercase bg-green-600 hover:bg-green-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0">
+                        {{ uploadModal.downloading ? '⏳ Đang tải...' : '⬇️ Tải' }}
+                    </button>
+                </div>
+            </div>
+            <div class="border-t border-gray-800 pt-3"></div>
             <div class="border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer"
                 :class="uploadModal.dragging ? 'border-yellow-400 bg-yellow-500/10' : 'border-gray-700 hover:border-gray-500'"
                 @dragover.prevent="uploadModal.dragging = true"
@@ -587,7 +599,7 @@ createApp({
         const toast = ref('');
         const voiceModal = ref({ open: false, lang: '', speakerUuid: '', langs: [], speakers: [], batchUuid: '' });
         const editModal = ref({ open: false, type: '', asset: null, start: 0, end: 0, duration: 0, cropX: 0, cropY: 0, cropW: 200, cropH: 200, cropReady: false, saving: false });
-        const uploadModal = ref({ open: false, type: '', para: null, files: [], dragging: false, uploading: false });
+        const uploadModal = ref({ open: false, type: '', para: null, files: [], dragging: false, uploading: false, url: '', downloading: false });
         const aiModal = ref({ open: false, type: '', para: null, gid: '', count: 2, content: '', keywords: [], prompt: '', ratio: '16:9', videoMode: 'Frames', veo: 'Fast' });
         const sentenceModal = ref({ open: false, asset: null, para: null, type: '', sentences: [] });
         const previewModal = ref({ open: false, type: '', asset: null, para: null });
@@ -845,7 +857,26 @@ createApp({
         }
 
         function uploadAsset(para, gid, type) {
-            uploadModal.value = { open: true, type, para, gid: String(gid), files: [], dragging: false, uploading: false };
+            uploadModal.value = { open: true, type, para, gid: String(gid), files: [], dragging: false, uploading: false, url: '', downloading: false };
+        }
+
+        async function submitDownloadUrl() {
+            const { url, para } = uploadModal.value;
+            if (!url) return;
+            uploadModal.value.downloading = true;
+            try {
+                const res = await fetch('/api/download-url', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, videoId: activeProjectId.value, paragraphId: para.id })
+                });
+                const r = await res.json();
+                if (r.success) {
+                    showToast('✅ Đã tải video từ link!');
+                    uploadModal.value.url = '';
+                    await reloadParaAssets(para);
+                } else alert('❌ ' + r.error);
+            } catch (e) { alert('❌ ' + e.message); }
+            uploadModal.value.downloading = false;
         }
 
         function onDropFiles(e) {
@@ -1343,6 +1374,7 @@ createApp({
             doSelect,
             reloadParaAssets,
             uploadAsset,
+            submitDownloadUrl,
             unselectAsset,
             openFolder,
             onDropFiles,
