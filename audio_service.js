@@ -90,9 +90,11 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid) {
     );
     await db.close();
 
-    const texts = sentences.map(s => s.content.trim()).filter(Boolean);
-    const folderNames = sentences.map(s => String(s.order));
-    const paragraphIds = sentences.map(s => s.id);
+    const valid = sentences.filter(s => s.content.trim());
+    const texts = valid.map(s => s.content.trim());
+    const folderNames = valid.map(s => String(s.order));
+    const paragraphIds = valid.map(s => s.id);
+    const orderMap = valid.map(s => s.order);
     if (!texts.length) throw new Error(`Không có paragraph nào trong post id: ${postId}`);
 
     const batchName = `${projectName}_${lang}`;
@@ -103,10 +105,10 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid) {
         const batchSentences = createRes.data?.sentences || [];
 
         const db2 = await getDb();
-        for (let i = 0; i < paragraphIds.length; i++) {
-            const matched = batchSentences.find(s => s.index === i + 1);
-            if (paragraphIds[i] && matched) {
-                await db2.run('UPDATE Sentence SET sentence_uuid = ? WHERE id = ?', [matched.uuid, paragraphIds[i]]);
+        for (const bs of batchSentences) {
+            const sentenceId = valid.find(s => s.order === bs.index)?.id;
+            if (sentenceId) {
+                await db2.run('UPDATE Sentence SET sentence_uuid = ? WHERE id = ?', [bs.uuid, sentenceId]);
             }
         }
         await db2.close();
