@@ -305,7 +305,7 @@ app.get('/api/languages', async (req, res) => {
 
 app.get('/api/reference-speakers', async (req, res) => {
     try {
-        const result = await getReferenceSpeakers();
+        const result = await getReferenceSpeakers(req.query.lang);
         res.json(result.data || []);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });

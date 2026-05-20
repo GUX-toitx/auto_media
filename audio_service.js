@@ -1,6 +1,3 @@
-import { fetchIPv4 as fetch } from './fetchIPv4.js';
-import dns from 'dns';
-dns.setDefaultResultOrder('ipv4first');
 import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';
@@ -37,10 +34,21 @@ async function api(endpoint, options = {}) {
 async function createBatch(batchName, sentences, lang, speakerUuid) {
     const form = new FormData();
     form.append('batch_name', batchName);
-    form.append('reference_speaker_uuid', speakerUuid);
-    form.append('upload_type', 'sentence');
     form.append('language', lang || 'en');
+    form.append('pitch', 1);
+    form.append('speed', 1);
+    form.append('volume', 1);
+    form.append('silence_duration', 1);
+    form.append('exaggeration', 0.5);
+    form.append('cfg_weight', 0.5);
+    form.append('temperature', 0.8);
+    form.append('top_p', 1);
+    form.append('repetition_penalty', 2);
+    form.append('crossfade_ms', 50);
+    form.append('upload_type', 'sentence');
     form.append('source', 'API');
+    form.append('split_chars', JSON.stringify(["\n", ".", "?", "!"]));
+    form.append('speakers', JSON.stringify([{ no: 1, reference_speaker_uuid: speakerUuid }]));
     sentences.forEach((text, i) => form.append(`sentences[${i}][text]`, text));
 
     const res = await api('/user/batch', { method: 'POST', body: form });
@@ -62,9 +70,11 @@ export async function getLanguages() {
     return api('/user/language?page=0&limit=-1').then(r => r.json());
 }
 
-export async function getReferenceSpeakers() {
+export async function getReferenceSpeakers(lang) {
+    const where = { OR: [{ user_uuid: null }, { user_uuid: '15f22a66-68e7-4367-87c6-02ca4ee76469' }] };
+    if (lang) where.language = lang;
     const condition = JSON.stringify({
-        where: { OR: [{ user_uuid: null }, { user_uuid: '15f22a66-68e7-4367-87c6-02ca4ee76469' }] },
+        where,
         orderBy: [{ user_uuid: 'asc' }, { speaker_name: 'asc' }],
     });
     return api(`/user/reference-speaker?page=0&limit=-1&condition=${encodeURIComponent(condition)}`).then(r => r.json());

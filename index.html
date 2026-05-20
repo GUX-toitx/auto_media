@@ -358,7 +358,7 @@
                 <h3 class="text-xl font-black text-white">🎙️ Tạo Voice</h3>
                 <div>
                     <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Ngôn ngữ</label>
-                    <select v-model="voiceModal.lang" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
+                    <select v-model="voiceModal.lang" @change="loadSpeakersByLang" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
                         <option value="">-- Chọn ngôn ngữ --</option>
                         <option v-for="l in voiceModal.langs" :key="l.code || l.uuid" :value="l.code || l.uuid">{{ l.name || l.code }}</option>
                     </select>
@@ -1028,13 +1028,23 @@ createApp({
                 batchUuid: ''
             };
 
+            const lang = voiceModal.value.lang;
             const [lr, sr] = await Promise.all([
                 fetch('/api/languages'),
-                fetch('/api/reference-speakers')
+                fetch(`/api/reference-speakers?lang=${lang}`)
             ]);
 
             voiceModal.value.langs = await lr.json();
             voiceModal.value.speakers = await sr.json();
+        }
+
+        async function loadSpeakersByLang() {
+            const lang = voiceModal.value.lang;
+            voiceModal.value.speakerUuid = '';
+            voiceModal.value.speakers = [];
+            if (!lang) return;
+            const res = await fetch(`/api/reference-speakers?lang=${lang}`);
+            voiceModal.value.speakers = await res.json();
         }
 
         async function submitCreateVoice() {
@@ -1294,7 +1304,7 @@ createApp({
             loginProfile,
             onProfileFileSelect,
             onDropProfileFile,
-            doSelect,
+            loadSpeakersByLang,
             reloadParaAssets,
             uploadAsset,
             unselectAsset,
