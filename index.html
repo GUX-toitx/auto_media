@@ -404,6 +404,13 @@
                     </select>
                 </div>
                 <div>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Nội dung</label>
+                    <select v-model="voiceModal.contentType" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
+                        <option value="content">Target Content</option>
+                        <option value="original_content">Original Content</option>
+                    </select>
+                </div>
+                <div>
                     <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Giọng mẫu</label>
                     <select v-model="voiceModal.speakerUuid" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
                         <option value="">-- Chọn giọng mẫu --</option>
@@ -1158,7 +1165,8 @@ createApp({
                 speakerUuid: '',
                 langs: [],
                 speakers: [],
-                batchUuid: ''
+                batchUuid: '',
+                contentType: 'content',
             };
 
             const lang = voiceModal.value.lang;
@@ -1181,13 +1189,13 @@ createApp({
         }
 
         async function submitCreateVoice() {
-            const { lang, speakerUuid, postId } = voiceModal.value;
+            const { lang, speakerUuid, postId, contentType } = voiceModal.value;
             if (!lang || !speakerUuid) return alert('Vui lòng chọn đủ!');
 
             const res = await fetch('/api/create-voice', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ videoId: activeProjectId.value, postId, lang, speakerUuid })
+                body: JSON.stringify({ videoId: activeProjectId.value, postId, lang, speakerUuid, contentType })
             });
             const r = await res.json();
 

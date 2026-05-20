@@ -65,17 +65,17 @@ export async function getReferenceSpeakers(lang) {
     return api(`/user/reference-speaker?page=0&limit=-1&condition=${encodeURIComponent(condition)}`).then(r => r.json());
 }
 
-export async function generateAudios(projectDir, postId, lang, speakerUuid) {
+export async function generateAudios(projectDir, postId, lang, speakerUuid, contentType = 'content') {
     const projectName = path.basename(projectDir);
     const db = await getDb();
     const sentences = await db.all(
-        'SELECT id, content, "order" FROM Sentence WHERE paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?) ORDER BY "order"',
+        `SELECT id, content, original_content, "order" FROM Sentence WHERE paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?) ORDER BY "order"`,
         [postId]
     );
     await db.close();
 
-    const valid = sentences.filter(s => s.content.trim());
-    const texts = valid.map(s => s.content.trim());
+    const valid = sentences.filter(s => (s[contentType] || s.content).trim());
+    const texts = valid.map(s => (s[contentType] || s.content).trim());
     const folderNames = valid.map(s => String(s.order));
     const paragraphIds = valid.map(s => s.id);
     if (!texts.length) throw new Error(`Không có paragraph nào trong post id: ${postId}`);

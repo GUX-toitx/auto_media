@@ -327,9 +327,9 @@ app.get('/api/reference-speakers', async (req, res) => {
 
 app.post('/api/create-voice', async (req, res) => {
     try {
-        const { videoId, postId, lang, speakerUuid } = req.body;
+        const { videoId, postId, lang, speakerUuid, contentType } = req.body;
         const projectDir = path.join(MEDIA_DIR, videoId);
-        const result = await generateAudios(projectDir, postId, lang, speakerUuid);
+        const result = await generateAudios(projectDir, postId, lang, speakerUuid, contentType);
 
         // Lưu batchUuid vào bảng Post
         const db = await getDb();
