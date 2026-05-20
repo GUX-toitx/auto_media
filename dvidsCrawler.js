@@ -9,6 +9,7 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import * as cheerio from 'cheerio';
 // Import trình quản lý Proxy xoay vòng
 import { getOldestProxy } from './proxyManager.js';
+import { claimNextStockPath } from './stockNaming.js';
 
 const SETTINGS_DIR = path.join(process.cwd(), 'setting');
 const COUNTER_FILE = path.join(SETTINGS_DIR, 'current_index.txt');
@@ -66,13 +67,12 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword) {
         return false;
     }
 
-    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-    const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
-    const savePath = path.join(targetDir, `stock_${existing + 1}.${ext}`);
+    const savePath = claimNextStockPath(targetDir, ext);
+    let success = false;
 
     try {
         const fetchOptions = { headers: { 'User-Agent': 'Mozilla/5.0' } };
-        
+
         if (proxy && proxy.dispatcher) {
             fetchOptions.dispatcher = proxy.dispatcher;
         }
@@ -84,11 +84,11 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword) {
         fetchOptions.signal = controller.signal;
 
         const res = await fetch(url, fetchOptions);
-        clearTimeout(timeoutId); 
+        clearTimeout(timeoutId);
 
         if (res.ok) {
             const contentType = (res.headers.get('content-type') || '').toLowerCase();
-            
+
             // 🟢 2. BẢO VỆ ĐỊNH DẠNG
             if (ext === 'mp4' && !contentType.includes('video')) return false;
             if (ext === 'jpg' && !contentType.includes('image')) {
@@ -102,18 +102,19 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword) {
             if (ext === 'mp4') {
                 const sizeMB = buffer.byteLength / (1024 * 1024);
                 if (sizeMB < 0.1) return false; // Nhỏ hơn 100KB -> Rác
-                
+
                 // Mở rộng giới hạn lên 250MB cho DVIDS
-                if (sizeMB > 250) { 
+                if (sizeMB > 250) {
                     console.log(`      [Bỏ qua] Video DVIDS quá khủng (${sizeMB.toFixed(1)}MB). Vượt mốc 250MB!`);
-                    return false; 
+                    return false;
                 }
             } else if (ext === 'jpg') {
-                if (buffer.byteLength < 5 * 1024) return false; 
+                if (buffer.byteLength < 5 * 1024) return false;
             }
 
             // Ghi file xuống ổ cứng
             fs.writeFileSync(savePath, Buffer.from(buffer));
+            success = true;
             return true;
         }
     } catch (e) {
@@ -122,6 +123,10 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword) {
              console.log(`      [Cảnh báo] Mạng quá chậm, file tải hơn ${ext==='mp4'?'3 phút':'15 giây'} nên bị hủy!`);
         } else {
              console.error(`      [${keyword}][Dvids Lỗi Tải File] URL: ${url} - ${e.message}`);
+        }
+    } finally {
+        if (!success) {
+            try { fs.unlinkSync(savePath); } catch (_) {}
         }
     }
     return false;

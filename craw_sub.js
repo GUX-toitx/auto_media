@@ -8,7 +8,6 @@ import { JWT } from 'google-auth-library';
 import fs from 'fs';
 import Parser from 'srt-parser-2';
 import { execSync } from 'child_process';
-import crypto from 'crypto';
 import OpenAI from 'openai';
 import { initDB } from './migrate.js';
 import { fetchFromDvidsBot } from './dvidsCrawler.js';
@@ -17,6 +16,8 @@ import { fetchFromApnewsBot } from './apnewsCrawler.js';
 import { fetchFromAlJazeeraBot } from './aljazeeraCrawler.js';
 import { fetchFromCnnBot } from './cnnCrawler.js';
 import { fetchFromGoogleImageBot } from './googleImageCrawler.js';
+import { fetchFromStoryblocksBot } from './storyblocksCrawler.js';
+import { claimNextStockPath } from './stockNaming.js';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -27,10 +28,8 @@ const BASE_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
 const PORT = process.env.PORT || 3000;
 const SPREADSHEET_ID = '1K596bCoqZcNx0hvZbJitwHhIYTANpgsI8KqrWsvkRSs';
 
-const OPENAI_KEY = process.env.OPENAI_KEY; 
-const PUBLIC_KEY = process.env.STORYBLOCKS_PUBLIC_KEY;
-const PRIVATE_KEY = process.env.STORYBLOCKS_PRIVATE_KEY;
-const PEXELS_API_KEY = process.env.PEXELS_API_KEY; 
+const OPENAI_KEY = process.env.OPENAI_KEY;
+const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
 const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY;
 
 const VIDEOS_PER_SOURCE = 4;
@@ -50,58 +49,54 @@ const serviceAccountAuth = new JWT({
 // 2. HÀM TẢI STOCK (ĐA NGUỒN)
 // ==========================================
 async function downloadFileHelper(url, targetDir, ext) {
-    const existingFiles = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext));
-    const nextIndex = existingFiles.length + 1;
-    const savePath = path.join(targetDir, `stock_${nextIndex}.${ext}`);
+    const savePath = claimNextStockPath(targetDir, ext);
+    let success = false;
 
-    if (!fs.existsSync(savePath)) {
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 15000);
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-            const res = await fetch(url, { 
-                headers: { 'User-Agent': 'Mozilla/5.0' },
-                signal: controller.signal 
-            });
-            
-            clearTimeout(timeoutId);
+        const res = await fetch(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            signal: controller.signal
+        });
 
-            if (res.ok) {
-                const size = res.headers.get('content-length');
-                // 1. Chặn file quá TO (Treo máy)
-                if (ext === 'mp4' && size && parseInt(size) > 35 * 1024 * 1024) {
-                    return false;
-                }
+        clearTimeout(timeoutId);
 
-                const buffer = await res.arrayBuffer();
-                
-                // 🟢 2. CHẶN FILE QUÁ NHỎ (FILE RÁC/LỖI HTML)
-                // Đảm bảo file MP4 phải lớn hơn 50KB (50 * 1024 bytes)
-                if (ext === 'mp4' && buffer.byteLength < 50 * 1024) {
-                    console.log(`      [Bỏ qua] Video rác/lỗi rỗng (${(buffer.byteLength/1024).toFixed(1)}KB)`);
-                    return false;
-                }
-
-                // Nếu qua được các bài test thì mới cho lưu vào ổ cứng
-                fs.writeFileSync(savePath, Buffer.from(buffer));
-                return true;
+        if (res.ok) {
+            const size = res.headers.get('content-length');
+            // 1. Chặn file quá TO (Treo máy)
+            if (ext === 'mp4' && size && parseInt(size) > 35 * 1024 * 1024) {
+                return false;
             }
-        } catch (error) { 
-            // Bỏ qua lỗi
+
+            const buffer = await res.arrayBuffer();
+
+            // 🟢 2. CHẶN FILE QUÁ NHỎ (FILE RÁC/LỖI HTML)
+            // Đảm bảo file MP4 phải lớn hơn 50KB (50 * 1024 bytes)
+            if (ext === 'mp4' && buffer.byteLength < 50 * 1024) {
+                console.log(`      [Bỏ qua] Video rác/lỗi rỗng (${(buffer.byteLength/1024).toFixed(1)}KB)`);
+                return false;
+            }
+
+            // Nếu qua được các bài test thì mới cho lưu vào ổ cứng
+            fs.writeFileSync(savePath, Buffer.from(buffer));
+            success = true;
+            return true;
+        }
+    } catch (error) {
+        // Bỏ qua lỗi
+    } finally {
+        if (!success) {
+            try { fs.unlinkSync(savePath); } catch (_) {}
         }
     }
     return false;
 }
 
-function buildStoryblocksUrlV2(resource, params = {}) {
-    const expires = Math.floor(Date.now() / 1000) + 3600;
-    const hmacKey = PRIVATE_KEY + expires;
-    const hmac = crypto.createHmac('sha256', hmacKey).update(resource).digest('hex');
-    const queryParams = new URLSearchParams({ ...params, APIKEY: PUBLIC_KEY, EXPIRES: expires, HMAC: hmac, project_id: 'cory_corner_auto', user_id: 'khaitm_dev' });
-    return `https://api.storyblocks.com${resource}?${queryParams.toString()}`;
-}
-
-async function fetchFromStoryblocks(keyword, type, targetDir, neededCount) {
+// Storyblocks giờ được crawl qua Playwright (xem ./storyblocksCrawler.js).
+// eslint-disable-next-line no-unused-vars
+async function fetchFromStoryblocks_LEGACY_UNUSED(keyword, type, targetDir, neededCount) {
     let downloaded = 0;
     const ext = type === 'video' ? 'mp4' : 'jpg';
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
@@ -137,7 +132,6 @@ async function fetchFromPexels(keyword, type, targetDir, neededCount) {
     if (!PEXELS_API_KEY || PEXELS_API_KEY.includes('ĐIỀN_KEY')) return 0;
     let downloaded = 0;
     const ext = type === 'video' ? 'mp4' : 'jpg';
-    const existing = fs.readdirSync(targetDir).filter(f => f.startsWith('stock_') && f.endsWith(ext)).length;
     const url = type === 'video' ? `https://api.pexels.com/videos/search?query=${encodeURIComponent(keyword)}&per_page=${neededCount * 2}` : `https://api.pexels.com/v1/search?query=${encodeURIComponent(keyword)}&per_page=${neededCount * 2}`;
     try {
         const response = await fetch(url, { headers: { Authorization: PEXELS_API_KEY } });
@@ -154,11 +148,19 @@ async function fetchFromPexels(keyword, type, targetDir, neededCount) {
                 downloadUrl = item.src.large;
             }
             if (downloadUrl) {
-                const savePath = path.join(targetDir, `stock_${existing + downloaded + 1}.${ext}`);
+                const savePath = claimNextStockPath(targetDir, ext);
+                let ok = false;
                 try {
                     const res = await fetch(downloadUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-                    if (res.ok) { fs.writeFileSync(savePath, Buffer.from(await res.arrayBuffer())); downloaded++; }
+                    if (res.ok) {
+                        fs.writeFileSync(savePath, Buffer.from(await res.arrayBuffer()));
+                        downloaded++;
+                        ok = true;
+                    }
                 } catch (e) { console.error('Lỗi tải Pexels:', e.message); }
+                if (!ok) {
+                    try { fs.unlinkSync(savePath); } catch (_) {}
+                }
             }
         }
     } catch (e) { console.log('Lỗi Pexels:', e.message); }
@@ -201,7 +203,7 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
     let totalDownloaded = 0;
     
     const providers = [
-        { name: 'Storyblocks', fetcher: fetchFromStoryblocks },
+        { name: 'Storyblocks (Bot)', fetcher: fetchFromStoryblocksBot },
         { name: 'Pexels', fetcher: fetchFromPexels },
         { name: 'DVIDS (Bot)', fetcher: fetchFromDvidsBot },
         { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot },
@@ -233,7 +235,7 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
     });
 
     // Chạy đa luồng
-    const results = await runConcurrently(tasks, 5); 
+    const results = await runConcurrently(tasks, 10); 
 
     for (const res of results) {
         if (res.status === 'fulfilled') {
@@ -260,17 +262,6 @@ async function enhanceContent(rawText, targetLang = null) {
     } catch (e) { return rawText; }
 }
 
-async function getGlobalTheme(fullText) {
-    try {
-        const response = await openai.chat.completions.create({
-            model: "gpt-4o",
-            messages: [{ role: "system", content: `Bạn là Video Editor chuyên nghiệp có 10 năm kinh nghiệm. Tôi gửi cho bạn đầu vào là một kịch bản. Đầu tiên hãy đọc vào hiểu nó,sau đó trả về 3-4 từ tiếng Anh là keyword của kịch bản. Mục đích của việc tìm keyword --> từ keyword tôi có thể dễ dàng tìm nguồn images/videos phục vụ cho mục đích làm videos của tôi, vì vậy hãy bạn hãy làm thật kĩ và chính xác (không dùng từ ngữ trừu tượng cho keyword).` }, { role: "user", content: fullText.slice(0, 2000) }],
-            temperature: 0.1
-        });
-        return response.choices[0].message.content.replace(/[.,"'!]/g, '').trim();
-    } catch (e) { return "cinematic b-roll"; }
-}
-
 function chunkTextToParagraphs(rawText, maxChars = 3000) {
     const sentences = rawText.split(/(?<=\.)/); 
     const chunks = [];
@@ -284,50 +275,8 @@ function chunkTextToParagraphs(rawText, maxChars = 3000) {
     return chunks;
 }
 
-async function analyzeAndGroupScenes(textChunk, globalTheme, targetLang = null) {
-    const langInstruction = targetLang
-        ? `Viết "text" bằng ngôn ngữ: ${targetLang}. Viết "original_text" bằng tiếng Việt.`
-        : 'Viết cả "text" và "original_text" bằng tiếng Việt.';
-    try {
-        const response = await openai.chat.completions.create({
-            model: "gpt-4o",
-            response_format: { type: "json_object" },
-            messages: [
-                {
-                    role: "system",
-                    content: `Bạn là Đạo diễn Hình ảnh. Kịch bản có chủ đề chung là: "${globalTheme}".
-Nhiệm vụ:
-1. ĐỌC HIỂU toàn bộ nội dung, sau đó TỰ ĐỘNG CHIA thành các "Cảnh" dựa theo ngữ cảnh và ý nghĩa (mỗi cảnh 2-4 câu liên quan).
-2. Làm mịn từng cảnh cho tự nhiên, phù hợp Voice-over.
-3. ${langInstruction}
-4. Cấp cho MỖI CẢNH đúng 3 từ khóa tiếng Anh (3-5 từ/khóa) để tìm Video Stock.
-
-🔥 ĐỊA DANH ƯU TIÊN SỐ 1: Nếu có địa danh (Trung Đông, Mỹ...), BẮT BUỘC dịch sang tiếng Anh và đưa vào Keyword.
-🔥 "ĐỘNG TỪ HÓA": Dùng V-ing hoặc tính từ sự kiện (vd: "stock market crashing", "military helicopter flying").
-🔥 VIẾT TẮT: KHÔNG thêm space vào giữa các chữ viết tắt. Ví dụ: U.S.A không phải U. S. A, U.K không phải U. K. KHÔNG dùng dạng có dấu chấm cuối như U.S. hay U.K.
-🔥 TÊN QUỐC GIA: KHÔNG viết tắt tên quốc gia, viết rõ tên đầy đủ. Ví dụ: America hoặc United States thay vì US/USA, United Kingdom thay vì UK.
-🔥 KHÔNG LẶP Ý: Mỗi câu trong cảnh phải mang ý MỚI, KHÔNG được tóm tắt lại ý của câu trước, KHÔNG viết câu kết luận lặp lại nội dung đã nói.
-
-BẮT BUỘC trả về JSON:
-{
-  "scenes": [
-    {
-      "original_text": "Đoạn đã làm mịn bằng tiếng Việt...",
-      "text": "Đoạn đã làm mịn theo ngôn ngữ đích...",
-      "keywords": ["keyword 1", "keyword 2", "keyword 3"]
-    }
-  ]
-}`
-                },
-                { role: "user", content: textChunk }
-            ],
-            temperature: 0.5
-        });
-        return JSON.parse(response.choices[0].message.content).scenes || [];
-    } catch (e) { return [{ original_text: textChunk, text: textChunk, keywords: ["cinematic b-roll", "professional background", "slow motion footage"] }]; }
-}
-
-async function splitAndTranslateSentences(originalText, targetLang) {
+// eslint-disable-next-line no-unused-vars
+async function splitAndTranslateSentences_DEPRECATED(originalText, targetLang) { // legacy, replaced by splitSentencesAndTranslateToVi
     const SPLIT_REGEX = /(?<=[.!?]\s)|(?<=[\u3002\uff01\uff1f])|\n+/;
 
     // Dedup: loại câu trùng sau khi split
@@ -385,6 +334,158 @@ async function translateText(text, targetLang) {
         });
         return response.choices[0].message.content.trim();
     } catch (e) { return text; }
+}
+
+// Map mã ngôn ngữ ISO sang tên tiếng Việt để build prompt
+function getLangName(code) {
+    const map = {
+        'ja': 'tiếng Nhật', 'ko': 'tiếng Hàn', 'en': 'tiếng Anh',
+        'zh': 'tiếng Trung', 'zh-cn': 'tiếng Trung', 'zh-tw': 'tiếng Trung phồn thể',
+        'fr': 'tiếng Pháp', 'es': 'tiếng Tây Ban Nha', 'de': 'tiếng Đức',
+        'it': 'tiếng Ý', 'pt': 'tiếng Bồ Đào Nha', 'ru': 'tiếng Nga',
+        'th': 'tiếng Thái', 'id': 'tiếng Indonesia', 'ms': 'tiếng Malaysia',
+        'hi': 'tiếng Hindi', 'ar': 'tiếng Ả Rập', 'vi': 'tiếng Việt',
+        'tr': 'tiếng Thổ Nhĩ Kỳ', 'nl': 'tiếng Hà Lan', 'pl': 'tiếng Ba Lan'
+    };
+    return map[(code || '').toLowerCase()] || code;
+}
+
+// BƯỚC 2: Viết lại toàn bộ nội dung bằng ngôn ngữ đích theo phong cách nhà báo
+async function rewriteAsJournalist(rawText, targetLang) {
+    console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+    console.log(rawText)
+    if (!targetLang) return rawText;
+    const langName = getLangName(targetLang);
+    try {
+        const response = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "system",
+                    content: `Bạn là một nhà báo, phóng viên chuyên nghiệp với 20 năm kinh nghiệm phân tích về tin tức chính trị thế giới và thông thạo nhiều ngôn ngữ. Đầu tiên hãy đọc hiểu (hiểu rõ nội dung, hiểu lỗi chính tả, lỗi sai cơ bản, lỗi danh từ riêng...), sau đó hãy VIẾT LẠI cho tôi đoạn bằng ngôn ngữ ${langName}.
+                                - CHỈ trả về nội dung viết lại, KHÔNG thêm tiêu đề, KHÔNG thêm ghi chú/giải thích.`
+                },
+                { role: "user", content: rawText }
+            ],
+            temperature: 0.7
+        });
+        console.log("-----------------------------------------------------------------------------------------------")
+        console.log(response.choices[0].message.content.trim())
+        return response.choices[0].message.content.trim();
+    } catch (e) {
+        console.log(`[rewriteAsJournalist] Lỗi: ${e.message}`);
+        return rawText;
+    }
+}
+
+// BƯỚC 3 + 4a: Chia văn bản (đã ở ngôn ngữ đích) thành các đoạn,
+// mỗi đoạn chứa nhiều câu liên quan + đúng 3 từ khóa tiếng Anh.
+async function splitIntoScenesWithKeywords(targetText, targetLang) {
+    const langName = targetLang ? getLangName(targetLang) : 'tiếng Việt';
+    const prompt = [
+        'Bạn là Đạo diễn Hình ảnh chuyên tạo scene cho video stock footage.',
+        '',
+        '# MỤC TIÊU',
+        '1. Đọc hiểu TOÀN BỘ nội dung bằng ngôn ngữ ' + langName + '.',
+        '2. TỰ ĐỘNG chia nội dung thành các scene.',
+        '3. Mỗi scene gồm 2-5 câu có cùng chủ đề/ngữ nghĩa.',
+        '4. GIỮ NGUYÊN 100% văn bản gốc: KHÔNG sửa từ, KHÔNG paraphrase, KHÔNG tóm tắt, KHÔNG đổi dấu câu, CHỈ được phép chia đoạn.',
+        '5. Với mỗi scene, tạo đúng 3 keyword tiếng Anh để tìm video stock.',
+        '',
+        '# QUY TẮC KEYWORD',
+        '- Mỗi keyword gồm 3-5 từ tiếng Anh, dạng cinematic/stock footage search.',
+        '- Ưu tiên V-ing hoặc event adjective. Ví dụ: stock market crashing, military helicopter flying.',
+        '',
+        '## ĐỊA DANH = ƯU TIÊN CAO NHẤT',
+        'Nếu scene có địa danh/quốc gia: BẮT BUỘC đưa vào keyword bằng tiếng Anh.',
+        'Trung Đông → Middle East, Mỹ → United States, Anh → United Kingdom, Nga → Russia.',
+        '',
+        '',
+        '# OUTPUT FORMAT - Chỉ trả về JSON hợp lệ:',
+        '{ "scenes": [ { "text": "Nguyên văn ' + langName + '", "keywords": ["keyword 1", "keyword 2", "keyword 3"] } ] }',
+        '',
+        'Không markdown, không giải thích, không text ngoài JSON.',
+    ].join('\n')
+    try {
+        const response = await openai.chat.completions.create({
+            model: "gpt-4o",
+            response_format: { type: "json_object" },
+            messages: [
+                {
+                    role: "system",
+                    content: prompt
+                },
+                { role: "user", content: targetText }
+            ],
+            temperature: 0.3
+        });
+        return JSON.parse(response.choices[0].message.content).scenes || [];
+    } catch (e) {
+        console.log(`[splitIntoScenesWithKeywords] Lỗi: ${e.message}`);
+        return [{ text: targetText, keywords: ["cinematic b-roll", "professional background", "slow motion footage"] }];
+    }
+}
+
+// BƯỚC 4b: Tách đoạn (ngôn ngữ đích) thành các câu, dịch từng câu sang tiếng Việt.
+// Trả về mảng { target, vi }.
+async function splitSentencesAndTranslateToVi(sceneText, targetLang) {
+
+    console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+    console.log(sceneText)
+
+    // Bảo vệ abbreviation: U.S. Mr. Dr. etc. trước khi split
+    const ABBREV_RE = /\b([A-Z]\.){1,}([A-Z]\.?)?|\b(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|approx|dept|inc|corp|ltd|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\.(?=\s)/gi;
+    const PH = '\x00';
+    const protectedText = sceneText.replace(ABBREV_RE, m => m.replace(/\./g, PH));
+
+    // Chia câu theo: xuống dòng, hoặc dấu kết thúc câu + space (EN/VI/JP/CN/KR)
+    const SPLIT_REGEX = /\n+|(?<=[.!?;]\s)|(?<=[。！？；।॥۔])/;
+
+    const seen = new Set();
+    const targetSentences = protectedText.split(SPLIT_REGEX)
+        .map(s => s && s.trim().replace(/\x00/g, '.')).filter(Boolean)
+        .filter(s => {
+            const key = s.toLowerCase().replace(/\s+/g, ' ');
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+
+    if (!targetLang || targetLang === 'vi' || targetSentences.length === 0) {
+        return targetSentences.map(s => ({ vi: s, target: s }));
+    }
+
+    try {
+        const numbered = targetSentences.map((s, i) => (i + 1) + '. ' + s).join('\n');
+        const response = await openai.chat.completions.create({
+            model: 'gpt-4o',
+            response_format: { type: 'json_object' },
+            messages: [
+                {
+                    role: 'system',
+                    content: 'Bạn là phiên dịch chuyên nghiệp. Dịch từng câu sang tiếng Việt một cách tự nhiên. GIỮ NGUYÊN số thứ tự và số lượng câu. Phải trả về đúng ' + targetSentences.length + ' câu. Trả về JSON: { "sentences": ["câu 1", "câu 2"] }'
+                },
+                { role: 'user', content: numbered }
+            ],
+            temperature: 0.2
+        });
+        console.log("-----------------------------------------------------------------------------------------------")
+        console.log(response.choices[0].message.content)
+        const result = JSON.parse(response.choices[0].message.content);
+        const translated = result.sentences || [];
+
+        const seenVi = new Set();
+        return targetSentences.map((target, i) => {
+            let vi = (translated[i] || target).trim();
+            const key = vi.toLowerCase().replace(/\s+/g, ' ');
+            if (seenVi.has(key)) vi = target;
+            seenVi.add(key);
+            return { vi, target };
+        });
+    } catch (e) {
+        console.log(`[splitSentencesAndTranslateToVi] Lỗi: ${e.message}`);
+        return targetSentences.map(target => ({ vi: target, target }));
+    }
 }
 
 // ==========================================
@@ -447,7 +548,7 @@ async function runSingleCrawl(videoId, paragraphId, keywordsArray) {
     }
 
     // CHẠY ĐA LUỒNG: Chạy 2 Keyword/Type cùng lúc
-    await runConcurrently(mediaTasks, 2);
+    await runConcurrently(mediaTasks, 4);
 
     // Sync asset mới vào DB
     const syncAssets = async (folderPath, assetType) => {
@@ -638,7 +739,7 @@ async function continueUnfinishedProject(recoveryData) {
             };
             
             const syncPromise = liveSyncTask();
-            await runConcurrently(mediaTasks, 2);
+            await runConcurrently(mediaTasks, 4);
             isSceneDownloading = false;
             await syncPromise;
             
@@ -737,9 +838,6 @@ async function processNextInQueue() {
             fs.writeFileSync(path.join(targetDir, 'original_content.txt'), rawInputContent);
         }
 
-        const globalTheme = await getGlobalTheme(fullRawText);
-        const textChunks = chunkTextToParagraphs(fullRawText);
-
         const langsToProcess = targetLangs.length > 0 ? targetLangs : [null];
 
         for (const processLang of langsToProcess) {
@@ -753,13 +851,25 @@ async function processNextInQueue() {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ postTitle, status: 'crawling' })
             }).catch(() => {});
-            
+
             const postRecord = await db.get('SELECT id FROM Post WHERE title = ?', [postTitle]);
             const dbPostId = postRecord.id;
 
+            // BƯỚC 2: Viết lại nội dung bằng ngôn ngữ đích theo phong cách nhà báo
+            let processText = fullRawText;
+            if (processLang) {
+                console.log(`   [BƯỚC 2] Viết lại nội dung bằng ${getLangName(processLang)} (phong cách nhà báo)...`);
+                processText = await rewriteAsJournalist(fullRawText, processLang);
+                fs.writeFileSync(path.join(targetDir, `rewritten_${processLang}.txt`), processText);
+            }
+
+            // BƯỚC 3 + 4a: Tách văn bản đã ở ngôn ngữ đích thành các đoạn,
+            // mỗi đoạn nhiều câu liên quan + đúng 3 từ khóa tiếng Anh
+            console.log(`   [BƯỚC 3+4a] Tách đoạn và lấy từ khóa tiếng Anh...`);
+            const textChunks = chunkTextToParagraphs(processText, 125000);
             let allScenes = [];
             for (const chunk of textChunks) {
-                allScenes = allScenes.concat(await analyzeAndGroupScenes(chunk, globalTheme, processLang));
+                allScenes = allScenes.concat(await splitIntoScenesWithKeywords(chunk, processLang));
             }
 
             // ========================================================
@@ -774,47 +884,49 @@ async function processNextInQueue() {
                     const scene = allScenes[i];
                     const gid = String(i + 1);
 
-                    // 1. Tạo sẵn Folder trống
-                    const vFolder = path.join(targetDir, 'assets', '_raw_videos', gid);
-                    const iFolder = path.join(targetDir, 'assets', '_raw_images', gid);
-                    [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+                    // // 1. Tạo sẵn Folder trống
+                    // const vFolder = path.join(targetDir, 'assets', '_raw_videos', gid);
+                    // const iFolder = path.join(targetDir, 'assets', '_raw_images', gid);
+                    // [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 
-                    // 2. Ghi Context Text File
+                    // // 2. Ghi Context Text File
                     const kws = scene.keywords && scene.keywords.length > 0 ? scene.keywords : ["cinematic b-roll footage"];
-                    const ctxLang = processLang || lang;
-                    fs.writeFileSync(path.join(vFolder, 'keywords.txt'), kws.join(', '));
-                    fs.writeFileSync(path.join(iFolder, 'keywords.txt'), kws.join(', '));
-                    fs.writeFileSync(path.join(vFolder, `${ctxLang}.context.txt`), scene.text);
-                    fs.writeFileSync(path.join(iFolder, `${ctxLang}.context.txt`), scene.text);
-                    if (!processLang) {
-                        fs.writeFileSync(path.join(vFolder, 'context.txt'), scene.text);
-                        fs.writeFileSync(path.join(iFolder, 'context.txt'), scene.text);
-                        fs.writeFileSync(path.join(vFolder, 'original_content.txt'), fullRawText);
-                        fs.writeFileSync(path.join(iFolder, 'original_content.txt'), fullRawText);
-                    }
+                    // const ctxLang = processLang || lang;
+                    // fs.writeFileSync(path.join(vFolder, 'keywords.txt'), kws.join(', '));
+                    // fs.writeFileSync(path.join(iFolder, 'keywords.txt'), kws.join(', '));
+                    // fs.writeFileSync(path.join(vFolder, `${ctxLang}.context.txt`), scene.text);
+                    // fs.writeFileSync(path.join(iFolder, `${ctxLang}.context.txt`), scene.text);
+                    // if (!processLang) {
+                    //     fs.writeFileSync(path.join(vFolder, 'context.txt'), scene.text);
+                    //     fs.writeFileSync(path.join(iFolder, 'context.txt'), scene.text);
+                    //     fs.writeFileSync(path.join(vFolder, 'original_content.txt'), fullRawText);
+                    //     fs.writeFileSync(path.join(iFolder, 'original_content.txt'), fullRawText);
+                    // }
 
-                    // 3. Insert Cảnh vào DB
+                    // 3. BƯỚC 4b: Tách đoạn (ngôn ngữ đích) thành câu + dịch từng câu sang tiếng Việt
+                    const sentencePairs = await splitSentencesAndTranslateToVi(scene.text, processLang);
+                    const viParagraph = sentencePairs.length > 0
+                        ? sentencePairs.map(p => p.vi).join(' ')
+                        : scene.text;
+
+                    // 4. Insert Cảnh vào DB (content = ngôn ngữ đích, original_content = tiếng Việt)
                     const maxOrder = await db.get('SELECT COALESCE(MAX("order"), 0) as max FROM Paragraph WHERE post_id = ?', [dbPostId]);
                     const paraRes = await db.run(
                         'INSERT INTO Paragraph (post_id, content, original_content, "order") VALUES (?, ?, ?, ?)',
-                        [dbPostId, scene.text, scene.original_text || scene.text, maxOrder.max + 1]
+                        [dbPostId, scene.text, viParagraph, maxOrder.max + 1]
                     );
-                    
+
                     // Lưu ID thật của Cảnh trong DB vào object scene để Lát nữa xài
                     scene.dbParagraphId = paraRes.lastID;
                     scene.gid = gid;
                     scene.kws = kws; // Lưu keyword lại
 
-                    // 4. Insert Keywords
+                    // 5. Insert Keywords (3 từ khóa tiếng Anh)
                     for (const kw of kws) {
                         await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [scene.dbParagraphId, kw]);
                     }
 
-                    // 5. Insert Sentences - split tu tieng Viet roi dich sang target
-                    const sentencePairs = await splitAndTranslateSentences(
-                        scene.original_text || scene.text,
-                        processLang
-                    );
+                    // 6. Insert Sentences (content = câu ở ngôn ngữ đích, original_content = câu tiếng Việt)
                     for (const pair of sentencePairs) {
                         sentenceOrder++;
                         await db.run('INSERT INTO Sentence (paragraph_id, content, original_content, "order") VALUES (?, ?, ?, ?)', [scene.dbParagraphId, pair.target, pair.vi, sentenceOrder]);
@@ -888,7 +1000,7 @@ async function processNextInQueue() {
                     const syncPromise = liveSyncTask();
 
                     // 🟢 BẮT ĐẦU CHẠY ĐA LUỒNG TẢI MEDIA
-                    await runConcurrently(mediaTasks, 2);
+                    await runConcurrently(mediaTasks, 4);
 
                     // Khi hàm tải xong, báo hiệu cho vòng lặp Live Sync dừng lại
                     isSceneDownloading = false;

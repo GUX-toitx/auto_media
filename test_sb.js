@@ -1,44 +1,36 @@
-import { fetchIPv4 as fetch } from './fetchIPv4.js';
-import crypto from 'crypto';
-import dns from 'dns';
-dns.setDefaultResultOrder('ipv4first');
+// Test bot Storyblocks (Playwright)
+// Cách chạy:
+//   node test_sb.js                                    -> mặc định: video, keyword "Louisiana primary election", 2 file
+//   node test_sb.js "stock market crashing"            -> đổi keyword
+//   node test_sb.js "military helicopter" video 4      -> keyword + type + số file
+//   node test_sb.js "city skyline" image 3             -> tải ảnh
 
-// Copy nguyên cặp key của bạn vào đây
-const PUBLIC_KEY = 'test_977ec1f6be07a66229b434a575890b06caf21b5d1c727a27e53a9ab35ad'; 
-const PRIVATE_KEY = 'test_d32754f41533fe7e0d467675e8438e72321bcebbce1375f1f00c4f162fd';
+import path from 'path';
+import fs from 'fs';
+import { fetchFromStoryblocksBot } from './storyblocksCrawler.js';
 
-function buildStoryblocksUrlV2(resource, params = {}) {
-    const expires = Math.floor(Date.now() / 1000) + 3600;
-    const hmacKey = PRIVATE_KEY + expires;
-    const hmac = crypto.createHmac('sha256', hmacKey).update(resource).digest('hex');
+const keyword = process.argv[2] || 'Louisiana primary election';
+const type = process.argv[3] || 'video';            // 'video' hoặc 'image'
+const count = parseInt(process.argv[4] || '2', 10);
 
-    const queryParams = new URLSearchParams({
-        ...params,
-        APIKEY: PUBLIC_KEY,
-        EXPIRES: expires,
-        HMAC: hmac,
-        project_id: 'cory_corner_auto',
-        user_id: 'khaitm_dev'
-    });
-    return `https://api.storyblocks.com${resource}?${queryParams.toString()}`;
+const outDir = path.join(process.cwd(), '_test_storyblocks', type);
+if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+
+console.log('=== TEST STORYBLOCKS BOT (Playwright) ===');
+console.log('Keyword :', keyword);
+console.log('Type    :', type);
+console.log('Cần     :', count, 'file');
+console.log('Lưu tại :', outDir);
+console.log('-------------------------------------------');
+
+const t0 = Date.now();
+const got = await fetchFromStoryblocksBot(keyword, type, outDir, count);
+const dt = ((Date.now() - t0) / 1000).toFixed(1);
+
+console.log('-------------------------------------------');
+console.log(`✅ Xong sau ${dt}s. Tải được ${got}/${count} ${type}.`);
+if (got > 0) {
+    const files = fs.readdirSync(outDir).filter(f => f.startsWith('stock_'));
+    console.log('Files:', files);
 }
-
-async function testVideoAPI() {
-    console.log("=== BẮT ĐẦU TEST API STORYBLOCKS VIDEO ===");
-    
-    // Test thử với từ khóa "aquarium fish" - từ khóa chắc chắn phải có kết quả
-    const url = buildStoryblocksUrlV2('/api/v2/videos/search', { keywords: 'aquarium fish', results_per_page: 2 });
-    
-    try {
-        const res = await fetch(url);
-        console.log("Mã trạng thái (Status):", res.status);
-        
-        const text = await res.text();
-        console.log("\nKết quả thô từ Server (Giới hạn 500 ký tự):");
-        console.log(text.substring(0, 500)); 
-    } catch (e) {
-        console.log("Lỗi mạng:", e);
-    }
-}
-
-testVideoAPI();
+process.exit(0);
