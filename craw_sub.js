@@ -476,7 +476,7 @@ async function splitSentencesAndTranslateToVi(sceneText, targetLang) {
 
         const seenVi = new Set();
         return targetSentences.map((target, i) => {
-            let vi = (translated[i] || target).trim();
+            let vi = (translated[i] || target).trim().replace(/^\d+\.\s*/, '');
             const key = vi.toLowerCase().replace(/\s+/g, ' ');
             if (seenVi.has(key)) vi = target;
             seenVi.add(key);
