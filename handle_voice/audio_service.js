@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
+import { downloadIndividual, downloadMerged } from './downloadAudio.js';
 
 const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
 const DB_DIR = process.env.DB_DIR || '/usr/gux/media-team/db';
@@ -23,11 +24,7 @@ async function api(endpoint, options = {}) {
             ...options.headers,
         },
     });
-
-    if (!res.ok) {
-        throw new Error(`API ${endpoint} failed: ${res.status} ${await res.text()}`);
-    }
-
+    if (!res.ok) throw new Error(`API ${endpoint} failed: ${res.status} ${await res.text()}`);
     return res;
 }
 
@@ -50,22 +47,10 @@ async function createBatch(batchName, sentences, lang, speakerUuid) {
     form.append('split_chars', JSON.stringify(["\n", ".", "?", "!"]));
     form.append('speakers', JSON.stringify([{ no: 1, reference_speaker_uuid: speakerUuid }]));
     sentences.forEach((text, i) => form.append(`sentences[${i}][text]`, text));
-
     const res = await api('/user/batch', { method: 'POST', body: form });
     return res.json();
 }
 
-async function downloadAudio(audioUrl, savePath) {
-    const baseUrl = VOICE_API.slice(0, VOICE_API.lastIndexOf('/api'));
-    const res = await fetch(`${baseUrl}/${audioUrl}`, {
-        headers: { 'x-api-key': API_KEY, 'x-tenant': TENANT },
-    });
-    if (!res.ok) throw new Error(`Download failed: ${res.status} ${await res.text()}`);
-    const buffer = await res.arrayBuffer();
-    fs.writeFileSync(savePath, Buffer.from(buffer));
-}
-
-// --- EXPORT ---
 export async function getLanguages() {
     return api('/user/language?page=0&limit=-1').then(r => r.json());
 }
@@ -82,7 +67,6 @@ export async function getReferenceSpeakers(lang) {
 
 export async function generateAudios(projectDir, postId, lang, speakerUuid) {
     const projectName = path.basename(projectDir);
-
     const db = await getDb();
     const sentences = await db.all(
         'SELECT id, content, "order" FROM Sentence WHERE paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?) ORDER BY "order"',
@@ -94,17 +78,16 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid) {
     const texts = valid.map(s => s.content.trim());
     const folderNames = valid.map(s => String(s.order));
     const paragraphIds = valid.map(s => s.id);
-    const orderMap = valid.map(s => s.order);
     if (!texts.length) throw new Error(`Không có paragraph nào trong post id: ${postId}`);
 
     const batchName = `${projectName}_${lang}`;
-
     try {
         const createRes = await createBatch(batchName, texts, lang, speakerUuid);
         const batchUuid = createRes.data?.uuid || createRes.uuid;
         const batchSentences = createRes.data?.sentences || [];
 
         const db2 = await getDb();
+        await db2.run('UPDATE Post SET silence_duration = ? WHERE id = ?', [createRes.data?.silence_duration ?? 1, postId]);
         for (const bs of batchSentences) {
             const sentenceId = valid.find(s => s.order === bs.index)?.id;
             if (sentenceId) {
@@ -125,30 +108,87 @@ export async function updateBatchStatus(batchUuid) {
     return res.json();
 }
 
-export async function downloadBatchAudios(batchUuid, baseDir, folderNames = [], paragraphIds = []) {
+export async function getBatchAudios(batchUuid, paragraphIds = []) {
     const batchData = await api(`/user/batch/${batchUuid}`).then(r => r.json());
     const status = batchData.data?.status || batchData.status;
-
     if (status !== 'OK') return null;
 
     const condition = JSON.stringify({ where: { batch_uuid: batchUuid }, orderBy: { index: 'asc' } });
     const sentenceData = await api(`/user/sentence?page=0&limit=-1&condition=${encodeURIComponent(condition)}`).then(r => r.json());
-    const sentences = (sentenceData.data || []);
-    console.log('[downloadBatchAudios] status:', status, '| sentences count:', sentences.length);
-    const results = [];
+    const sentences = sentenceData.data || [];
 
-    for (let i = 0; i < sentences.length; i++) {
-        const s = sentences[i];
-        const folder = folderNames[i] || String(i + 1);
-        const outputDir = path.join(baseDir, folder);
-        if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-
-        const savePath = path.join(outputDir, `audio.mp3`);
-        await downloadAudio(s.audio_url, savePath);
-
-        const relativePath = path.relative(MEDIA_DIR, savePath);
-        results.push({ paragraphId: paragraphIds[i], relativePath, sentenceUuid: s.uuid });
-    }
+    const results = sentences.map((s, i) => ({
+        paragraphId: paragraphIds[i],
+        audioUrl: s.audio_url,
+        sentenceUuid: s.uuid,
+    }));
 
     return { total: sentences.length, results };
+}
+
+export async function checkAndSaveVoice(batchUuid, postId) {
+    const batchData = await api(`/user/batch/${batchUuid}`).then(r => r.json());
+    const status = batchData.data?.status || batchData.status;
+
+    if (status === 'OK' && postId) {
+        const db = await getDb();
+        const sentences = await db.all(
+            'SELECT id FROM Sentence WHERE paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?) ORDER BY "order"',
+            [postId]
+        );
+        const result = await getBatchAudios(batchUuid, sentences.map(s => s.id));
+        console.log('[Voice] getBatchAudios result:', result ? result.total : 'null');
+        if (result) {
+            for (const r of result.results) {
+                if (r.paragraphId) {
+                    await db.run('UPDATE Sentence SET audio = ?, sentence_uuid = ? WHERE id = ?', [r.audioUrl, r.sentenceUuid || null, r.paragraphId]);
+                    console.log(`[Voice] Saved audio for sentence ${r.paragraphId}: ${r.audioUrl}`);
+                }
+            }
+        }
+        await db.close();
+    }
+
+    return { status };
+}
+
+export async function getIndividualAudio(postId) {
+    const db = await getDb();
+    const sentences = await db.all(
+        `SELECT s."order", s.audio FROM Sentence s
+         JOIN Paragraph p ON s.paragraph_id = p.id
+         WHERE p.post_id = ? AND s.audio IS NOT NULL ORDER BY s."order"`,
+        [postId]
+    );
+    const post = await db.get('SELECT title FROM Post WHERE id = ?', [postId]);
+    await db.close();
+    const buf = await downloadIndividual(sentences);
+    return { buf, filename: `${post.title}_individual.zip` };
+}
+
+export async function getMergedAudio(postId, silenceDuration, tmpDir) {
+    const db = await getDb();
+    const sentences = await db.all(
+        `SELECT s."order", s.audio FROM Sentence s
+         JOIN Paragraph p ON s.paragraph_id = p.id
+         WHERE p.post_id = ? AND s.audio IS NOT NULL ORDER BY s."order"`,
+        [postId]
+    );
+    const post = await db.get('SELECT title, audio_uuid, silence_duration FROM Post WHERE id = ?', [postId]);
+    await db.close();
+
+    const silence = silenceDuration ?? post.silence_duration ?? 1;
+
+    if (post.audio_uuid) {
+        await api(`/user/batch/${post.audio_uuid}`, {
+            method: 'PUT',
+            body: JSON.stringify({ uuid: post.audio_uuid, silence_duration: silence }),
+        }).catch(e => console.error('[getMergedAudio] update silence_duration failed:', e.message));
+        const db2 = await getDb();
+        await db2.run('UPDATE Post SET silence_duration = ? WHERE id = ?', [silence, postId]);
+        await db2.close();
+    }
+
+    const outputFile = await downloadMerged(sentences, silence, tmpDir);
+    return { outputFile, filename: `${post.title}_merged.mp3` };
 }

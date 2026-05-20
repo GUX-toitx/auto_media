@@ -66,6 +66,7 @@ export async function initDB() {
 
     // ALTER migrations (bỏ qua nếu cột đã tồn tại)
     await db.run('ALTER TABLE Post ADD COLUMN status TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN silence_duration REAL DEFAULT 1').catch(() => {});
     await db.run('ALTER TABLE Sentence ADD COLUMN sentence_uuid TEXT DEFAULT NULL').catch(() => {});
 
     return db;

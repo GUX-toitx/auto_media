@@ -11,7 +11,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import multer from 'multer';
 
-import { getLanguages, getReferenceSpeakers, generateAudios, updateBatchStatus, downloadBatchAudios } from './audio_service.js';
+import { getLanguages, getReferenceSpeakers, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio } from './handle_voice/audio_service.js';
 import { processAll } from './video_service.js';
 import { generateFlowImage } from './browser.js';
 import archiver from 'archiver';
@@ -63,7 +63,7 @@ app.get('/api/posts/:postId', async (req, res) => {
             para.sentences = (await db.all(
                 'SELECT id, content, original_content, audio, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"',
                 [para.id]
-            )).map(s => ({ ...s, audioUrl: s.audio ? `/${s.audio}` : null }));
+            )).map(s => ({ ...s, audioUrl: s.audio ? (s.audio.startsWith('http') ? s.audio : `/${s.audio}`) : null }));
 
             // Keywords từ DB
             para.keywords = (await db.all(
@@ -246,6 +246,41 @@ app.post('/api/download-voice', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+const BUNNY_BASE_URL = process.env.BUNNYCDN_BASE_URL;
+const BUNNY_ACCESS_KEY = process.env.BUNNYCDN_ACCESS_KEY;
+const BUNNY_AUDIO_DIR = process.env.BUNNYCDN_AUDIO_DIR || 'sentences';
+
+async function fetchBunnyAudio(audioPath) {
+    const url = audioPath.startsWith('http') ? audioPath : `${BUNNY_BASE_URL}/${audioPath}`;
+    const res = await fetch(url, { headers: { AccessKey: BUNNY_ACCESS_KEY } });
+    if (!res.ok) throw new Error(`Bunny fetch failed: ${res.status} ${url}`);
+    return Buffer.from(await res.arrayBuffer());
+}
+
+app.post('/api/download-audio/individual', async (req, res) => {
+    try {
+        const { postId } = req.body;
+        const { buf, filename } = await getIndividualAudio(postId);
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.send(buf);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/download-audio/merged', async (req, res) => {
+    try {
+        const { postId, silenceDuration = 0.5 } = req.body;
+        const tmpDir = path.join(MEDIA_DIR, '_tmp_uploads', `merge_${Date.now()}`);
+        const { outputFile, filename } = await getMergedAudio(postId, silenceDuration, tmpDir);
+        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        const stream = fs.createReadStream(outputFile);
+        stream.pipe(res);
+        stream.on('end', () => fs.rmSync(tmpDir, { recursive: true, force: true }));
+        stream.on('error', () => fs.rmSync(tmpDir, { recursive: true, force: true }));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/update-batch-status', async (req, res) => {
     try {
         const { batchUuid } = req.body;
@@ -256,35 +291,9 @@ app.post('/api/update-batch-status', async (req, res) => {
 
 app.post('/api/check-download-voice', async (req, res) => {
     try {
-        const { batchUuid, postId, videoId } = req.body;
-        const batchData = await fetch(`${process.env.VOICE_API}/user/batch/${batchUuid}`, {
-            headers: { 'x-api-key': process.env.API_KEY, 'x-tenant': process.env.TENANT }
-        }).then(r => r.json());
-        const status = batchData.data?.status || batchData.status;
-
-        if (status === 'OK' && postId && videoId) {
-            const db = await getDb();
-            const post = await db.get('SELECT title FROM Post WHERE id = ?', [postId]);
-            const lang = post?.title?.match(/_([a-z]{2})$/)?.[1] || 'unknown';
-            const sentences = await db.all(
-                'SELECT id, "order" FROM Sentence WHERE paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?) ORDER BY "order"',
-                [postId]
-            );
-            const baseDir = path.join(MEDIA_DIR, videoId, 'output', lang, 'audios');
-            const result = await downloadBatchAudios(batchUuid, baseDir, sentences.map(s => String(s.order)), sentences.map(s => s.id));
-            console.log('[Voice] downloadBatchAudios result:', result ? result.total : 'null');
-            if (result) {
-                for (const r of result.results) {
-                    if (r.paragraphId) {
-                        await db.run('UPDATE Sentence SET audio = ?, sentence_uuid = ? WHERE id = ?', [r.relativePath, r.sentenceUuid || null, r.paragraphId]);
-                        console.log(`[Voice] Saved audio for sentence ${r.paragraphId}: ${r.relativePath}`);
-                    }
-                }
-            }
-            await db.close();
-        }
-
-        res.json({ status });
+        const { batchUuid, postId } = req.body;
+        const result = await checkAndSaveVoice(batchUuid, postId);
+        res.json(result);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -750,6 +759,7 @@ app.get('/api/get-prompt', (req, res) => {
 });
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.use(express.static(__dirname));
 app.use(express.static(MEDIA_DIR, {
     setHeaders: (res, path) => {
         res.setHeader('Accept-Ranges', 'bytes'); // Cho phép trình duyệt yêu cầu từng đoạn video để tua
