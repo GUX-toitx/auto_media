@@ -205,29 +205,34 @@ app.post('/api/download-voice', async (req, res) => {
 
             // Xử lý audio
             if (s.audio) {
-                const audioSrc = path.join(MEDIA_DIR, s.audio);
-                if (fs.existsSync(audioSrc)) {
-                    const audioName = `${sceneFolder}/audio.mp3`;
+                const audioName = `${sceneFolder}/audio.mp3`;
+                try {
+                    const audioBuf = await fetchBunnyAudio(s.audio);
                     if (totalAssetDuration > 0) {
+                        const tmpAudioPath = path.join(MEDIA_DIR, '_tmp_uploads', `audio_${s.order}_${Date.now()}.mp3`);
+                        fs.mkdirSync(path.dirname(tmpAudioPath), { recursive: true });
+                        fs.writeFileSync(tmpAudioPath, audioBuf);
                         let mp3Duration = 0;
                         try {
-                            const out = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${audioSrc}"`);
+                            const out = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${tmpAudioPath}"`);
                             mp3Duration = parseFloat(out.toString().trim());
                         } catch (e) {}
                         if (totalAssetDuration > mp3Duration) {
-                            const tmpPath = audioSrc.replace('.mp3', '_padded.mp3');
+                            const tmpPadded = tmpAudioPath.replace('.mp3', '_padded.mp3');
                             try {
-                                execSync(`ffmpeg -i "${audioSrc}" -af "apad=pad_dur=${totalAssetDuration - mp3Duration}" -t ${totalAssetDuration} -y "${tmpPath}"`);
-                                archive.file(tmpPath, { name: audioName });
-                                tmpFiles.push(tmpPath);
-                            } catch (e) { archive.file(audioSrc, { name: audioName }); }
+                                execSync(`ffmpeg -i "${tmpAudioPath}" -af "apad=pad_dur=${totalAssetDuration - mp3Duration}" -t ${totalAssetDuration} -y "${tmpPadded}"`);
+                                archive.file(tmpPadded, { name: audioName });
+                                tmpFiles.push(tmpPadded);
+                            } catch (e) { archive.append(audioBuf, { name: audioName }); }
+                            tmpFiles.push(tmpAudioPath);
                         } else {
-                            archive.file(audioSrc, { name: audioName });
+                            archive.append(audioBuf, { name: audioName });
+                            tmpFiles.push(tmpAudioPath);
                         }
                     } else {
-                        archive.file(audioSrc, { name: audioName });
+                        archive.append(audioBuf, { name: audioName });
                     }
-                }
+                } catch (e) { console.error(`[download-voice] skip audio ${s.order}:`, e.message); }
             }
 
             // Assets
