@@ -275,7 +275,7 @@ app.post('/api/check-download-voice', async (req, res) => {
             if (result) {
                 for (const r of result.results) {
                     if (r.paragraphId) {
-                        await db.run('UPDATE Sentence SET audio = ? WHERE id = ?', [r.relativePath, r.paragraphId]);
+                        await db.run('UPDATE Sentence SET audio = ?, sentence_uuid = ? WHERE id = ?', [r.relativePath, r.sentenceUuid || null, r.paragraphId]);
                         console.log(`[Voice] Saved audio for sentence ${r.paragraphId}: ${r.relativePath}`);
                     }
                 }

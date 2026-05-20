@@ -100,6 +100,17 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid) {
     try {
         const createRes = await createBatch(batchName, texts, lang, speakerUuid);
         const batchUuid = createRes.data?.uuid || createRes.uuid;
+        const batchSentences = createRes.data?.sentences || [];
+
+        const db2 = await getDb();
+        for (let i = 0; i < paragraphIds.length; i++) {
+            const matched = batchSentences.find(s => s.index === i + 1);
+            if (paragraphIds[i] && matched) {
+                await db2.run('UPDATE Sentence SET sentence_uuid = ? WHERE id = ?', [matched.uuid, paragraphIds[i]]);
+            }
+        }
+        await db2.close();
+
         return { batch_uuid: batchUuid, folderNames, paragraphIds };
     } catch (err) {
         console.error(`[generateAudios] LỖI createBatch:`, err.message);
@@ -134,7 +145,7 @@ export async function downloadBatchAudios(batchUuid, baseDir, folderNames = [], 
         await downloadAudio(s.audio_url, savePath);
 
         const relativePath = path.relative(MEDIA_DIR, savePath);
-        results.push({ paragraphId: paragraphIds[i], relativePath });
+        results.push({ paragraphId: paragraphIds[i], relativePath, sentenceUuid: s.uuid });
     }
 
     return { total: sentences.length, results };
