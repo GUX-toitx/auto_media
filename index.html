@@ -463,6 +463,12 @@
                 </select>
             </div>
             <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Ngôn ngữ (lọc giọng)</label>
+                <select v-model="sentenceVoiceModal.lang" @change="loadSentenceSpeakersByLang" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
+                    <option v-for="l in sentenceVoiceModal.langs" :key="l.code || l.uuid" :value="l.code || l.uuid">{{ l.name || l.code }}</option>
+                </select>
+            </div>
+            <div>
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Giọng mẫu</label>
                 <select v-model="sentenceVoiceModal.speakerUuid" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
                     <option value="">-- Giữ giọng cũ --</option>
@@ -1202,15 +1208,29 @@ createApp({
         async function recreateVoiceSentence(sentence, paraIndex, sentenceIndex) {
             if (!sentence.sentenceUuid) return alert('Sentence chưa có uuid!');
             const lang = activePost.value?.title?.match(/_([a-z]{2})$/)?.[1] || 'en';
-            const sr = await fetch(`/api/reference-speakers?lang=${lang}`);
+            const [lr, sr] = await Promise.all([
+                fetch('/api/languages'),
+                fetch(`/api/reference-speakers?lang=${lang}`)
+            ]);
             sentenceVoiceModal.value = {
                 open: true,
                 sentence,
                 label: `#${paraIndex + 1}.${sentenceIndex + 1}`,
+                lang,
+                langs: await lr.json(),
                 speakerUuid: '',
                 contentType: 'content',
                 speakers: await sr.json(),
             };
+        }
+
+        async function loadSentenceSpeakersByLang() {
+            const lang = sentenceVoiceModal.value.lang;
+            sentenceVoiceModal.value.speakerUuid = '';
+            sentenceVoiceModal.value.speakers = [];
+            if (!lang) return;
+            const res = await fetch(`/api/reference-speakers?lang=${lang}`);
+            sentenceVoiceModal.value.speakers = await res.json();
         }
 
         async function submitRecreateSentenceVoice() {
@@ -1599,6 +1619,7 @@ createApp({
             submitEdit,
             createVoice,
             recreateVoiceSentence,
+            loadSentenceSpeakersByLang,
             refreshSentenceVoice,
             saveSentenceField,
             sentenceVoiceModal,
