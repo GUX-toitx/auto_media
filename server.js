@@ -11,7 +11,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import multer from 'multer';
 
-import { getLanguages, getReferenceSpeakers, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio } from './handle_voice/audio_service.js';
+import { getLanguages, getReferenceSpeakers, getDictionary, getMe, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio } from './handle_voice/audio_service.js';
 import { processAll } from './video_service.js';
 import { generateFlowImage } from './browser.js';
 import archiver from 'archiver';
@@ -173,11 +173,11 @@ app.post('/api/download-voice', async (req, res) => {
 
         const lang = post.title.match(/_([a-z]{2})$/)?.[1] || 'unknown';
 
-        // Lấy tất cả sentences của post theo order
+        // Lấy tất cả sentences kèm paragraph order
         const sentences = await db.all(
-            `SELECT s.id, s.audio, s."order", s.paragraph_id FROM Sentence s
+            `SELECT s.id, s.audio, s."order" as s_order, p."order" as p_order FROM Sentence s
              JOIN Paragraph p ON s.paragraph_id = p.id
-             WHERE p.post_id = ? ORDER BY s."order"`,
+             WHERE p.post_id = ? ORDER BY p."order", s."order"`,
             [postId]
         );
 
@@ -189,65 +189,38 @@ app.post('/api/download-voice', async (req, res) => {
         const archive = archiver('zip', { zlib: { level: 6 } });
         archive.on('error', e => { throw e; });
         archive.pipe(res);
-        const tmpFiles = [];
-        const { execSync } = await import('child_process');
 
+        let lastPOrder = null;
+        let sIndex = 0;
         for (const s of sentences) {
-            const sceneFolder = `cau_${s.order}`;
+            if (s.p_order !== lastPOrder) { sIndex = 1; lastPOrder = s.p_order; } else { sIndex++; }
+            const label = `${s.p_order}_${sIndex}`;
+            const sceneFolder = `cau_${label}`;
 
-            // Lấy assets của sentence này
+            // Audio -> folder audio/
+            if (s.audio) {
+                try {
+                    const audioBuf = await fetchBunnyAudio(s.audio);
+                    archive.append(audioBuf, { name: `audio/${label}_audio.mp3` });
+                } catch (e) { console.error(`[download-voice] skip audio ${label}:`, e.message); }
+            }
+
+            // Assets
             const assets = await db.all(
                 'SELECT file_path, "order", duration FROM Asset WHERE selected = 1 AND sentence_id = ? ORDER BY "order"',
                 [s.id]
             );
-
-            const totalAssetDuration = Math.ceil(assets.reduce((sum, a) => sum + (a.duration || 0), 0));
-
-            // Xử lý audio
-            if (s.audio) {
-                const audioName = `${sceneFolder}/audio.mp3`;
-                try {
-                    const audioBuf = await fetchBunnyAudio(s.audio);
-                    if (totalAssetDuration > 0) {
-                        const tmpAudioPath = path.join(MEDIA_DIR, '_tmp_uploads', `audio_${s.order}_${Date.now()}.mp3`);
-                        fs.mkdirSync(path.dirname(tmpAudioPath), { recursive: true });
-                        fs.writeFileSync(tmpAudioPath, audioBuf);
-                        let mp3Duration = 0;
-                        try {
-                            const out = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${tmpAudioPath}"`);
-                            mp3Duration = parseFloat(out.toString().trim());
-                        } catch (e) {}
-                        if (totalAssetDuration > mp3Duration) {
-                            const tmpPadded = tmpAudioPath.replace('.mp3', '_padded.mp3');
-                            try {
-                                execSync(`ffmpeg -i "${tmpAudioPath}" -af "apad=pad_dur=${totalAssetDuration - mp3Duration}" -t ${totalAssetDuration} -y "${tmpPadded}"`);
-                                archive.file(tmpPadded, { name: audioName });
-                                tmpFiles.push(tmpPadded);
-                            } catch (e) { archive.append(audioBuf, { name: audioName }); }
-                            tmpFiles.push(tmpAudioPath);
-                        } else {
-                            archive.append(audioBuf, { name: audioName });
-                            tmpFiles.push(tmpAudioPath);
-                        }
-                    } else {
-                        archive.append(audioBuf, { name: audioName });
-                    }
-                } catch (e) { console.error(`[download-voice] skip audio ${s.order}:`, e.message); }
-            }
-
-            // Assets
             for (const asset of assets) {
                 const srcPath = path.join(MEDIA_DIR, asset.file_path);
                 if (fs.existsSync(srcPath)) {
                     const ext = path.extname(asset.file_path);
                     const durSuffix = asset.duration ? `_${Math.round(asset.duration)}s` : '';
-                    archive.file(srcPath, { name: `${sceneFolder}/${asset.order}${durSuffix}${ext}` });
+                    archive.file(srcPath, { name: `media/${sceneFolder}/${asset.order}${durSuffix}${ext}` });
                 }
             }
         }
         await db.close();
         await archive.finalize();
-        for (const f of tmpFiles) { try { fs.unlinkSync(f); } catch(_) {} }
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -311,6 +284,13 @@ app.post('/api/generate-media-video', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/me', async (req, res) => {
+    try {
+        const result = await getMe();
+        res.json(result.data || {});
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/languages', async (req, res) => {
     try {
         const result = await getLanguages();
@@ -325,11 +305,18 @@ app.get('/api/reference-speakers', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/dictionaries', async (req, res) => {
+    try {
+        const result = await getDictionary();
+        res.json(result.data || []);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/create-voice', async (req, res) => {
     try {
-        const { videoId, postId, lang, speakerUuid, contentType } = req.body;
+        const { videoId, postId, lang, speakerUuid, contentType, dictionaryUuids } = req.body;
         const projectDir = path.join(MEDIA_DIR, videoId);
-        const result = await generateAudios(projectDir, postId, lang, speakerUuid, contentType);
+        const result = await generateAudios(projectDir, postId, lang, speakerUuid, contentType, dictionaryUuids);
 
         // Lưu batchUuid vào bảng Post
         const db = await getDb();

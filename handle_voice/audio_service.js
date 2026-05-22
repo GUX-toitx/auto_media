@@ -28,7 +28,7 @@ async function api(endpoint, options = {}) {
     return res;
 }
 
-async function createBatch(batchName, sentences, lang, speakerUuid) {
+async function createBatch(batchName, sentences, lang, speakerUuid, dictionaryUuids = []) {
     const form = new FormData();
     form.append('batch_name', batchName);
     form.append('language', lang || 'en');
@@ -46,17 +46,38 @@ async function createBatch(batchName, sentences, lang, speakerUuid) {
     form.append('source', 'API');
     form.append('split_chars', JSON.stringify(["\n", ".", "?", "!"]));
     form.append('speakers', JSON.stringify([{ no: 1, reference_speaker_uuid: speakerUuid }]));
+    dictionaryUuids.forEach(uuid => form.append('dictionary_uuids[]', uuid));
     sentences.forEach((text, i) => form.append(`sentences[${i}][text]`, text));
     const res = await api('/user/batch', { method: 'POST', body: form });
     return res.json();
+}
+
+let cachedUserUuid = null;
+
+export async function getMe() {
+    const res = await api('/user/auth/me').then(r => r.json());
+    cachedUserUuid = res.data?.uuid || null;
+    return res;
+}
+
+async function getUserUuid() {
+    if (!cachedUserUuid) await getMe();
+    return cachedUserUuid;
 }
 
 export async function getLanguages() {
     return api('/user/language?page=0&limit=-1').then(r => r.json());
 }
 
+export async function getDictionary() {
+    const uuid = await getUserUuid();
+    const condition = JSON.stringify({ where: { OR: [{ user_uuid: null }, { user_uuid: uuid }] } });
+    return api(`/user/dictionary?page=0&limit=-1&condition=${encodeURIComponent(condition)}`).then(r => r.json());
+}
+
 export async function getReferenceSpeakers(lang) {
-    const where = { OR: [{ user_uuid: null }, { user_uuid: '15f22a66-68e7-4367-87c6-02ca4ee76469' }] };
+    const uuid = await getUserUuid();
+    const where = { OR: [{ user_uuid: null }, { user_uuid: uuid }] };
     if (lang) where.language = lang;
     const condition = JSON.stringify({
         where,
@@ -65,7 +86,7 @@ export async function getReferenceSpeakers(lang) {
     return api(`/user/reference-speaker?page=0&limit=-1&condition=${encodeURIComponent(condition)}`).then(r => r.json());
 }
 
-export async function generateAudios(projectDir, postId, lang, speakerUuid, contentType = 'content') {
+export async function generateAudios(projectDir, postId, lang, speakerUuid, contentType = 'content', dictionaryUuids = []) {
     const projectName = path.basename(projectDir);
     const db = await getDb();
     const sentences = await db.all(
@@ -82,7 +103,7 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid, cont
 
     const batchName = `${projectName}_${lang}`;
     try {
-        const createRes = await createBatch(batchName, texts, lang, speakerUuid);
+        const createRes = await createBatch(batchName, texts, lang, speakerUuid, dictionaryUuids);
         const batchUuid = createRes.data?.uuid || createRes.uuid;
         const batchSentences = createRes.data?.sentences || [];
 

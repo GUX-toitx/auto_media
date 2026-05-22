@@ -417,6 +417,16 @@
                         <option v-for="s in voiceModal.speakers" :key="s.uuid" :value="s.uuid">{{ s.speaker_name }}</option>
                     </select>
                 </div>
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Từ điển</label>
+                    <div class="max-h-[170px] overflow-y-auto bg-gray-800 border border-gray-700 rounded-lg p-2 space-y-1">
+                        <label v-for="d in voiceModal.dictionaries" :key="d.uuid" class="flex items-center gap-2 text-sm text-white cursor-pointer hover:bg-gray-700 rounded px-2 py-1">
+                            <input type="checkbox" :value="d.uuid" v-model="voiceModal.selectedDicts" class="accent-purple-500">
+                            <span>{{ d.name || d.uuid }}</span>
+                        </label>
+                        <p v-if="!voiceModal.dictionaries?.length" class="text-[11px] text-gray-500 italic">Không có từ điển</p>
+                    </div>
+                </div>
                 <div class="flex gap-3 justify-end pt-2">
                     <button @click="voiceModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
                     <button @click="submitCreateVoice" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-purple-600 hover:bg-purple-500">Tạo</button>
@@ -1165,18 +1175,22 @@ createApp({
                 speakerUuid: '',
                 langs: [],
                 speakers: [],
+                dictionaries: [],
+                selectedDicts: [],
                 batchUuid: '',
                 contentType: 'content',
             };
 
             const lang = voiceModal.value.lang;
-            const [lr, sr] = await Promise.all([
+            const [lr, sr, dr] = await Promise.all([
                 fetch('/api/languages'),
-                fetch(`/api/reference-speakers?lang=${lang}`)
+                fetch(`/api/reference-speakers?lang=${lang}`),
+                fetch('/api/dictionaries')
             ]);
 
             voiceModal.value.langs = await lr.json();
             voiceModal.value.speakers = await sr.json();
+            voiceModal.value.dictionaries = await dr.json();
         }
 
         async function loadSpeakersByLang() {
@@ -1189,13 +1203,13 @@ createApp({
         }
 
         async function submitCreateVoice() {
-            const { lang, speakerUuid, postId, contentType } = voiceModal.value;
+            const { lang, speakerUuid, postId, contentType, selectedDicts } = voiceModal.value;
             if (!lang || !speakerUuid) return alert('Vui lòng chọn đủ!');
 
             const res = await fetch('/api/create-voice', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ videoId: activeProjectId.value, postId, lang, speakerUuid, contentType })
+                body: JSON.stringify({ videoId: activeProjectId.value, postId, lang, speakerUuid, contentType, dictionaryUuids: selectedDicts })
             });
             const r = await res.json();
 
@@ -1402,6 +1416,11 @@ createApp({
         // ==========================================
 
         loadPosts();
+
+        // Load user info và lưu uuid vào localStorage
+        fetch('/api/me').then(r => r.json()).then(data => {
+            if (data.uuid) localStorage.setItem('user_uuid', data.uuid);
+        }).catch(() => {});
 
         // SSE: lắng nghe crawl status
         const sse = new EventSource('/api/crawl-status/stream');
