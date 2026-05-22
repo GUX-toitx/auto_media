@@ -11,7 +11,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import multer from 'multer';
 
-import { getLanguages, getReferenceSpeakers, getDictionary, getMe, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio } from './handle_voice/audio_service.js';
+import { getLanguages, getReferenceSpeakers, getDictionary, getMe, sendToQueue, getSentenceStatus, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio } from './handle_voice/audio_service.js';
 import { processAll } from './video_service.js';
 import { generateFlowImage } from './browser.js';
 import archiver from 'archiver';
@@ -61,9 +61,9 @@ app.get('/api/posts/:postId', async (req, res) => {
 
             // Sentences kèm audio
             para.sentences = (await db.all(
-                'SELECT id, content, original_content, audio, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"',
+                'SELECT id, content, original_content, audio, sentence_uuid, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"',
                 [para.id]
-            )).map(s => ({ ...s, audioUrl: s.audio ? (s.audio.startsWith('http') ? s.audio : `/${s.audio}`) : null }));
+            )).map(s => ({ ...s, sentenceUuid: s.sentence_uuid, audioUrl: s.audio ? (s.audio.startsWith('http') ? s.audio : `/${s.audio}`) : null }));
 
             // Keywords từ DB
             para.keywords = (await db.all(
@@ -288,6 +288,28 @@ app.get('/api/me', async (req, res) => {
     try {
         const result = await getMe();
         res.json(result.data || {});
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/send-to-queue', async (req, res) => {
+    try {
+        const { uuids } = req.body;
+        const result = await sendToQueue(uuids);
+        res.json(result);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/check-sentence-voice', async (req, res) => {
+    try {
+        const { sentenceUuid, sentenceId } = req.body;
+        const result = await getSentenceStatus(sentenceUuid);
+        const data = result.data || result;
+        if (data.status === 'OK' && data.audio_url && sentenceId) {
+            const db = await getDb();
+            await db.run('UPDATE Sentence SET audio = ? WHERE id = ?', [data.audio_url, sentenceId]);
+            await db.close();
+        }
+        res.json({ status: data.status, audioUrl: data.audio_url || null });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

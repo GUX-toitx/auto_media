@@ -65,6 +65,19 @@ async function getUserUuid() {
     return cachedUserUuid;
 }
 
+export async function sendToQueue(uuids) {
+    const res = await api('/user/sentence/send-to-queue', {
+        method: 'POST',
+        body: JSON.stringify({ uuids }),
+    });
+    return res.json();
+}
+
+export async function getSentenceStatus(sentenceUuid) {
+    const res = await api(`/user/sentence/${sentenceUuid}`);
+    return res.json();
+}
+
 export async function getLanguages() {
     return api('/user/language?page=0&limit=-1').then(r => r.json());
 }
