@@ -11,7 +11,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import multer from 'multer';
 
-import { getLanguages, getReferenceSpeakers, getDictionary, getMe, sendToQueue, getSentenceStatus, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio } from './handle_voice/audio_service.js';
+import { getLanguages, getReferenceSpeakers, getDictionary, getMe, sendToQueue, getSentenceStatus, updateSentence, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio } from './handle_voice/audio_service.js';
 import { processAll } from './video_service.js';
 import { generateFlowImage } from './browser.js';
 import archiver from 'archiver';
@@ -296,6 +296,25 @@ app.post('/api/send-to-queue', async (req, res) => {
         const { uuids } = req.body;
         const result = await sendToQueue(uuids);
         res.json(result);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/update-sentence', async (req, res) => {
+    try {
+        const { uuid, reference_speaker_uuid, text } = req.body;
+        const result = await updateSentence({ uuid, reference_speaker_uuid, text });
+        res.json(result);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/save-sentence-field', async (req, res) => {
+    try {
+        const { sentenceId, field, value } = req.body;
+        if (!['content', 'original_content'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
+        const db = await getDb();
+        await db.run(`UPDATE Sentence SET ${field} = ? WHERE id = ?`, [value, sentenceId]);
+        await db.close();
+        res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

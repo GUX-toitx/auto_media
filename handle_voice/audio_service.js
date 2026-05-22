@@ -78,6 +78,16 @@ export async function getSentenceStatus(sentenceUuid) {
     return res.json();
 }
 
+export async function updateSentence({ uuid, reference_speaker_uuid, text }) {
+    const payload = { uuid, text };
+    if (reference_speaker_uuid) payload.reference_speaker_uuid = reference_speaker_uuid;
+    const res = await api(`/user/sentence/${uuid}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+    });
+    return res.json();
+}
+
 export async function getLanguages() {
     return api('/user/language?page=0&limit=-1').then(r => r.json());
 }

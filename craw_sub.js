@@ -363,7 +363,9 @@ async function rewriteAsJournalist(rawText, targetLang) {
                 {
                     role: "system",
                     content: `Bạn là một nhà báo, phóng viên chuyên nghiệp với 20 năm kinh nghiệm phân tích về tin tức chính trị thế giới và thông thạo nhiều ngôn ngữ. Đầu tiên hãy đọc hiểu (hiểu rõ nội dung, hiểu lỗi chính tả, lỗi sai cơ bản, lỗi danh từ riêng...), sau đó hãy VIẾT LẠI cho tôi đoạn bằng ngôn ngữ ${langName}.
-                                - CHỈ trả về nội dung viết lại, KHÔNG thêm tiêu đề, KHÔNG thêm ghi chú/giải thích.`
+                                - CHỈ trả về nội dung viết lại dạng văn xuôi liền mạch.
+                                - TUYỆT ĐỐI KHÔNG đánh số thứ tự (1. 2. 3...), KHÔNG dùng bullet point, KHÔNG dùng danh sách.
+                                - KHÔNG thêm tiêu đề, KHÔNG thêm ghi chú/giải thích.`
                 },
                 { role: "user", content: rawText }
             ],
@@ -389,7 +391,7 @@ async function splitIntoScenesWithKeywords(targetText, targetLang) {
         '1. Đọc hiểu TOÀN BỘ nội dung bằng ngôn ngữ ' + langName + '.',
         '2. TỰ ĐỘNG chia nội dung thành các scene.',
         '3. Mỗi scene gồm 2-5 câu có cùng chủ đề/ngữ nghĩa.',
-        '4. GIỮ NGUYÊN 100% văn bản gốc: KHÔNG sửa từ, KHÔNG paraphrase, KHÔNG tóm tắt, KHÔNG đổi dấu câu, CHỈ được phép chia đoạn.',
+        '4. GIỮ NGUYÊN 100% văn bản gốc: KHÔNG sửa từ, KHÔNG paraphrase, KHÔNG tóm tắt, KHÔNG đổi dấu câu, KHÔNG đánh số thứ tự (1. 2. 3...), CHỈ được phép chia đoạn.',
         '5. Với mỗi scene, tạo đúng 3 keyword tiếng Anh để tìm video stock.',
         '',
         '# QUY TẮC KEYWORD',

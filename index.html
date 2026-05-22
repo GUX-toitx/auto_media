@@ -77,15 +77,15 @@
                                     <div class="flex items-start gap-2">
                                         <span class="bg-green-600 text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 mt-0.5">#{{ i + 1 }}.{{ si + 1 }}</span>
                                         <div class="grid grid-cols-2 gap-2 flex-1">
-                                            <div class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap">{{ s.original_content || s.content }}</div>
-                                            <div class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap">{{ s.content }}</div>
+                                            <div contenteditable="true" @blur="saveSentenceField(s, 'original_content', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ s.original_content || s.content }}</div>
+                                            <div contenteditable="true" @blur="saveSentenceField(s, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ s.content }}</div>
                                         </div>
                                     </div>
                                     <div class="flex items-center gap-2 bg-gray-800/40 rounded-lg px-2 py-1">
                                         <span class="text-[9px] font-black text-green-400 shrink-0">🎵</span>
                                         <audio v-if="s.audioUrl" controls :src="s.audioUrl" class="h-7 flex-1" preload="metadata"></audio>
                                         <span v-else class="flex-1 text-[10px] text-gray-600 italic">Chưa có audio</span>
-                                        <button @click="recreateVoiceSentence(s)" :disabled="s._voiceLoading" :class="['text-[11px] font-bold px-3 py-1.5 rounded text-white shrink-0', s._voiceLoading ? 'bg-purple-400 animate-pulse' : 'bg-purple-600 hover:bg-purple-500']">🎙️{{ s._voiceLoading ? ' ...' : '' }}</button>
+                                        <button @click="recreateVoiceSentence(s, i, si)" :disabled="s._voiceLoading" :class="['text-[11px] font-bold px-3 py-1.5 rounded text-white shrink-0', s._voiceLoading ? 'bg-purple-400 animate-pulse' : 'bg-purple-600 hover:bg-purple-500']">🎙️{{ s._voiceLoading ? ' ...' : '' }}</button>
                                         <button @click="refreshSentenceVoice(s)" class="text-[11px] font-bold px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white shrink-0">🔄</button>
                                     </div>
                                     <!-- Video selected của câu này -->
@@ -451,6 +451,32 @@
         </div>
     </div>
 
+    <!-- SENTENCE VOICE MODAL -->
+    <div v-if="sentenceVoiceModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-8 w-[420px] space-y-6">
+            <h3 class="text-xl font-black text-white">🎙️ Tạo lại Voice câu {{ sentenceVoiceModal.label }}</h3>
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Nội dung</label>
+                <select v-model="sentenceVoiceModal.contentType" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
+                    <option value="content">Target Content</option>
+                    <option value="original_content">Original Content</option>
+                </select>
+            </div>
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Giọng mẫu</label>
+                <select v-model="sentenceVoiceModal.speakerUuid" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
+                    <option value="">-- Giữ giọng cũ --</option>
+                    <option v-for="s in sentenceVoiceModal.speakers" :key="s.uuid" :value="s.uuid">{{ s.speaker_name }}</option>
+                </select>
+                <p class="text-[10px] font-bold bg-yellow-500 text-black rounded px-2 py-1 mt-2">Nếu không đổi giọng thì để trống ở đây</p>
+            </div>
+            <div class="flex gap-3 justify-end pt-2">
+                <button @click="sentenceVoiceModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
+                <button @click="submitRecreateSentenceVoice" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-purple-600 hover:bg-purple-500">Tạo</button>
+            </div>
+        </div>
+    </div>
+
     <!-- AI GENERATE MODAL -->
     <div v-if="aiModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="aiModal.open = false">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[500px] space-y-4">
@@ -676,6 +702,7 @@ createApp({
         const activePost = ref(null);
         const toast = ref('');
         const voiceModal = ref({ open: false, lang: '', speakerUuid: '', langs: [], speakers: [], batchUuid: '' });
+        const sentenceVoiceModal = ref({ open: false, sentence: null, speakerUuid: '', contentType: 'content', speakers: [], langs: [] });
         const editModal = ref({ open: false, type: '', asset: null, start: 0, end: 0, duration: 0, cropX: 0, cropY: 0, cropW: 200, cropH: 200, cropReady: false, saving: false });
         const uploadModal = ref({ open: false, type: '', para: null, files: [], dragging: false, uploading: false, url: '', downloading: false });
         const aiModal = ref({ open: false, type: '', para: null, gid: '', count: 2, content: '', keywords: [], prompt: '', ratio: '16:9', videoMode: 'Frames', veo: 'Fast' });
@@ -1172,20 +1199,61 @@ createApp({
             editModal.value.saving = false;
         }
 
-        async function recreateVoiceSentence(sentence) {
+        async function recreateVoiceSentence(sentence, paraIndex, sentenceIndex) {
             if (!sentence.sentenceUuid) return alert('Sentence chưa có uuid!');
+            const lang = activePost.value?.title?.match(/_([a-z]{2})$/)?.[1] || 'en';
+            const sr = await fetch(`/api/reference-speakers?lang=${lang}`);
+            sentenceVoiceModal.value = {
+                open: true,
+                sentence,
+                label: `#${paraIndex + 1}.${sentenceIndex + 1}`,
+                speakerUuid: '',
+                contentType: 'content',
+                speakers: await sr.json(),
+            };
+        }
+
+        async function submitRecreateSentenceVoice() {
+            const { sentence, speakerUuid, contentType } = sentenceVoiceModal.value;
+            const text = contentType === 'original_content' ? (sentence.original_content || sentence.content) : sentence.content;
             try {
+                const payload = { uuid: sentence.sentenceUuid, text };
+                if (speakerUuid) payload.reference_speaker_uuid = speakerUuid;
+                const updateRes = await fetch('/api/update-sentence', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!updateRes.ok) {
+                    const err = await updateRes.json();
+                    return alert('❌ Update lỗi: ' + (err.error || 'Thử lại!'));
+                }
                 const res = await fetch('/api/send-to-queue', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ uuids: [sentence.sentenceUuid] })
                 });
-                const r = await res.json();
-                if (res.ok) {
-                    showToast('✅ Đang tạo lại voice...');
-                    startPollingSentenceVoice(sentence);
-                } else alert(r.error || '❌ Lỗi!');
+                if (!res.ok) {
+                    const err = await res.json();
+                    return alert('❌ Send to queue lỗi: ' + (err.error || 'Thử lại!'));
+                }
+                sentenceVoiceModal.value.open = false;
+                showToast('✅ Đang tạo lại voice...');
+                startPollingSentenceVoice(sentence);
             } catch (e) { alert('❌ ' + e.message); }
+        }
+
+        async function saveSentenceField(sentence, field, event) {
+            const newText = event.target.innerText.trim();
+            if (newText === (sentence[field] || '').trim()) return;
+            sentence[field] = newText;
+            try {
+                await fetch('/api/save-sentence-field', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sentenceId: sentence.id, field, value: newText })
+                });
+            } catch (e) { console.error('Save sentence failed:', e); }
         }
 
         async function refreshSentenceVoice(sentence) {
@@ -1532,6 +1600,9 @@ createApp({
             createVoice,
             recreateVoiceSentence,
             refreshSentenceVoice,
+            saveSentenceField,
+            sentenceVoiceModal,
+            submitRecreateSentenceVoice,
             downloadAudioModal,
             openDownloadAudioModal,
             submitDownloadAudio,
