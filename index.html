@@ -17,9 +17,12 @@
 <div id="app" class="flex w-full h-full overflow-hidden">
     <!-- SIDEBAR -->
     <aside class="w-64 bg-gray-900 border-r border-gray-800 flex flex-col h-full shrink-0">
-        <div class="p-3 border-b border-gray-800 flex gap-2">
-            <button @click="page = 'posts'" :class="['flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all', page === 'posts' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white']">📂 Dự án</button>
-            <button @click="openProfilePage" :class="['flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all', page === 'profiles' ? 'bg-green-600 text-white shadow-lg shadow-green-500/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white']">🧑💻 Profiles</button>
+        <div class="p-3 border-b border-gray-800 flex gap-2 flex-col">
+            <div class="flex gap-2">
+                <button @click="page = 'posts'" :class="['flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all', page === 'posts' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white']">📂 Dự án</button>
+                <button @click="openProfilePage" :class="['flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all', page === 'profiles' ? 'bg-green-600 text-white shadow-lg shadow-green-500/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white']">🧑💻 Profiles</button>
+            </div>
+            <button @click="newProjectModal.open = true" class="w-full py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-emerald-600 hover:bg-emerald-500 text-white">➕ Tạo mới dự án</button>
         </div>
         <div class="flex-1 overflow-y-auto p-4 space-y-1">
             <div v-for="post in posts" :key="post.id" class="flex items-stretch gap-1">
@@ -47,6 +50,7 @@
                     <div class="flex items-center gap-3">
                         <h2 class="text-4xl font-black text-white">{{ activePost.title }}</h2>
                     </div>
+                    <p v-if="activePost.tieu_de" class="text-gray-300 text-sm mt-1 font-medium">{{ activePost.tieu_de }}</p>
                 </div>
                 <div class="flex gap-3 items-center">
                     <button @click="createVoice" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
@@ -60,13 +64,44 @@
                 </div>
             </header>
 
-            <div class="space-y-4 mt-[150px]">
+            <div class="space-y-4 mt-[180px]">
+                <!-- Mo bai & Tom tat -->
+                <div v-if="activePost.mo_bai || activePost.tom_tat" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
+                    <div v-if="activePost.mo_bai || activePost.mo_bai_vi">
+                        <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Mở bài</p>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div contenteditable="true" @blur="savePostField('mo_bai_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.mo_bai_vi }}</div>
+                            <div contenteditable="true" @blur="savePostField('mo_bai', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.mo_bai }}</div>
+                        </div>
+                    </div>
+                    <div v-if="activePost.tom_tat || activePost.tom_tat_vi">
+                        <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Tóm tắt</p>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div contenteditable="true" @blur="savePostField('tom_tat_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.tom_tat_vi }}</div>
+                            <div contenteditable="true" @blur="savePostField('tom_tat', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.tom_tat }}</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div v-for="(para, i) in activePost.paragraphs" :key="para.id" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
 
                     <!-- Row 1: badge + sentences -->
                     <div class="flex items-start gap-2">
                         <span class="bg-blue-600 text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 mt-0.5">#{{ i + 1 }}</span>
                         <div class="flex-1 space-y-1">
+                            <!-- Paragraph content: 2 input tiếng Việt và ngôn ngữ đích -->
+                            <div v-if="para.original_content || para.content" class="space-y-1">
+                                <!-- Title row -->
+                                <div v-if="para.title || para.title_vi" class="grid grid-cols-2 gap-2">
+                                    <div contenteditable="true" @blur="saveParaField(para, 'title_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-400 leading-relaxed min-h-[32px] outline-none focus:border-yellow-500">{{ para.title_vi }}</div>
+                                    <div contenteditable="true" @blur="saveParaField(para, 'title', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-300 leading-relaxed min-h-[32px] outline-none focus:border-yellow-500">{{ para.title }}</div>
+                                </div>
+                                <!-- Content row -->
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div contenteditable="true" @blur="saveParaField(para, 'original_content', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-900 border border-gray-700 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ para.original_content }}</div>
+                                    <div contenteditable="true" @blur="saveParaField(para, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-900 border border-gray-700 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ para.content }}</div>
+                                </div>
+                            </div>
                             <div class="flex items-center gap-2">
                                 <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300" @click="toggleSection(para, 'sentencesOpen')">
                                     {{ para.sentencesOpen ? '▼' : '▶' }} Sentences ({{ (para.sentences || []).length }})
@@ -76,9 +111,17 @@
                                 <div v-for="(s, si) in (para.sentences || []).slice().sort((a,b) => a.order - b.order)" :key="s.id" class="bg-gray-900/60 border border-gray-800 rounded-lg p-2 space-y-1.5">
                                     <div class="flex items-start gap-2">
                                         <span class="bg-green-600 text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 mt-0.5">#{{ i + 1 }}.{{ si + 1 }}</span>
-                                        <div class="grid grid-cols-2 gap-2 flex-1">
-                                            <div contenteditable="true" @blur="saveSentenceField(s, 'original_content', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ s.original_content || s.content }}</div>
-                                            <div contenteditable="true" @blur="saveSentenceField(s, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ s.content }}</div>
+                                        <div class="flex-1 space-y-1">
+                                            <!-- Sentence title -->
+                                            <div v-if="s.title || s.title_vi" class="grid grid-cols-2 gap-2">
+                                                <div contenteditable="true" @blur="saveSentenceField(s, 'title_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-400 leading-relaxed min-h-[28px] outline-none focus:border-yellow-500">{{ s.title_vi }}</div>
+                                                <div contenteditable="true" @blur="saveSentenceField(s, 'title', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-300 leading-relaxed min-h-[28px] outline-none focus:border-yellow-500">{{ s.title }}</div>
+                                            </div>
+                                            <!-- Sentence content -->
+                                            <div class="grid grid-cols-2 gap-2">
+                                                <div contenteditable="true" @blur="saveSentenceField(s, 'original_content', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ s.original_content || s.content }}</div>
+                                                <div contenteditable="true" @blur="saveSentenceField(s, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ s.content }}</div>
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="flex items-center gap-2 bg-gray-800/40 rounded-lg px-2 py-1">
@@ -89,34 +132,38 @@
                                         <button @click="refreshSentenceVoice(s)" class="text-[11px] font-bold px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white shrink-0">🔄</button>
                                     </div>
                                     <!-- Video selected của câu này -->
-                                    <div v-if="(para.videos || []).filter(v => v.selected && v.sentenceId == s.id).length">
+                                    <div v-if="(para.videos || []).filter(v => v.sentenceId == s.id).length">
                                         <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="s._videoOpen = !s._videoOpen">
-                                            {{ s._videoOpen ? '▼' : '▶' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos ({{ (para.videos || []).filter(v => v.selected && v.sentenceId == s.id).length }})
+                                            {{ s._videoOpen ? '▼' : '▶' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos ({{ (para.videos || []).filter(v => v.sentenceId == s.id).length }})
                                         </div>
-                                        <div v-if="s._videoOpen" class="grid grid-cols-4 gap-1 mt-1">
-                                            <div v-for="v in (para.videos || []).filter(v => v.selected && v.sentenceId == s.id).sort((a,b) => a.order - b.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
-                                                <button @click="unselectAsset(v, para, 0, 'video')" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
+                                        <div v-if="s._videoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
+                                            <div v-for="v in (para.videos || []).filter(v => v.sentenceId == s.id).sort((a,b) => a.order - b.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
+                                                :class="v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-700'">
+                                                <button @click="deleteAsset(v, para)" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
                                                 <video muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v, 'video', para)" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                                 <div class="flex gap-1">
-                                                    <button class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</button>
-                                                    <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-green-600 uppercase">✓</button>
+                                                    <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
+                                                    <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
+                                                        :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
                                                     <button @click="openEdit(v, 'video', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
                                     <!-- Image selected của câu này -->
-                                    <div v-if="(para.images || []).filter(img => img.selected && img.sentenceId == s.id).length">
+                                    <div v-if="(para.images || []).filter(img => img.sentenceId == s.id).length">
                                         <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="s._imageOpen = !s._imageOpen">
-                                            {{ s._imageOpen ? '▼' : '▶' }} <span class="w-1.5 h-1.5 bg-orange-500 rounded-full mx-1"></span> Images ({{ (para.images || []).filter(img => img.selected && img.sentenceId == s.id).length }})
+                                            {{ s._imageOpen ? '▼' : '▶' }} <span class="w-1.5 h-1.5 bg-orange-500 rounded-full mx-1"></span> Images ({{ (para.images || []).filter(img => img.sentenceId == s.id).length }})
                                         </div>
-                                        <div v-if="s._imageOpen" class="grid grid-cols-6 gap-1 mt-1">
-                                            <div v-for="img in (para.images || []).filter(img => img.selected && img.sentenceId == s.id).sort((a,b) => a.order - b.order)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
-                                                <button @click="unselectAsset(img, para, 0, 'image')" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
+                                        <div v-if="s._imageOpen !== false" class="grid grid-cols-6 gap-1 mt-1">
+                                            <div v-for="img in (para.images || []).filter(img => img.sentenceId == s.id).sort((a,b) => a.order - b.order)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
+                                                :class="img.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-700'">
+                                                <button @click="deleteAsset(img, para)" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
                                                 <img :src="img.url" @click="openPreview(img, 'image', para)" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
                                                 <div class="flex gap-1">
-                                                    <button class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</button>
-                                                    <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-green-600 uppercase">✓</button>
+                                                    <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
+                                                    <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
+                                                        :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
                                                     <button @click="openEdit(img, 'image', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
                                                 </div>
                                             </div>
@@ -125,15 +172,6 @@
                                 </div>
                             </div>
                         </div>
-                    </div>
-
-                    <!-- Row 2: keywords -->
-                    <div class="flex flex-wrap gap-1 px-1">
-                        <span v-for="(kw, ki) in para.keywords" :key="ki" class="keyword-tag">
-                            {{ kw }}<b class="cursor-pointer text-gray-600 hover:text-red-500 ml-1" @click="removeKeyword(para, ki)">×</b>
-                        </span>
-                        <input type="text" @keydown.enter="addKeyword($event, para)" placeholder="+ keyword"
-                            class="bg-transparent text-[11px] p-0.5 outline-none text-blue-400 w-24 border-b border-transparent focus:border-blue-500">
                     </div>
 
                     <!-- Row 5: Videos -->
@@ -694,6 +732,61 @@
         </div>
     </div>
 
+    <!-- NEW PROJECT MODAL -->
+    <div v-if="newProjectModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="newProjectModal.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[560px] space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-lg font-black text-white">➕ Tạo mới dự án</h3>
+                <button @click="newProjectModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+
+            <!-- Ngôn ngữ đích -->
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Ngôn ngữ đích</label>
+                <select v-model="newProjectModal.targetLang" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-blue-500">
+                    <option v-for="l in newProjectModal.langOptions" :key="l.code" :value="l.code">{{ l.name }}</option>
+                </select>
+            </div>
+
+            <!-- Nguồn -->
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Nguồn tin</label>
+                <div class="flex flex-wrap gap-2 mb-2">
+                    <button v-for="src in newProjectModal.sourceOptions" :key="src"
+                        @click="newProjectModal.toggleSource(src)"
+                        :class="['px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all border', newProjectModal.selectedSources.includes(src) ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500']">{{ src }}</button>
+                </div>
+                <div class="flex gap-2">
+                    <input v-model="newProjectModal.customSource" type="text" placeholder="Nguồn khác (free text)..."
+                        class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-blue-500">
+                    <button @click="newProjectModal.addCustomSource"
+                        :disabled="!newProjectModal.customSource.trim()"
+                        class="px-4 py-2 rounded-lg text-[11px] font-bold bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed">➕ Thêm</button>
+                </div>
+                <div v-if="newProjectModal.selectedSources.length" class="flex flex-wrap gap-1 mt-2">
+                    <span v-for="src in newProjectModal.selectedSources" :key="src" class="keyword-tag">
+                        {{ src }}<b class="cursor-pointer text-gray-600 hover:text-red-500 ml-1" @click="newProjectModal.toggleSource(src)">×</b>
+                    </span>
+                </div>
+            </div>
+
+            <!-- Nội dung -->
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Nội dung</label>
+                <textarea v-model="newProjectModal.content" rows="8" placeholder="Dán nội dung bài viết vào đây..."
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-blue-500 resize-none leading-relaxed"></textarea>
+            </div>
+
+            <div class="flex gap-3 justify-end pt-1">
+                <button @click="newProjectModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
+                <button @click="submitNewProject" :disabled="!newProjectModal.content.trim() || newProjectModal.loading"
+                    class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-emerald-600 hover:bg-emerald-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                    {{ newProjectModal.loading ? '⏳ Đang tạo...' : '✅ Tạo dự án' }}
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- TOAST -->
     <div v-if="toast" class="fixed top-6 right-6 z-50 bg-blue-600 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-lg">{{ toast }}</div>
 </div>
@@ -716,6 +809,61 @@ createApp({
         const previewModal = ref({ open: false, type: '', asset: null, para: null });
         const page = ref('posts');
         const profileModal = ref({ list: [], bulkText: '', cmds: [], addOpen: false, fileName: '' });
+
+        const newProjectModal = ref({
+            open: false,
+            content: '',
+            customSource: '',
+            targetLang: 'en',
+            loading: false,
+            selectedSources: ['Reuters', 'AP', 'BBC', 'CNN', 'DW', 'Al Jazeera', 'NATO', 'Bộ Quốc phòng Nga', 'YouTube chính thức'],
+            sourceOptions: ['Reuters', 'AP', 'BBC', 'CNN', 'DW', 'Al Jazeera', 'NATO', 'Bộ Quốc phòng Nga', 'YouTube chính thức'],
+            langOptions: [
+                { code: 'en', name: 'Tiếng Anh' },
+                { code: 'ja', name: 'Tiếng Nhật' },
+                { code: 'ko', name: 'Tiếng Hàn' },
+                { code: 'zh', name: 'Tiếng Trung' },
+                { code: 'fr', name: 'Tiếng Pháp' },
+                { code: 'de', name: 'Tiếng Đức' },
+                { code: 'es', name: 'Tiếng Tây Ban Nha' },
+                { code: 'pt', name: 'Tiếng Bồ Đào Nha' },
+                { code: 'ar', name: 'Tiếng Ả Rập' },
+            ],
+            toggleSource(src) {
+                const idx = this.selectedSources.indexOf(src);
+                if (idx === -1) this.selectedSources.push(src);
+                else this.selectedSources.splice(idx, 1);
+            },
+            addCustomSource() {
+                const s = this.customSource.trim();
+                if (s && !this.selectedSources.includes(s)) this.selectedSources.push(s);
+                this.customSource = '';
+            }
+        });
+
+        async function submitNewProject() {
+            const { content, selectedSources, targetLang } = newProjectModal.value;
+            if (!content.trim()) return;
+            newProjectModal.value.loading = true;
+            try {
+                const res = await fetch('/api/create-project', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content: content.trim(), sources: selectedSources, targetLang })
+                });
+                const r = await res.json();
+                if (r.success) {
+                    newProjectModal.value.open = false;
+                    newProjectModal.value.content = '';
+                    newProjectModal.value.selectedSources = [...newProjectModal.value.sourceOptions];
+                    showToast('✅ Đã tạo dự án, đang xử lý...');
+                    await loadPosts();
+                } else {
+                    alert('❌ ' + (r.error || 'Tạo thất bại'));
+                }
+            } catch (e) { alert('❌ ' + e.message); }
+            newProjectModal.value.loading = false;
+        }
 
         async function openProfilePage() {
             const res = await fetch('/api/chrome-profiles');
@@ -1263,6 +1411,26 @@ createApp({
             } catch (e) { alert('❌ ' + e.message); }
         }
 
+        async function savePostField(field, event) {
+            const newText = event.target.innerText.trim();
+            if (newText === (activePost.value[field] || '').trim()) return;
+            activePost.value[field] = newText;
+            await fetch('/api/save-post-field', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ postId: activePostId.value, field, value: newText })
+            });
+        }
+
+        async function saveParaField(para, field, event) {
+            const newText = event.target.innerText.trim();
+            if (newText === (para[field] || '').trim()) return;
+            para[field] = newText;
+            await fetch('/api/save-para-field', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paragraphId: para.id, field, value: newText })
+            });
+        }
+
         async function saveSentenceField(sentence, field, event) {
             const newText = event.target.innerText.trim();
             if (newText === (sentence[field] || '').trim()) return;
@@ -1621,6 +1789,8 @@ createApp({
             recreateVoiceSentence,
             loadSentenceSpeakersByLang,
             refreshSentenceVoice,
+            savePostField,
+            saveParaField,
             saveSentenceField,
             sentenceVoiceModal,
             submitRecreateSentenceVoice,
@@ -1659,6 +1829,8 @@ createApp({
             openPreview,
             closePreview,
             togglePreviewSelect,
+            newProjectModal,
+            submitNewProject,
         };
     }
 }).mount('#app');

@@ -34,7 +34,7 @@ const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 app.get('/api/posts', async (req, res) => {
     try {
         const db = await getDb();
-        const posts = await db.all('SELECT id, title, status, audio_uuid FROM Post ORDER BY id DESC');
+        const posts = await db.all('SELECT id, title, status, audio_uuid, tieu_de FROM Post ORDER BY id DESC');
         await db.close();
         res.json(posts);
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -44,11 +44,11 @@ app.get('/api/posts', async (req, res) => {
 app.get('/api/posts/:postId', async (req, res) => {
     try {
         const db = await getDb();
-        const post = await db.get('SELECT id, title FROM Post WHERE id = ?', [req.params.postId]);
+        const post = await db.get('SELECT id, title, tieu_de, mo_bai, mo_bai_vi, tom_tat, tom_tat_vi FROM Post WHERE id = ?', [req.params.postId]);
         if (!post) return res.status(404).json({ error: 'Post not found' });
 
         const paragraphs = await db.all(
-            'SELECT id, content, original_content, audio FROM Paragraph WHERE post_id = ? ORDER BY id',
+            'SELECT id, content, original_content, title, title_vi, audio FROM Paragraph WHERE post_id = ? ORDER BY id',
             [post.id]
         );
 
@@ -61,7 +61,7 @@ app.get('/api/posts/:postId', async (req, res) => {
 
             // Sentences kèm audio
             para.sentences = (await db.all(
-                'SELECT id, content, original_content, audio, sentence_uuid, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"',
+                'SELECT id, content, original_content, title, title_vi, audio, sentence_uuid, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"',
                 [para.id]
             )).map(s => ({ ...s, sentenceUuid: s.sentence_uuid, audioUrl: s.audio ? (s.audio.startsWith('http') ? s.audio : `/${s.audio}`) : null }));
 
@@ -307,10 +307,32 @@ app.post('/api/update-sentence', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/save-post-field', async (req, res) => {
+    try {
+        const { postId, field, value } = req.body;
+        if (!['tieu_de', 'mo_bai', 'mo_bai_vi', 'tom_tat', 'tom_tat_vi'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
+        const db = await getDb();
+        await db.run(`UPDATE Post SET ${field} = ? WHERE id = ?`, [value, postId]);
+        await db.close();
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/save-para-field', async (req, res) => {
+    try {
+        const { paragraphId, field, value } = req.body;
+        if (!['content', 'original_content', 'title', 'title_vi'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
+        const db = await getDb();
+        await db.run(`UPDATE Paragraph SET ${field} = ? WHERE id = ?`, [value, paragraphId]);
+        await db.close();
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/save-sentence-field', async (req, res) => {
     try {
         const { sentenceId, field, value } = req.body;
-        if (!['content', 'original_content'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
+        if (!['content', 'original_content', 'title', 'title_vi'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
         const db = await getDb();
         await db.run(`UPDATE Sentence SET ${field} = ? WHERE id = ?`, [value, sentenceId]);
         await db.close();
@@ -366,6 +388,40 @@ app.post('/api/create-voice', async (req, res) => {
 
         res.json({ batch_uuid: result.batch_uuid, folderNames: result.folderNames, paragraphIds: result.paragraphIds });
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API: Tạo mới dự án từ nội dung
+app.post('/api/create-project', async (req, res) => {
+    const { content, sources, targetLang } = req.body;
+    if (!content?.trim()) return res.status(400).json({ error: 'Thiếu nội dung' });
+    try {
+        const projectId = 'proj_' + Date.now();
+        const targetDir = path.join(MEDIA_DIR, projectId);
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        fs.writeFileSync(path.join(targetDir, 'original_content.txt'), content.trim());
+        if (sources?.length) {
+            fs.writeFileSync(path.join(targetDir, 'sources.txt'), sources.join('\n'));
+        }
+        const crawlProcess = spawn('node', [
+            'process_content.js',
+            '--projectId', projectId,
+            '--content', content.trim(),
+            '--sources', (sources || []).join('|'),
+            '--targetLang', targetLang || 'en'
+        ], { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+        crawlProcess.stdout.on('data', d => process.stdout.write(`[process_content] ${d}`));
+        crawlProcess.stderr.on('data', d => process.stderr.write(`[process_content] ${d}`));
+        crawlProcess.unref();
+        res.json({ success: true, projectId });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API: Đọc log của project
+app.get('/api/project-log/:projectId', (req, res) => {
+    const logFile = path.join(MEDIA_DIR, req.params.projectId, 'process.log');
+    if (!fs.existsSync(logFile)) return res.json({ log: '' });
+    const log = fs.readFileSync(logFile, 'utf8');
+    res.json({ log });
 });
 
 // API: Xóa toàn bộ project
