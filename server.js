@@ -11,7 +11,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import multer from 'multer';
 
-import { getLanguages, getReferenceSpeakers, getDictionary, getMe, sendToQueue, getSentenceStatus, updateSentence, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio } from './handle_voice/audio_service.js';
+import { getLanguages, getReferenceSpeakers, getDictionary, getMe, sendToQueue, getSentenceStatus, updateSentence, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio, getAllAudioUrls } from './handle_voice/audio_service.js';
 import { processAll } from './video_service.js';
 import { generateFlowImage } from './browser.js';
 import archiver from 'archiver';
@@ -167,21 +167,10 @@ app.post('/api/download-voice', async (req, res) => {
     try {
         const { videoId, postId } = req.body;
         const db = await getDb();
-
-        const post = await db.get('SELECT title, audio_uuid FROM Post WHERE id = ?', [postId]);
-        if (!post?.audio_uuid) { await db.close(); return res.json({ error: 'Chưa tạo voice!' }); }
-
+        const post = await db.get('SELECT title, voice_content_type FROM Post WHERE id = ?', [postId]);
         const lang = post.title.match(/_([a-z]{2})$/)?.[1] || 'unknown';
+        const contentType = post.voice_content_type || 'content';
 
-        // Lấy tất cả sentences kèm paragraph order
-        const sentences = await db.all(
-            `SELECT s.id, s.audio, s."order" as s_order, p."order" as p_order FROM Sentence s
-             JOIN Paragraph p ON s.paragraph_id = p.id
-             WHERE p.post_id = ? ORDER BY p."order", s."order"`,
-            [postId]
-        );
-
-        // Stream thẳng vào zip
         const zipName = `${videoId}_${lang}.zip`;
         res.setHeader('Content-Type', 'application/zip');
         res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
@@ -190,35 +179,39 @@ app.post('/api/download-voice', async (req, res) => {
         archive.on('error', e => { throw e; });
         archive.pipe(res);
 
-        let lastPOrder = null;
-        let sIndex = 0;
-        for (const s of sentences) {
-            if (s.p_order !== lastPOrder) { sIndex = 1; lastPOrder = s.p_order; } else { sIndex++; }
-            const label = `${s.p_order}_${sIndex}`;
-            const sceneFolder = `cau_${label}`;
+        // Lấy tất cả audio URLs theo thứ tự (giống download audio đơn lẻ)
+        const audioList = await getAllAudioUrls(postId, contentType);
 
-            // Audio -> folder audio/
-            if (s.audio) {
-                try {
-                    const audioBuf = await fetchBunnyAudio(s.audio);
-                    archive.append(audioBuf, { name: `audio/${label}_audio.mp3` });
-                } catch (e) { console.error(`[download-voice] skip audio ${label}:`, e.message); }
-            }
+        // Đặt tên 1.mp3, 2.mp3...
+        for (let i = 0; i < audioList.length; i++) {
+            const audioUrl = audioList[i].audio;
+            if (!audioUrl) continue;
+            try {
+                const buf = await fetchBunnyAudio(audioUrl);
+                archive.append(buf, { name: `audio/${i + 1}.mp3` });
+            } catch(e) { console.error(`[download-voice] skip audio ${i+1}:`, e.message); }
+        }
 
-            // Assets
-            const assets = await db.all(
-                'SELECT file_path, "order", duration FROM Asset WHERE selected = 1 AND sentence_id = ? ORDER BY "order"',
-                [s.id]
-            );
-            for (const asset of assets) {
-                const srcPath = path.join(MEDIA_DIR, asset.file_path);
-                if (fs.existsSync(srcPath)) {
-                    const ext = path.extname(asset.file_path);
-                    const durSuffix = asset.duration ? `_${Math.round(asset.duration)}s` : '';
-                    archive.file(srcPath, { name: `media/${sceneFolder}/${asset.order}${durSuffix}${ext}` });
+        // Assets selected theo sentence
+        const paragraphs = await db.all('SELECT id, "order" FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);
+        for (const para of paragraphs) {
+            const sentences = await db.all('SELECT id, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"', [para.id]);
+            for (const s of sentences) {
+                const assets = await db.all(
+                    'SELECT file_path, "order", duration FROM Asset WHERE selected = 1 AND sentence_id = ? ORDER BY "order"',
+                    [s.id]
+                );
+                for (const asset of assets) {
+                    const srcPath = path.join(MEDIA_DIR, asset.file_path);
+                    if (fs.existsSync(srcPath)) {
+                        const ext = path.extname(asset.file_path);
+                        const durSuffix = asset.duration ? `_${Math.round(asset.duration)}s` : '';
+                        archive.file(srcPath, { name: `media/${para.order}_${s.order}/${asset.order}${durSuffix}${ext}` });
+                    }
                 }
             }
         }
+
         await db.close();
         await archive.finalize();
     } catch (e) { res.status(500).json({ error: e.message }); }
