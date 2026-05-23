@@ -208,7 +208,7 @@ async function saveToDb(projectId, result) {
             const paraContentTranslated = await translateText(cau.noi_dung_luan_diem, targetLang);
             const paraTitleTranslated = await translateText(cau.tieu_de_luan_diem, targetLang);
             const paraRes = await db.run(
-                'INSERT INTO Paragraph (post_id, content, original_content, title, title_vi, "order") VALUES (?, ?, ?, ?, ?, ?)',
+                'INSERT INTO Paragraph (post_id, content, content_vi, title, title_vi, "order") VALUES (?, ?, ?, ?, ?, ?)',
                 [postId, paraContentTranslated, cau.noi_dung_luan_diem, paraTitleTranslated, cau.tieu_de_luan_diem, i + 1]
             );
             const paragraphId = paraRes.lastID;
@@ -234,7 +234,7 @@ async function saveToDb(projectId, result) {
                 const doanTranslated = await translateText(doan.noi_dung_luan_cu, targetLang);
                 const doanTitleTranslated = await translateText(doan.tieu_de_luan_cu, targetLang);
                 const sentenceRes = await db.run(
-                    'INSERT INTO Sentence (paragraph_id, content, original_content, title, title_vi, "order") VALUES (?, ?, ?, ?, ?, ?)',
+                    'INSERT INTO Sentence (paragraph_id, content, content_vi, title, title_vi, "order") VALUES (?, ?, ?, ?, ?, ?)',
                     [paragraphId, doanTranslated, doan.noi_dung_luan_cu, doanTitleTranslated, doan.tieu_de_luan_cu, sentenceOrder]
                 );
                 const sentenceId = sentenceRes.lastID;

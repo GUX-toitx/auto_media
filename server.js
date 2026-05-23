@@ -34,7 +34,7 @@ const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 app.get('/api/posts', async (req, res) => {
     try {
         const db = await getDb();
-        const posts = await db.all('SELECT id, title, status, audio_uuid, tieu_de FROM Post ORDER BY id DESC');
+        const posts = await db.all('SELECT id, title, status, audio_uuid, tieu_de, voice_content_type FROM Post ORDER BY id DESC');
         await db.close();
         res.json(posts);
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -44,11 +44,11 @@ app.get('/api/posts', async (req, res) => {
 app.get('/api/posts/:postId', async (req, res) => {
     try {
         const db = await getDb();
-        const post = await db.get('SELECT id, title, tieu_de, mo_bai, mo_bai_vi, tom_tat, tom_tat_vi FROM Post WHERE id = ?', [req.params.postId]);
+        const post = await db.get('SELECT id, title, tieu_de, mo_bai, mo_bai_vi, tom_tat, tom_tat_vi, mo_bai_audio, mo_bai_vi_audio, tom_tat_audio, tom_tat_vi_audio FROM Post WHERE id = ?', [req.params.postId]);
         if (!post) return res.status(404).json({ error: 'Post not found' });
 
         const paragraphs = await db.all(
-            'SELECT id, content, original_content, title, title_vi, audio FROM Paragraph WHERE post_id = ? ORDER BY id',
+            'SELECT id, content, content_vi, title, title_vi, content_audio, content_vi_audio, title_audio, title_vi_audio FROM Paragraph WHERE post_id = ? ORDER BY id',
             [post.id]
         );
 
@@ -61,7 +61,7 @@ app.get('/api/posts/:postId', async (req, res) => {
 
             // Sentences kèm audio
             para.sentences = (await db.all(
-                'SELECT id, content, original_content, title, title_vi, audio, sentence_uuid, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"',
+                'SELECT id, content, content_vi, title, title_vi, content_audio, content_vi_audio, title_audio, title_vi_audio, audio, sentence_uuid, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"',
                 [para.id]
             )).map(s => ({ ...s, sentenceUuid: s.sentence_uuid, audioUrl: s.audio ? (s.audio.startsWith('http') ? s.audio : `/${s.audio}`) : null }));
 
@@ -269,8 +269,8 @@ app.post('/api/update-batch-status', async (req, res) => {
 
 app.post('/api/check-download-voice', async (req, res) => {
     try {
-        const { batchUuid, postId } = req.body;
-        const result = await checkAndSaveVoice(batchUuid, postId);
+        const { batchUuid, postId, contentType } = req.body;
+        const result = await checkAndSaveVoice(batchUuid, postId, contentType || 'content');
         res.json(result);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -321,7 +321,7 @@ app.post('/api/save-post-field', async (req, res) => {
 app.post('/api/save-para-field', async (req, res) => {
     try {
         const { paragraphId, field, value } = req.body;
-        if (!['content', 'original_content', 'title', 'title_vi'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
+        if (!['content', 'content_vi', 'title', 'title_vi'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
         const db = await getDb();
         await db.run(`UPDATE Paragraph SET ${field} = ? WHERE id = ?`, [value, paragraphId]);
         await db.close();
@@ -332,7 +332,7 @@ app.post('/api/save-para-field', async (req, res) => {
 app.post('/api/save-sentence-field', async (req, res) => {
     try {
         const { sentenceId, field, value } = req.body;
-        if (!['content', 'original_content', 'title', 'title_vi'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
+        if (!['content', 'content_vi', 'title', 'title_vi'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
         const db = await getDb();
         await db.run(`UPDATE Sentence SET ${field} = ? WHERE id = ?`, [value, sentenceId]);
         await db.close();
@@ -377,14 +377,18 @@ app.get('/api/dictionaries', async (req, res) => {
 
 app.post('/api/create-voice', async (req, res) => {
     try {
-        const { videoId, postId, lang, speakerUuid, contentType, dictionaryUuids } = req.body;
+        const { videoId, postId, lang, speakerUuid, contentType, dictionaryUuids, texts } = req.body;
         const projectDir = path.join(MEDIA_DIR, videoId);
-        const result = await generateAudios(projectDir, postId, lang, speakerUuid, contentType, dictionaryUuids);
+        const result = await generateAudios(projectDir, postId, lang, speakerUuid, contentType, dictionaryUuids, texts || null);
 
         // Lưu batchUuid vào bảng Post
         const db = await getDb();
-        await db.run('UPDATE Post SET audio_uuid = ? WHERE id = ?', [result.batch_uuid, postId]);
+        await db.run('UPDATE Post SET audio_uuid = ?, voice_content_type = ? WHERE id = ?', [result.batch_uuid, contentType || 'content', postId]);
         await db.close();
+
+        // Kích hoạt TTS chạy ngay
+        await updateBatchStatus(result.batch_uuid);
+        console.log('[create-voice] Batch activated:', result.batch_uuid);
 
         res.json({ batch_uuid: result.batch_uuid, folderNames: result.folderNames, paragraphIds: result.paragraphIds });
     } catch (e) { res.status(500).json({ error: e.message }); }

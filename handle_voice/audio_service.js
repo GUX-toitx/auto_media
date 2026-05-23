@@ -109,20 +109,32 @@ export async function getReferenceSpeakers(lang) {
     return api(`/user/reference-speaker?page=0&limit=-1&condition=${encodeURIComponent(condition)}`).then(r => r.json());
 }
 
-export async function generateAudios(projectDir, postId, lang, speakerUuid, contentType = 'content', dictionaryUuids = []) {
+export async function generateAudios(projectDir, postId, lang, speakerUuid, contentType = 'content', dictionaryUuids = [], textsFromDOM = null) {
     const projectName = path.basename(projectDir);
     const db = await getDb();
     const sentences = await db.all(
-        `SELECT id, content, original_content, "order" FROM Sentence WHERE paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?) ORDER BY "order"`,
+        `SELECT id, content, content_vi, "order" FROM Sentence WHERE paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?) ORDER BY "order"`,
         [postId]
     );
     await db.close();
 
-    const valid = sentences.filter(s => (s[contentType] || s.content).trim());
-    const texts = valid.map(s => (s[contentType] || s.content).trim());
-    const folderNames = valid.map(s => String(s.order));
-    const paragraphIds = valid.map(s => s.id);
-    if (!texts.length) throw new Error(`Không có paragraph nào trong post id: ${postId}`);
+    let texts, folderNames, paragraphIds;
+
+    if (textsFromDOM && textsFromDOM.length > 0) {
+        // Dùng texts từ DOM (bao gồm Post, Paragraph, Sentence theo đúng thứ tự hiển thị)
+        texts = textsFromDOM;
+        folderNames = textsFromDOM.map((_, i) => String(i + 1));
+        paragraphIds = sentences.map(s => s.id); // giữ để map sau
+    } else {
+        // Fallback: chỉ lấy từ Sentence
+        const field = contentType === 'content_vi' ? 'content_vi' : 'content';
+        const valid = sentences.filter(s => (s[field] || s.content).trim());
+        texts = valid.map(s => (s[field] || s.content).trim());
+        folderNames = valid.map(s => String(s.order));
+        paragraphIds = valid.map(s => s.id);
+    }
+
+    if (!texts.length) throw new Error(`Không có nội dung nào trong post id: ${postId}`);
 
     const batchName = `${projectName}_${lang}`;
     try {
@@ -133,7 +145,7 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid, cont
         const db2 = await getDb();
         await db2.run('UPDATE Post SET silence_duration = ? WHERE id = ?', [createRes.data?.silence_duration ?? 1, postId]);
         for (const bs of batchSentences) {
-            const sentenceId = valid.find(s => s.order === bs.index)?.id;
+            const sentenceId = sentences.find(s => s.order === bs.index)?.id;
             if (sentenceId) {
                 await db2.run('UPDATE Sentence SET sentence_uuid = ? WHERE id = ?', [bs.uuid, sentenceId]);
             }
@@ -170,26 +182,49 @@ export async function getBatchAudios(batchUuid, paragraphIds = []) {
     return { total: sentences.length, results };
 }
 
-export async function checkAndSaveVoice(batchUuid, postId) {
+export async function checkAndSaveVoice(batchUuid, postId, contentType = 'content') {
     const batchData = await api(`/user/batch/${batchUuid}`).then(r => r.json());
     const status = batchData.data?.status || batchData.status;
 
     if (status === 'OK' && postId) {
         const db = await getDb();
-        const sentences = await db.all(
-            'SELECT id FROM Sentence WHERE paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?) ORDER BY "order"',
-            [postId]
-        );
-        const result = await getBatchAudios(batchUuid, sentences.map(s => s.id));
-        console.log('[Voice] getBatchAudios result:', result ? result.total : 'null');
-        if (result) {
-            for (const r of result.results) {
-                if (r.paragraphId) {
-                    await db.run('UPDATE Sentence SET audio = ?, sentence_uuid = ? WHERE id = ?', [r.audioUrl, r.sentenceUuid || null, r.paragraphId]);
-                    console.log(`[Voice] Saved audio for sentence ${r.paragraphId}: ${r.audioUrl}`);
-                }
+
+        // Lấy tất cả sentences từ batch theo thứ tự
+        const condition = JSON.stringify({ where: { batch_uuid: batchUuid }, orderBy: { index: 'asc' } });
+        const sentenceData = await api(`/user/sentence?page=0&limit=-1&condition=${encodeURIComponent(condition)}`).then(r => r.json());
+        const batchSentences = sentenceData.data || [];
+
+        // Xây dựng danh sách các đơn vị cần lưu audio theo đúng thứ tự DOM
+        // Thứ tự: Post(mo_bai, tom_tat) -> Paragraph(title, content) -> Sentence(title, content)
+        const isVi = contentType === 'content_vi';
+        const audioField = isVi ? '_vi_audio' : '_audio';
+        const units = [];
+
+        const post = await db.get('SELECT id, mo_bai, mo_bai_vi, tom_tat, tom_tat_vi FROM Post WHERE id = ?', [postId]);
+        if (post.mo_bai_vi || post.mo_bai) units.push({ table: 'Post', id: post.id, field: `mo_bai${audioField}` });
+        if (post.tom_tat_vi || post.tom_tat) units.push({ table: 'Post', id: post.id, field: `tom_tat${audioField}` });
+
+        const paragraphs = await db.all('SELECT id, title, title_vi, content, content_vi FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);
+        for (const para of paragraphs) {
+            if (para.title_vi || para.title) units.push({ table: 'Paragraph', id: para.id, field: `title${audioField}` });
+            if (para.content_vi || para.content) units.push({ table: 'Paragraph', id: para.id, field: `content${audioField}` });
+
+            const sentences = await db.all('SELECT id, title, title_vi, content, content_vi FROM Sentence WHERE paragraph_id = ? ORDER BY "order"', [para.id]);
+            for (const s of sentences) {
+                if (s.title_vi || s.title) units.push({ table: 'Sentence', id: s.id, field: `title${audioField}` });
+                if (s.content_vi || s.content) units.push({ table: 'Sentence', id: s.id, field: `content${audioField}` });
             }
         }
+
+        // Map từng batch sentence vào đúng unit theo index
+        for (let i = 0; i < batchSentences.length; i++) {
+            const bs = batchSentences[i];
+            const unit = units[i];
+            if (!unit || !bs.audio_url) continue;
+            await db.run(`UPDATE ${unit.table} SET ${unit.field} = ? WHERE id = ?`, [bs.audio_url, unit.id]);
+            console.log(`[Voice] Saved ${unit.table}#${unit.id}.${unit.field} = ${bs.audio_url}`);
+        }
+
         await db.close();
     }
 

@@ -70,15 +70,23 @@
                     <div v-if="activePost.mo_bai || activePost.mo_bai_vi">
                         <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Mở bài</p>
                         <div class="grid grid-cols-2 gap-2">
-                            <div contenteditable="true" @blur="savePostField('mo_bai_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.mo_bai_vi }}</div>
-                            <div contenteditable="true" @blur="savePostField('mo_bai', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.mo_bai }}</div>
+                            <div contenteditable="true" @blur="savePostField('mo_bai_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.mo_bai_vi }}</div>
+                            <div contenteditable="true" @blur="savePostField('mo_bai', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.mo_bai }}</div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 mt-1">
+                            <div><audio v-if="activePost.mo_bai_vi_audio" controls :src="activePost.mo_bai_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                            <div><audio v-if="activePost.mo_bai_audio" controls :src="activePost.mo_bai_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
                         </div>
                     </div>
                     <div v-if="activePost.tom_tat || activePost.tom_tat_vi">
                         <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Tóm tắt</p>
                         <div class="grid grid-cols-2 gap-2">
-                            <div contenteditable="true" @blur="savePostField('tom_tat_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.tom_tat_vi }}</div>
-                            <div contenteditable="true" @blur="savePostField('tom_tat', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.tom_tat }}</div>
+                            <div contenteditable="true" @blur="savePostField('tom_tat_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.tom_tat_vi }}</div>
+                            <div contenteditable="true" @blur="savePostField('tom_tat', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.tom_tat }}</div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 mt-1">
+                            <div><audio v-if="activePost.tom_tat_vi_audio" controls :src="activePost.tom_tat_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                            <div><audio v-if="activePost.tom_tat_audio" controls :src="activePost.tom_tat_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
                         </div>
                     </div>
                 </div>
@@ -90,16 +98,28 @@
                         <span class="bg-blue-600 text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 mt-0.5">#{{ i + 1 }}</span>
                         <div class="flex-1 space-y-1">
                             <!-- Paragraph content: 2 input tiếng Việt và ngôn ngữ đích -->
-                            <div v-if="para.original_content || para.content" class="space-y-1">
+                            <div v-if="para.content_vi || para.content" class="space-y-1">
                                 <!-- Title row -->
-                                <div v-if="para.title || para.title_vi" class="grid grid-cols-2 gap-2">
-                                    <div contenteditable="true" @blur="saveParaField(para, 'title_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-400 leading-relaxed min-h-[32px] outline-none focus:border-yellow-500">{{ para.title_vi }}</div>
-                                    <div contenteditable="true" @blur="saveParaField(para, 'title', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-300 leading-relaxed min-h-[32px] outline-none focus:border-yellow-500">{{ para.title }}</div>
+                                <div v-if="para.title || para.title_vi" class="space-y-1">
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <div contenteditable="true" @blur="saveParaField(para, 'title_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-400 leading-relaxed min-h-[32px] outline-none focus:border-yellow-500">{{ para.title_vi }}</div>
+                                        <div contenteditable="true" @blur="saveParaField(para, 'title', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-300 leading-relaxed min-h-[32px] outline-none focus:border-yellow-500">{{ para.title }}</div>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <div><audio v-if="para.title_vi_audio" controls :src="para.title_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                                        <div><audio v-if="para.title_audio" controls :src="para.title_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                                    </div>
                                 </div>
                                 <!-- Content row -->
-                                <div class="grid grid-cols-2 gap-2">
-                                    <div contenteditable="true" @blur="saveParaField(para, 'original_content', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-900 border border-gray-700 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ para.original_content }}</div>
-                                    <div contenteditable="true" @blur="saveParaField(para, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-900 border border-gray-700 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ para.content }}</div>
+                                <div class="space-y-1">
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <div contenteditable="true" @blur="saveParaField(para, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-900 border border-gray-700 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ para.content_vi }}</div>
+                                        <div contenteditable="true" @blur="saveParaField(para, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-900 border border-gray-700 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ para.content }}</div>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <div><audio v-if="para.content_vi_audio" controls :src="para.content_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                                        <div><audio v-if="para.content_audio" controls :src="para.content_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                                    </div>
                                 </div>
                             </div>
                             <div class="flex items-center gap-2">
@@ -113,23 +133,28 @@
                                         <span class="bg-green-600 text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 mt-0.5">#{{ i + 1 }}.{{ si + 1 }}</span>
                                         <div class="flex-1 space-y-1">
                                             <!-- Sentence title -->
-                                            <div v-if="s.title || s.title_vi" class="grid grid-cols-2 gap-2">
-                                                <div contenteditable="true" @blur="saveSentenceField(s, 'title_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-400 leading-relaxed min-h-[28px] outline-none focus:border-yellow-500">{{ s.title_vi }}</div>
-                                                <div contenteditable="true" @blur="saveSentenceField(s, 'title', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-300 leading-relaxed min-h-[28px] outline-none focus:border-yellow-500">{{ s.title }}</div>
+                                            <div v-if="s.title || s.title_vi" class="space-y-1">
+                                                <div class="grid grid-cols-2 gap-2">
+                                                    <div contenteditable="true" @blur="saveSentenceField(s, 'title_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-400 leading-relaxed min-h-[28px] outline-none focus:border-yellow-500">{{ s.title_vi }}</div>
+                                                    <div contenteditable="true" @blur="saveSentenceField(s, 'title', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-300 leading-relaxed min-h-[28px] outline-none focus:border-yellow-500">{{ s.title }}</div>
+                                                </div>
+                                                <div class="grid grid-cols-2 gap-2">
+                                                    <div><audio v-if="s.title_vi_audio" controls :src="s.title_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                                                    <div><audio v-if="s.title_audio" controls :src="s.title_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                                                </div>
                                             </div>
                                             <!-- Sentence content -->
-                                            <div class="grid grid-cols-2 gap-2">
-                                                <div contenteditable="true" @blur="saveSentenceField(s, 'original_content', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ s.original_content || s.content }}</div>
-                                                <div contenteditable="true" @blur="saveSentenceField(s, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ s.content }}</div>
+                                            <div class="space-y-1">
+                                                <div class="grid grid-cols-2 gap-2">
+                                                    <div contenteditable="true" @blur="saveSentenceField(s, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ s.content_vi || s.content }}</div>
+                                                    <div contenteditable="true" @blur="saveSentenceField(s, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ s.content }}</div>
+                                                </div>
+                                                <div class="grid grid-cols-2 gap-2">
+                                                    <div><audio v-if="s.content_vi_audio" controls :src="s.content_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                                                    <div><audio v-if="s.content_audio" controls :src="s.content_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                    <div class="flex items-center gap-2 bg-gray-800/40 rounded-lg px-2 py-1">
-                                        <span class="text-[9px] font-black text-green-400 shrink-0">🎵</span>
-                                        <audio v-if="s.audioUrl" controls :src="s.audioUrl" class="h-7 flex-1" preload="metadata"></audio>
-                                        <span v-else class="flex-1 text-[10px] text-gray-600 italic">Chưa có audio</span>
-                                        <button @click="recreateVoiceSentence(s, i, si)" :disabled="s._voiceLoading" :class="['text-[11px] font-bold px-3 py-1.5 rounded text-white shrink-0', s._voiceLoading ? 'bg-purple-400 animate-pulse' : 'bg-purple-600 hover:bg-purple-500']">🎙️{{ s._voiceLoading ? ' ...' : '' }}</button>
-                                        <button @click="refreshSentenceVoice(s)" class="text-[11px] font-bold px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white shrink-0">🔄</button>
                                     </div>
                                     <!-- Video selected của câu này -->
                                     <div v-if="(para.videos || []).filter(v => v.sentenceId == s.id).length">
@@ -450,7 +475,7 @@
                     <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Nội dung</label>
                     <select v-model="voiceModal.contentType" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
                         <option value="content">Target Content</option>
-                        <option value="original_content">Original Content</option>
+                        <option value="content_vi">Tiếng Việt</option>
                     </select>
                 </div>
                 <div>
@@ -497,7 +522,7 @@
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Nội dung</label>
                 <select v-model="sentenceVoiceModal.contentType" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-sm text-white outline-none focus:border-blue-500">
                     <option value="content">Target Content</option>
-                    <option value="original_content">Original Content</option>
+                    <option value="content_vi">Tiếng Việt</option>
                 </select>
             </div>
             <div>
@@ -601,7 +626,7 @@
                     <div class="flex items-start gap-2">
                         <span class="bg-green-600 text-[9px] font-black px-1.5 py-0.5 rounded shrink-0">#{{ s.order }}</span>
                         <div class="space-y-1 flex-1">
-                            <div class="text-[11px] text-gray-400">{{ s.original_content || s.content }}</div>
+                            <div class="text-[11px] text-gray-400">{{ s.content_vi || s.content }}</div>
                             <div class="text-[11px] text-gray-200">{{ s.content }}</div>
                         </div>
                     </div>
@@ -1383,7 +1408,7 @@ createApp({
 
         async function submitRecreateSentenceVoice() {
             const { sentence, speakerUuid, contentType } = sentenceVoiceModal.value;
-            const text = contentType === 'original_content' ? (sentence.original_content || sentence.content) : sentence.content;
+            const text = contentType === 'content_vi' ? (sentence.content_vi || sentence.content) : sentence.content;
             try {
                 const payload = { uuid: sentence.sentenceUuid, text };
                 if (speakerUuid) payload.reference_speaker_uuid = speakerUuid;
@@ -1517,45 +1542,61 @@ createApp({
             voiceModal.value.speakers = await res.json();
         }
 
+        // Lấy tất cả nội dung từ DOM theo class
+        function collectTextsFromDOM(className) {
+            return Array.from(document.querySelectorAll('.' + className))
+                .map(el => el.innerText.trim())
+                .filter(Boolean);
+        }
+
         async function submitCreateVoice() {
             const { lang, speakerUuid, postId, contentType, selectedDicts } = voiceModal.value;
             if (!lang || !speakerUuid) return alert('Vui lòng chọn đủ!');
 
+            // Lấy texts từ DOM theo class
+            const textsVi = collectTextsFromDOM('js-content-vi');
+            const textsTarget = collectTextsFromDOM('js-content-target');
+            const texts = contentType === 'content_vi' ? textsVi : textsTarget;
+
+            console.log(`[Voice] contentType=${contentType}, texts count=${texts.length}`);
+
             const res = await fetch('/api/create-voice', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ videoId: activeProjectId.value, postId, lang, speakerUuid, contentType, dictionaryUuids: selectedDicts })
+                body: JSON.stringify({ videoId: activeProjectId.value, postId, lang, speakerUuid, contentType, dictionaryUuids: selectedDicts, texts })
             });
             const r = await res.json();
 
             if (r.batch_uuid) {
                 voiceModal.value.batchUuid = r.batch_uuid;
+                const savedContentType = contentType;
+                voiceModal.value.open = false;
+                showToast('✅ Đã tạo voice, đang chờ gen...');
                 await loadPosts();
+                // Bắt đầu poll ngay
+                startPollingVoice(r.batch_uuid, savedContentType);
             } else {
                 alert('❌ Tạo không thành công!');
             }
         }
 
         async function genAudio() {
-            await fetch('/api/update-batch-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ batchUuid: voiceModal.value.batchUuid }) });
-            showToast('✅ Đã bắt đầu gen audio!');
             voiceModal.value.open = false;
-            const sentenceCount = activePost.value?.paragraphs?.length || 10;
-            startPollingVoice(voiceModal.value.batchUuid, sentenceCount);
+            showToast('✅ Đã bắt đầu gen audio!');
+            startPollingVoice(voiceModal.value.batchUuid, voiceModal.value.contentType || 'content');
         }
 
         const pollingTimer = ref(null);
-        function startPollingVoice(batchUuid, sentenceCount) {
+        function startPollingVoice(batchUuid, contentType) {
             if (pollingTimer.value) clearInterval(pollingTimer.value);
-            const estimatedMs = sentenceCount * 500;
-            console.log(`[Voice] ước tính ${sentenceCount} câu x 0.5s = ${estimatedMs/1000}s, bắt đầu poll sau đó`);
+            console.log(`[Voice] Bắt đầu poll batch: ${batchUuid}, contentType: ${contentType}`);
 
-            setTimeout(() => {
-                const poll = async () => {
+            const poll = async () => {
+                try {
                     const res = await fetch('/api/check-download-voice', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ batchUuid, postId: activePostId.value, videoId: activeProjectId.value })
+                        body: JSON.stringify({ batchUuid, postId: activePostId.value, videoId: activeProjectId.value, contentType })
                     });
                     const r = await res.json();
                     if (r.status === 'OK') {
@@ -1564,10 +1605,14 @@ createApp({
                         showToast('🎉 Voice đã gen xong!', 10000);
                         await selectPost({ id: activePostId.value });
                     }
-                };
-                poll();
-                pollingTimer.value = setInterval(poll, 5000);
-            }, estimatedMs);
+                } catch(e) {
+                    console.error('[Voice poll] Lỗi:', e.message);
+                }
+            };
+
+            // Poll ngay lập tức, sau đó mỗi 3s
+            poll();
+            pollingTimer.value = setInterval(poll, 3000);
         }
 
         const downloadAudioModal = ref({ open: false, type: 'merged', silence: 0.5 });
@@ -1599,19 +1644,9 @@ createApp({
         async function retryDownloadVoice() {
             const post = posts.value.find(p => p.id === activePostId.value);
             if (!post?.audio_uuid) return showToast('❌ Chưa có batch UUID, hãy tạo voice trước');
+            const contentType = post.voice_content_type || 'content';
             showToast('⏳ Đang kiểm tra voice...');
-            const res = await fetch('/api/check-download-voice', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ batchUuid: post.audio_uuid, postId: activePostId.value, videoId: activeProjectId.value })
-            });
-            const r = await res.json();
-            if (r.status === 'OK') {
-                showToast('🎉 Voice đã tải về thành công!');
-                await selectPost({ id: activePostId.value });
-            } else {
-                showToast('⏳ Voice chưa tạo xong, thử lại sau!');
-            }
+            startPollingVoice(post.audio_uuid, contentType);
         }
 
         async function aiGenerate(para, type) {
@@ -1785,6 +1820,7 @@ createApp({
             startCropDrag,
             startCropResize,
             submitEdit,
+            collectTextsFromDOM,
             createVoice,
             recreateVoiceSentence,
             loadSentenceSpeakersByLang,

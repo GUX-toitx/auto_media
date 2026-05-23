@@ -604,7 +604,7 @@ async function recoverTaskFromDB() {
     
     // Lấy tất cả paragraphs của project
     const paragraphs = await db.all(
-        'SELECT id, content, original_content FROM Paragraph WHERE post_id = ? ORDER BY id',
+        'SELECT id, content, content_vi FROM Paragraph WHERE post_id = ? ORDER BY id',
         [post.id]
     );
     
@@ -914,7 +914,7 @@ async function processNextInQueue() {
                     // 4. Insert Cảnh vào DB (content = ngôn ngữ đích, original_content = tiếng Việt)
                     const maxOrder = await db.get('SELECT COALESCE(MAX("order"), 0) as max FROM Paragraph WHERE post_id = ?', [dbPostId]);
                     const paraRes = await db.run(
-                        'INSERT INTO Paragraph (post_id, content, original_content, "order") VALUES (?, ?, ?, ?)',
+                        'INSERT INTO Paragraph (post_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
                         [dbPostId, scene.text, viParagraph, maxOrder.max + 1]
                     );
 
@@ -931,7 +931,7 @@ async function processNextInQueue() {
                     // 6. Insert Sentences (content = câu ở ngôn ngữ đích, original_content = câu tiếng Việt)
                     for (const pair of sentencePairs) {
                         sentenceOrder++;
-                        await db.run('INSERT INTO Sentence (paragraph_id, content, original_content, "order") VALUES (?, ?, ?, ?)', [scene.dbParagraphId, pair.target, pair.vi, sentenceOrder]);
+                        await db.run('INSERT INTO Sentence (paragraph_id, content, content_vi, "order") VALUES (?, ?, ?, ?)', [scene.dbParagraphId, pair.target, pair.vi, sentenceOrder]);
                     }
                 }
                 await db.run('COMMIT');
