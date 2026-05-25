@@ -94,42 +94,49 @@ async function analyzeWithGPT5(topic, sources) {
         type: 'object',
         properties: {
             tieu_de: { type: 'string' },
-            mo_bai: { type: 'string' },
-            tom_tat: { type: 'string' },
+            mo_bai_vi: { type: 'string' },
+            mo_bai_target: { type: 'string' },
+            tom_tat_vi: { type: 'string' },
+            tom_tat_target: { type: 'string' },
             luan_diem: {
                 type: 'array',
                 items: {
                     type: 'object',
                     properties: {
-                        tieu_de_luan_diem: { type: 'string' },
-                        noi_dung_luan_diem: { type: 'string' },
+                        tieu_de_vi: { type: 'string' },
+                        tieu_de_target: { type: 'string' },
+                        noi_dung_vi: { type: 'string' },
+                        noi_dung_target: { type: 'string' },
                         luan_cu: {
                             type: 'array',
                             items: {
                                 type: 'object',
                                 properties: {
-                                    tieu_de_luan_cu: { type: 'string' },
-                                    noi_dung_luan_cu: { type: 'string' },
+                                    tieu_de_vi: { type: 'string' },
+                                    tieu_de_target: { type: 'string' },
+                                    noi_dung_vi: { type: 'string' },
+                                    noi_dung_target: { type: 'string' },
                                     anh: { type: 'array', items: { type: 'string' } },
                                     video: { type: 'array', items: { type: 'string' } },
                                     nguon: { type: 'array', items: { type: 'string' } }
                                 },
-                                required: ['tieu_de_luan_cu', 'noi_dung_luan_cu', 'anh', 'video', 'nguon'],
+                                required: ['tieu_de_vi', 'tieu_de_target', 'noi_dung_vi', 'noi_dung_target', 'anh', 'video', 'nguon'],
                                 additionalProperties: false
                             }
                         }
                     },
-                    required: ['tieu_de_luan_diem', 'noi_dung_luan_diem', 'luan_cu'],
+                    required: ['tieu_de_vi', 'tieu_de_target', 'noi_dung_vi', 'noi_dung_target', 'luan_cu'],
                     additionalProperties: false
                 }
             },
-            ket_luan: { type: 'string' }
+            ket_luan_vi: { type: 'string' },
+            ket_luan_target: { type: 'string' }
         },
-        required: ['tieu_de', 'mo_bai', 'tom_tat', 'luan_diem', 'ket_luan'],
+        required: ['tieu_de', 'mo_bai_vi', 'mo_bai_target', 'tom_tat_vi', 'tom_tat_target', 'luan_diem', 'ket_luan_vi', 'ket_luan_target'],
         additionalProperties: false
     };
 
-    const input = `Hãy phân tích cho tôi sự kiện ${topic} mới nhất. Viết theo phong cách bình luận thời sự chuyên sâu. Chia luận điểm và luận cứ rõ ràng. Mỗi luận cứ cần có 2 ảnh + 2 video minh họa bằng URL trực tiếp chính xác. Ưu tiên ${sources} và YouTube chính thức. Chỉ trả về JSON hợp lệ, không markdown, không giải thích thêm.`;
+    const input = `Phân tích sự kiện: ${topic}. Yêu cầu: viết bình luận sự kiện ngắn gọn rõ ràng có số liệu. KHÔNG dùng ẩn dụ châm biếm văn hóa. KHÔNG chèn link URL vào text (mo_bai tom_tat noi_dung tieu_de) - link chỉ trong anh video nguon. Viết song ngữ: _vi = tieng Viet, _target = ${targetLang}. Mỗi luan_cu cần 2 URL anh va 2 URL video, ưu tiên ${sources} và YouTube chính thức.`;
 
     console.log(`[process_content] Gọi GPT-5 Responses API cho: ${topic}`);
 
@@ -188,12 +195,10 @@ async function saveToDb(projectId, result) {
     const post = await db.get('SELECT id FROM Post WHERE title = ?', [postTitle]);
     const postId = post.id;
 
-    // Lưu tieu_de, mo_bai, tom_tat
-    const mo_bai_translated = await translateText(result.mo_bai, targetLang);
-    const tom_tat_translated = await translateText(result.tom_tat, targetLang);
+    // Lưu tieu_de, mo_bai, tom_tat - GPT đã sinh song ngữ sẵn
     await db.run(
         'UPDATE Post SET tieu_de = ?, mo_bai = ?, mo_bai_vi = ?, tom_tat = ?, tom_tat_vi = ? WHERE id = ?',
-        [result.tieu_de, mo_bai_translated, result.mo_bai, tom_tat_translated, result.tom_tat, postId]
+        [result.tieu_de, result.mo_bai_target, result.mo_bai_vi, result.tom_tat_target, result.tom_tat_vi, postId]
     );
 
     let sentenceOrder = 0;
@@ -205,11 +210,9 @@ async function saveToDb(projectId, result) {
             // content = noi_dung đã dịch (ngôn ngữ đích)
             // original_content = noi_dung tiếng Việt
             // audio field không dùng, dùng Keyword để lưu tieu_de
-            const paraContentTranslated = await translateText(cau.noi_dung_luan_diem, targetLang);
-            const paraTitleTranslated = await translateText(cau.tieu_de_luan_diem, targetLang);
             const paraRes = await db.run(
                 'INSERT INTO Paragraph (post_id, content, content_vi, title, title_vi, "order") VALUES (?, ?, ?, ?, ?, ?)',
-                [postId, paraContentTranslated, cau.noi_dung_luan_diem, paraTitleTranslated, cau.tieu_de_luan_diem, i + 1]
+                [postId, cau.noi_dung_target, cau.noi_dung_vi, cau.tieu_de_target, cau.tieu_de_vi, i + 1]
             );
             const paragraphId = paraRes.lastID;
 
@@ -220,7 +223,7 @@ async function saveToDb(projectId, result) {
             [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 
             // Keyword = tieu_de_luan_diem (hiển thị trên UI như tag)
-            await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [paragraphId, cau.tieu_de_luan_diem]);
+            await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [paragraphId, cau.tieu_de_vi]);
 
             // Mỗi luan_cu = 1 Sentence (không split câu)
             for (let j = 0; j < cau.luan_cu.length; j++) {
@@ -231,11 +234,9 @@ async function saveToDb(projectId, result) {
                 fs.writeFileSync(metaPath, JSON.stringify({ anh: doan.anh || [], video: doan.video || [], nguon: doan.nguon || [] }, null, 2));
 
                 sentenceOrder++;
-                const doanTranslated = await translateText(doan.noi_dung_luan_cu, targetLang);
-                const doanTitleTranslated = await translateText(doan.tieu_de_luan_cu, targetLang);
                 const sentenceRes = await db.run(
                     'INSERT INTO Sentence (paragraph_id, content, content_vi, title, title_vi, "order") VALUES (?, ?, ?, ?, ?, ?)',
-                    [paragraphId, doanTranslated, doan.noi_dung_luan_cu, doanTitleTranslated, doan.tieu_de_luan_cu, sentenceOrder]
+                    [paragraphId, doan.noi_dung_target, doan.noi_dung_vi, doan.tieu_de_target, doan.tieu_de_vi, sentenceOrder]
                 );
                 const sentenceId = sentenceRes.lastID;
                 // Luu sentenceId de tai anh/video sau khi commit
