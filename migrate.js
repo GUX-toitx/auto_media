@@ -68,6 +68,14 @@ export async function initDB() {
     await db.run('ALTER TABLE Post ADD COLUMN status TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN silence_duration REAL DEFAULT 1').catch(() => {});
     await db.run('ALTER TABLE Sentence ADD COLUMN sentence_uuid TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN tom_tat_vi TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN tom_tat_vi_audio TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN tom_tat_target TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN tom_tat_target_audio TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN ket_bai_vi TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN ket_bai_vi_audio TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN ket_bai_target TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN ket_bai_target_audio TEXT DEFAULT NULL').catch(() => {});
 
     return db;
 }

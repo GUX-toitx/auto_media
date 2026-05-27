@@ -44,7 +44,7 @@ app.get('/api/posts', async (req, res) => {
 app.get('/api/posts/:postId', async (req, res) => {
     try {
         const db = await getDb();
-        const post = await db.get('SELECT id, title, tieu_de, mo_bai, mo_bai_vi, tom_tat, tom_tat_vi, mo_bai_audio, mo_bai_vi_audio, tom_tat_audio, tom_tat_vi_audio FROM Post WHERE id = ?', [req.params.postId]);
+        const post = await db.get('SELECT id, title, tieu_de, mo_bai, mo_bai_vi, tom_tat, tom_tat_vi, mo_bai_audio, mo_bai_vi_audio, tom_tat_audio, tom_tat_vi_audio, tom_tat_target, tom_tat_target_audio, ket_bai_vi, ket_bai_vi_audio, ket_bai_target, ket_bai_target_audio FROM Post WHERE id = ?', [req.params.postId]);
         if (!post) return res.status(404).json({ error: 'Post not found' });
 
         const paragraphs = await db.all(
@@ -303,7 +303,7 @@ app.post('/api/update-sentence', async (req, res) => {
 app.post('/api/save-post-field', async (req, res) => {
     try {
         const { postId, field, value } = req.body;
-        if (!['tieu_de', 'mo_bai', 'mo_bai_vi', 'tom_tat', 'tom_tat_vi'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
+        if (!['tieu_de', 'mo_bai', 'mo_bai_vi', 'tom_tat', 'tom_tat_vi', 'tom_tat_target', 'ket_bai_vi', 'ket_bai_target'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
         const db = await getDb();
         await db.run(`UPDATE Post SET ${field} = ? WHERE id = ?`, [value, postId]);
         await db.close();

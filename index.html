@@ -262,6 +262,32 @@
 
 
             </div>
+
+                <!-- Tóm tắt -->
+                <div v-if="activePost.tom_tat_vi || activePost.tom_tat_target" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
+                    <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Tóm tắt</p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div contenteditable="true" @blur="savePostField('tom_tat_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.tom_tat_vi }}</div>
+                        <div contenteditable="true" @blur="savePostField('tom_tat_target', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.tom_tat_target }}</div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 mt-1">
+                        <div><audio v-if="activePost.tom_tat_vi_audio" controls :src="activePost.tom_tat_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                        <div><audio v-if="activePost.tom_tat_target_audio" controls :src="activePost.tom_tat_target_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                    </div>
+
+
+                <!-- Kết bài -->
+                <div v-if="activePost.ket_bai_vi || activePost.ket_bai_target" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
+                    <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Kết bài</p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div contenteditable="true" @blur="savePostField('ket_bai_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.ket_bai_vi }}</div>
+                        <div contenteditable="true" @blur="savePostField('ket_bai_target', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.ket_bai_target }}</div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 mt-1">
+                        <div><audio v-if="activePost.ket_bai_vi_audio" controls :src="activePost.ket_bai_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                        <div><audio v-if="activePost.ket_bai_target_audio" controls :src="activePost.ket_bai_target_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                    </div>
+
         </div>
     </main>
 

@@ -154,8 +154,6 @@ async function analyzeWithGPT5(topic, sources) {
             },
             ket_bai_vi: { type: 'string' },
             ket_bai_target: { type: 'string' },
-            cta_vi: { type: 'string' },
-            cta_target: { type: 'string' },
             tom_tat_vi: { type: 'string' },
             tom_tat_target: { type: 'string' },
         },
@@ -166,8 +164,6 @@ async function analyzeWithGPT5(topic, sources) {
             'luan_diem',
             'ket_bai_vi',
             'ket_bai_target',
-            'cta_vi',
-            'cta_target',
             'tom_tat_vi',
             'tom_tat_target',
         ],
@@ -305,13 +301,8 @@ async function analyzeWithGPT5(topic, sources) {
         '- Co the ket bang cau hoi mo hoac du bao cho dien bien tiep theo.',
         '- Ket bai phai co cam giac documentary ket thuc nhung ban co van dang van dong.',
         '- Ket bai nen dua nguoi xem quay lai buc tranh quyen luc lon hon.',
-        '',
-        'CTA:',
-        '- Sau ket bai BAT BUOC phai co CTA rieng.',
-        '- CTA ngan gon, tu nhien.',
-        '- CTA phai giong documentary YouTube chuyen nghiep, khong qua commercial.',
-        '- Cau cuoi cung nen keu goi nguoi xem like video, dang ky kenh va de lai goc nhin hoac y kien cua ho duoi phan binh luan.',
-        '- CTA phai tao cam giac dang mo ra mot cuoc thao luan ve dia chinh tri thay vi chi keu goi hanh dong.',
+        '- Cau cuoi cung cua ket bai nen keu goi nguoi xem like video, dang ky kenh va de lai y kien duoi phan binh luan mot cach tu nhien.',
+        '- Ket bai KHONG duoc bi bo sot trong output cuoi.',
         '',
         'OUTPUT PHAI CAM GIAC NHU:',
         '- Mot documentary geopolitical hien dai.',
@@ -379,10 +370,12 @@ async function saveToDb(projectId, result) {
     const post = await db.get('SELECT id FROM Post WHERE title = ?', [postTitle]);
     const postId = post.id;
 
-    // Lưu tieu_de, mo_bai, tom_tat - GPT đã sinh song ngữ sẵn
+    // Lưu tieu_de, mo_bai, tom_tat, ket_bai - GPT đã sinh song ngữ sẵn
     await db.run(
-        'UPDATE Post SET tieu_de = ?, mo_bai = ?, mo_bai_vi = ? WHERE id = ?',
-        [stripLinks(result.tieu_de), stripLinks(result.mo_bai_target), stripLinks(result.mo_bai_vi), postId]
+        'UPDATE Post SET tieu_de = ?, mo_bai = ?, mo_bai_vi = ?, tom_tat_vi = ?, tom_tat_target = ?, ket_bai_vi = ?, ket_bai_target = ? WHERE id = ?',
+        [stripLinks(result.tieu_de), stripLinks(result.mo_bai_target), stripLinks(result.mo_bai_vi),
+         stripLinks(result.tom_tat_vi), stripLinks(result.tom_tat_target),
+         stripLinks(result.ket_bai_vi), stripLinks(result.ket_bai_target), postId]
     );
 
     let sentenceOrder = 0;
