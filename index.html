@@ -30,7 +30,7 @@
                     :class="['sidebar-btn flex-1 text-left px-3 py-2 rounded-lg hover:bg-gray-800 text-xs truncate transition-all font-medium',
                         activePostId === post.id ? '!bg-yellow-500 !text-black border-l-2 !border-yellow-400' : 'text-gray-500 hover:text-white']">
                     <div class="flex items-center justify-between">
-                        <span class="truncate">📁 {{ post.title }}</span>
+                        <span class="truncate">📁 {{ post.project_id }}</span>
                         <span v-if="post.status === 'crawling'" class="shrink-0 ml-1 animate-spin">⏳</span>
                     </div>
                 </button>
@@ -48,9 +48,9 @@
                 <div>
                     <p class="text-blue-500 font-mono text-[10px] mb-2 uppercase tracking-[0.3em]">Workspace / Project</p>
                     <div class="flex items-center gap-3">
-                        <h2 class="text-4xl font-black text-white">{{ activePost.title }}</h2>
+                        <h2 class="text-4xl font-black text-white">{{ activePost.project_id }}</h2>
                     </div>
-                    <p v-if="activePost.tieu_de" class="text-gray-300 text-sm mt-1 font-medium">{{ activePost.tieu_de }}</p>
+                    <p v-if="activePost.title" class="text-gray-300 text-sm mt-1 font-medium">{{ activePost.title }}</p>
                 </div>
                 <div class="flex gap-3 items-center">
                     <!-- Preview Mode Switch -->
@@ -73,16 +73,16 @@
 
             <div class="space-y-4 mt-[180px]">
                 <!-- Mo bai & Tom tat -->
-                <div v-if="activePost.mo_bai || activePost.mo_bai_vi" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
-                    <div v-if="activePost.mo_bai || activePost.mo_bai_vi">
+                <div v-if="activePost.hook || activePost.hook_vi" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
+                    <div v-if="activePost.hook || activePost.hook_vi">
                         <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Mở bài</p>
                         <div class="grid grid-cols-2 gap-2">
-                            <div contenteditable="true" @blur="savePostField('mo_bai_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.mo_bai_vi }}</div>
-                            <div contenteditable="true" @blur="savePostField('mo_bai', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.mo_bai }}</div>
+                            <div contenteditable="true" @blur="savePostField('hook_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.hook_vi }}</div>
+                            <div contenteditable="true" @blur="savePostField('hook', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.hook }}</div>
                         </div>
                         <div class="grid grid-cols-2 gap-2 mt-1">
-                            <div><audio v-if="activePost.mo_bai_vi_audio" controls :src="activePost.mo_bai_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
-                            <div><audio v-if="activePost.mo_bai_audio" controls :src="activePost.mo_bai_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                            <div><audio v-if="activePost.hook_vi_audio" controls :src="activePost.hook_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                            <div><audio v-if="activePost.hook_audio" controls :src="activePost.hook_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
                         </div>
                     </div>
 
@@ -280,28 +280,28 @@
             </div>
 
                 <!-- Tóm tắt -->
-                <div v-if="activePost.tom_tat_vi || activePost.tom_tat_target" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
+                <div v-if="activePost.summary_vi || activePost.summary_target" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
                     <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Tóm tắt</p>
                     <div class="grid grid-cols-2 gap-2">
-                        <div contenteditable="true" @blur="savePostField('tom_tat_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.tom_tat_vi }}</div>
-                        <div contenteditable="true" @blur="savePostField('tom_tat_target', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.tom_tat_target }}</div>
+                        <div contenteditable="true" @blur="savePostField('summary_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.summary_vi }}</div>
+                        <div contenteditable="true" @blur="savePostField('summary_target', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.summary_target }}</div>
                     </div>
                     <div class="grid grid-cols-2 gap-2 mt-1">
-                        <div><audio v-if="activePost.tom_tat_vi_audio" controls :src="activePost.tom_tat_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
-                        <div><audio v-if="activePost.tom_tat_target_audio" controls :src="activePost.tom_tat_target_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                        <div><audio v-if="activePost.summary_vi_audio" controls :src="activePost.summary_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                        <div><audio v-if="activePost.summary_target_audio" controls :src="activePost.summary_target_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
                     </div>
 
 
                 <!-- Kết bài -->
-                <div v-if="activePost.ket_bai_vi || activePost.ket_bai_target" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
+                <div v-if="activePost.conclusion_vi || activePost.conclusion_target" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
                     <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Kết bài</p>
                     <div class="grid grid-cols-2 gap-2">
-                        <div contenteditable="true" @blur="savePostField('ket_bai_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.ket_bai_vi }}</div>
-                        <div contenteditable="true" @blur="savePostField('ket_bai_target', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.ket_bai_target }}</div>
+                        <div contenteditable="true" @blur="savePostField('conclusion_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.conclusion_vi }}</div>
+                        <div contenteditable="true" @blur="savePostField('conclusion_target', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.conclusion_target }}</div>
                     </div>
                     <div class="grid grid-cols-2 gap-2 mt-1">
-                        <div><audio v-if="activePost.ket_bai_vi_audio" controls :src="activePost.ket_bai_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
-                        <div><audio v-if="activePost.ket_bai_target_audio" controls :src="activePost.ket_bai_target_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                        <div><audio v-if="activePost.conclusion_vi_audio" controls :src="activePost.conclusion_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                        <div><audio v-if="activePost.conclusion_target_audio" controls :src="activePost.conclusion_target_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
                     </div>
 
         </div>
@@ -1025,8 +1025,8 @@ createApp({
         }
 
         async function deleteProject(post) {
-            if (!confirm(`Xóa project "${post.title}"?`)) return;
-            const res = await fetch('/api/delete-project', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoId: post.title.replace(/_[a-z]{2}$/, '') }) });
+            if (!confirm(`Xóa project "${post.project_id}"?`)) return;
+            const res = await fetch('/api/delete-project', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoId: post.project_id.replace(/_[a-z]{2}$/, '') }) });
             const r = await res.json();
             if (r.success) {
                 posts.value = posts.value.filter(p => p.id !== post.id);
@@ -1413,7 +1413,7 @@ createApp({
 
         async function recreateVoiceSentence(sentence, paraIndex, sentenceIndex) {
             if (!sentence.sentenceUuid) return alert('Sentence chưa có uuid!');
-            const lang = activePost.value?.title?.match(/_([a-z]{2})$/)?.[1] || 'en';
+            const lang = activePost.value?.project_id?.match(/_([a-z]{2})$/)?.[1] || 'en';
             const [lr, sr] = await Promise.all([
                 fetch('/api/languages'),
                 fetch(`/api/reference-speakers?lang=${lang}`)
@@ -1544,7 +1544,7 @@ createApp({
             voiceModal.value = {
                 open: true,
                 postId: activePostId.value,
-                lang: activePost.value?.title?.match(/_([a-z]{2})$/)?.[1] || 'en',
+                lang: activePost.value?.project_id?.match(/_([a-z]{2})$/)?.[1] || 'en',
                 speakerUuid: '',
                 langs: [],
                 speakers: [],
@@ -1687,7 +1687,7 @@ createApp({
             if (!kws.length) return showToast('⚠️ Chưa có keyword!');
             const paras = activePost.value.paragraphs;
             const gid = String(paras.findIndex(p => p.id === para.id) + 1);
-            const lang = activePost.value?.title?.match(/_([a-z]{2})$/)?.[1] || 'en';
+            const lang = activePost.value?.project_id?.match(/_([a-z]{2})$/)?.[1] || 'en';
             const res = await fetch(`/api/get-prompt?type=${type}&lang=${lang}`);
             const { prompt } = await res.json();
             aiModal.value = { open: true, type, para, gid, count: type === 'video' ? 1 : 2, content: para.content || '', keywords: kws, lang, prompt: prompt + ' ' + (para.content || ''), ratio: '16:9', videoMode: 'Frames', veo: 'Lite' };

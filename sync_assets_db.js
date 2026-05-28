@@ -19,12 +19,12 @@ const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 
 async function main() {
     const db = await getDb();
-    const posts = await db.all('SELECT id, title FROM Post');
+    const posts = await db.all('SELECT id, project_id FROM Post');
 
     let inserted = 0, skipped = 0;
 
     for (const post of posts) {
-        const projectId = post.title.replace(/_[a-z]{2}$/, '');
+        const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
         const paragraphs = await db.all(
             'SELECT id FROM Paragraph WHERE post_id = ? ORDER BY id',
             [post.id]

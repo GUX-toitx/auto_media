@@ -118,54 +118,54 @@ async function analyzeWithGPT5(topic, sources) {
     const schema = {
         type: 'object',
         properties: {
-            tieu_de: { type: 'string' },
-            mo_bai_vi: { type: 'string' },
-            mo_bai_target: { type: 'string' },
+            title: { type: 'string' },
+            hook_vi: { type: 'string' },
+            hook_target: { type: 'string' },
             luan_diem: {
                 type: 'array',
                 items: {
                     type: 'object',
                     properties: {
-                        tieu_de_vi: { type: 'string' },
-                        tieu_de_target: { type: 'string' },
-                        noi_dung_vi: { type: 'string' },
-                        noi_dung_target: { type: 'string' },
+                        title_vi: { type: 'string' },
+                        title_target: { type: 'string' },
+                        content_vi: { type: 'string' },
+                        content_target: { type: 'string' },
                         luan_cu: {
                             type: 'array',
                             items: {
                                 type: 'object',
                                 properties: {
-                                    tieu_de_vi: { type: 'string' },
-                                    tieu_de_target: { type: 'string' },
-                                    noi_dung_vi: { type: 'string' },
-                                    noi_dung_target: { type: 'string' },
-                                    anh: { type: 'array', items: { type: 'string' } },
+                                    title_vi: { type: 'string' },
+                                    title_target: { type: 'string' },
+                                    content_vi: { type: 'string' },
+                                    content_target: { type: 'string' },
+                                    image: { type: 'array', items: { type: 'string' } },
                                     video: { type: 'array', items: { type: 'string' } },
-                                    nguon: { type: 'array', items: { type: 'string' } }
+                                    source: { type: 'array', items: { type: 'string' } }
                                 },
-                                required: ['tieu_de_vi', 'tieu_de_target', 'noi_dung_vi', 'noi_dung_target', 'anh', 'video', 'nguon'],
+                                required: ['title_vi', 'title_target', 'content_vi', 'content_target', 'image', 'video', 'source'],
                                 additionalProperties: false
                             }
                         }
                     },
-                    required: ['tieu_de_vi', 'tieu_de_target', 'noi_dung_vi', 'noi_dung_target', 'luan_cu'],
+                    required: ['title_vi', 'title_target', 'content_vi', 'content_target', 'luan_cu'],
                     additionalProperties: false
                 }
             },
-            ket_bai_vi: { type: 'string' },
-            ket_bai_target: { type: 'string' },
-            tom_tat_vi: { type: 'string' },
-            tom_tat_target: { type: 'string' },
+            conclusion_vi: { type: 'string' },
+            conclusion_target: { type: 'string' },
+            summary_vi: { type: 'string' },
+            summary_target: { type: 'string' },
         },
         required: [
-            'tieu_de',
-            'mo_bai_vi',
-            'mo_bai_target',
+            'title',
+            'hook_vi',
+            'hook_target',
             'luan_diem',
-            'ket_bai_vi',
-            'ket_bai_target',
-            'tom_tat_vi',
-            'tom_tat_target',
+            'conclusion_vi',
+            'conclusion_target',
+            'summary_vi',
+            'summary_target',
         ],
         additionalProperties: false
     };
@@ -199,7 +199,7 @@ async function analyzeWithGPT5(topic, sources) {
         '  "Khong chi vay", "Trong khi do", "Ben canh do", "Mot van de khac"...',
         '- Toan bo bai phai giu mot goc nhin narrative thong nhat tu dau toi cuoi.',
         '',
-        'MO BAI:',
+        'MO BAI: tuong ung voi hook_vi va hook_target',
         '- Mo bai ngan gon, vao thang van de.',
         '- Hook trong 2-4 cau dau.',
         '- Tao su to mo, tension hoac cam giac co mot dieu lon dang dien ra.',
@@ -257,7 +257,7 @@ async function analyzeWithGPT5(topic, sources) {
         '- Khong tao cam giac dang tach thanh cac muc rieng le.',
         '- Moi luan cu chi la mot lop thong tin moi duoc mo rong them trong cau chuyen.',
         '- Moi luan diem nen tao cam giac dang reveal them mot lop dong co, loi ich hoac chien luoc an sau.',
-        '- Moi noi_dung_vi va noi_dung_target phai du chi tiet de dung thanh mot doan voice-over cinematic.',
+        '- Moi content_vi va content_target phai du chi tiet de dung thanh mot doan voice-over cinematic.',
         '- Khong viet qua ngan hoac ket luan qua som.',
         '- Moi luan diem phai dao sau vao dong co, phan ung va tac dong day chuyen.',
         '- Uu tien cau ngan, ro, cinematic va de voice-over.',
@@ -294,8 +294,8 @@ async function analyzeWithGPT5(topic, sources) {
         '- Uu tien footage satellite, ban do, drone, trade route, military movement, summit, port, skyline va global logistics.',
         '- Uu tien shutterstock, storyblock, Reuters, AP, AFP, BBC, DW, CNA, Bloomberg, Al Jazeera, CNBC, VnExpress, Bao VietNamNet, Bao Thanh Nien, Bao Tuoi Tre, Bao Nhan Dan va official YouTube.',
         '',
-        'KET BAI:',
-        '- BAT BUOC phai co phan ket_bai_vi va ket_bai_target rieng.',
+        'KET BAI: tuong ung voi conclusion',
+        '- BAT BUOC phai co phan conclusion_vi va conclusion_target rieng.',
         '- Ket bai chi can mot dong narrative tong ket, KHONG chia luan cu.',
         '- Ket bai phai tao du am va cam giac van de van dang tiep dien.',
         '- Co the ket bang cau hoi mo hoac du bao cho dien bien tiep theo.',
@@ -360,22 +360,22 @@ async function saveToDb(projectId, result) {
     const db = await getDb();
     const postTitle = projectId;
 
-    await db.run('INSERT OR IGNORE INTO Post (title) VALUES (?)', [postTitle]);
-    await db.run('UPDATE Post SET status = ? WHERE title = ?', ['crawling', postTitle]);
+    await db.run('INSERT OR IGNORE INTO Post (project_id) VALUES (?)', [postTitle]);
+    await db.run('UPDATE Post SET status = ? WHERE project_id = ?', ['crawling', postTitle]);
 
     // Notify dashboard
     http.request({ hostname: 'localhost', port: PORT, path: '/api/crawl-status/notify', method: 'POST', headers: { 'Content-Type': 'application/json' } }, () => {})
         .end(JSON.stringify({ postTitle, status: 'crawling' }));
 
-    const post = await db.get('SELECT id FROM Post WHERE title = ?', [postTitle]);
+    const post = await db.get('SELECT id FROM Post WHERE project_id = ?', [postTitle]);
     const postId = post.id;
 
-    // Lưu tieu_de, mo_bai, tom_tat, ket_bai - GPT đã sinh song ngữ sẵn
+    // Lưu title, hook, summary, conclusion - GPT đã sinh song ngữ sẵn
     await db.run(
-        'UPDATE Post SET tieu_de = ?, mo_bai = ?, mo_bai_vi = ?, tom_tat_vi = ?, tom_tat_target = ?, ket_bai_vi = ?, ket_bai_target = ? WHERE id = ?',
-        [stripLinks(result.tieu_de), stripLinks(result.mo_bai_target), stripLinks(result.mo_bai_vi),
-         stripLinks(result.tom_tat_vi), stripLinks(result.tom_tat_target),
-         stripLinks(result.ket_bai_vi), stripLinks(result.ket_bai_target), postId]
+        'UPDATE Post SET title = ?, hook = ?, hook_vi = ?, summary_vi = ?, summary_target = ?, conclusion_vi = ?, conclusion_target = ? WHERE id = ?',
+        [stripLinks(result.title), stripLinks(result.hook_target), stripLinks(result.hook_vi),
+         stripLinks(result.summary_vi), stripLinks(result.summary_target),
+         stripLinks(result.conclusion_vi), stripLinks(result.conclusion_target), postId]
     );
 
     let sentenceOrder = 0;
@@ -384,12 +384,12 @@ async function saveToDb(projectId, result) {
         for (let i = 0; i < result.luan_diem.length; i++) {
             const cau = result.luan_diem[i];
             // Paragraph = Luận điểm
-            // content = noi_dung đã dịch (ngôn ngữ đích)
-            // original_content = noi_dung tiếng Việt
-            // audio field không dùng, dùng Keyword để lưu tieu_de
+            
+            
+            // Keyword = title luận điểm
             const paraRes = await db.run(
                 'INSERT INTO Paragraph (post_id, content, content_vi, title, title_vi, "order") VALUES (?, ?, ?, ?, ?, ?)',
-                [postId, stripLinks(cau.noi_dung_target), stripLinks(cau.noi_dung_vi), stripLinks(cau.tieu_de_target), stripLinks(cau.tieu_de_vi), i + 1]
+                [postId, stripLinks(cau.content_target), stripLinks(cau.content_vi), stripLinks(cau.title_target), stripLinks(cau.title_vi), i + 1]
             );
             const paragraphId = paraRes.lastID;
 
@@ -399,21 +399,21 @@ async function saveToDb(projectId, result) {
             const iFolder = path.join(BASE_DIR, projectId, 'assets', '_raw_images', gid);
             [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 
-            // Keyword = tieu_de_luan_diem (hiển thị trên UI như tag)
-            await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [paragraphId, cau.tieu_de_vi]);
+            
+            await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [paragraphId, cau.title_vi]);
 
             // Mỗi luan_cu = 1 Sentence (không split câu)
             for (let j = 0; j < cau.luan_cu.length; j++) {
                 const doan = cau.luan_cu[j];
 
-                // Lưu metadata anh/video/nguon
+                // Lưu metadata image/video/source
                 const metaPath = path.join(BASE_DIR, projectId, 'assets', `meta_${gid}_${j + 1}.json`);
-                fs.writeFileSync(metaPath, JSON.stringify({ anh: doan.anh || [], video: doan.video || [], nguon: doan.nguon || [] }, null, 2));
+                fs.writeFileSync(metaPath, JSON.stringify({ image: doan.image || [], video: doan.video || [], source: doan.source || [] }, null, 2));
 
                 sentenceOrder++;
                 const sentenceRes = await db.run(
                     'INSERT INTO Sentence (paragraph_id, content, content_vi, title, title_vi, "order") VALUES (?, ?, ?, ?, ?, ?)',
-                    [paragraphId, stripLinks(doan.noi_dung_target), stripLinks(doan.noi_dung_vi), stripLinks(doan.tieu_de_target), stripLinks(doan.tieu_de_vi), sentenceOrder]
+                    [paragraphId, stripLinks(doan.content_target), stripLinks(doan.content_vi), stripLinks(doan.title_target), stripLinks(doan.title_vi), sentenceOrder]
                 );
                 const sentenceId = sentenceRes.lastID;
                 // Luu sentenceId de tai anh/video sau khi commit
@@ -438,9 +438,9 @@ async function saveToDb(projectId, result) {
             const sentenceId = doan._sentenceId;
             const paragraphId = doan._paragraphId;
 
-                // Tải ảnh từ doan.anh
-                for (let ai = 0; ai < (doan.anh || []).length; ai++) {
-                    const url = doan.anh[ai];
+                // Tải ảnh từ doan.image
+                for (let ai = 0; ai < (doan.image || []).length; ai++) {
+                    const url = doan.image[ai];
                     if (!url || !url.startsWith('http')) continue;
                     try {
                         const imgDir = path.join(BASE_DIR, projectId, 'assets', '_raw_images', gid);
@@ -488,12 +488,12 @@ async function saveToDb(projectId, result) {
     // Lưu tóm tắt
     const summaryPath = path.join(BASE_DIR, projectId, 'summary.json');
     fs.writeFileSync(summaryPath, JSON.stringify({
-        tieu_de: result.tieu_de,
-        mo_bai_vi: result.mo_bai_vi,
-        mo_bai_target: result.mo_bai_target
+        title: result.title,
+        hook_vi: result.hook_vi,
+        hook_target: result.hook_target
     }, null, 2));
 
-    await db.run('UPDATE Post SET status = NULL WHERE title = ?', [postTitle]);
+    await db.run('UPDATE Post SET status = NULL WHERE project_id = ?', [postTitle]);
     http.request({ hostname: 'localhost', port: PORT, path: '/api/crawl-status/notify', method: 'POST', headers: { 'Content-Type': 'application/json' } }, () => {})
         .end(JSON.stringify({ postTitle, status: null }));
 

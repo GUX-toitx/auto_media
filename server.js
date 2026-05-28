@@ -34,7 +34,7 @@ const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 app.get('/api/posts', async (req, res) => {
     try {
         const db = await getDb();
-        const posts = await db.all('SELECT id, title, status, audio_uuid, tieu_de, voice_content_type FROM Post ORDER BY id DESC');
+        const posts = await db.all('SELECT id, project_id, status, audio_uuid, title, voice_content_type FROM Post ORDER BY id DESC');
         await db.close();
         res.json(posts);
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -44,7 +44,7 @@ app.get('/api/posts', async (req, res) => {
 app.get('/api/posts/:postId', async (req, res) => {
     try {
         const db = await getDb();
-        const post = await db.get('SELECT id, title, tieu_de, mo_bai, mo_bai_vi, tom_tat, tom_tat_vi, mo_bai_audio, mo_bai_vi_audio, tom_tat_audio, tom_tat_vi_audio, tom_tat_target, tom_tat_target_audio, ket_bai_vi, ket_bai_vi_audio, ket_bai_target, ket_bai_target_audio FROM Post WHERE id = ?', [req.params.postId]);
+        const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, summary, summary_vi, summary_audio, summary_vi_audio, summary_target, summary_target_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio FROM Post WHERE id = ?', [req.params.postId]);
         if (!post) return res.status(404).json({ error: 'Post not found' });
 
         const paragraphs = await db.all(
@@ -53,7 +53,7 @@ app.get('/api/posts/:postId', async (req, res) => {
         );
 
         // Lấy tên thư mục gốc (bỏ suffix _en, _vi...)
-        const projectId = post.title.replace(/_[a-z]{2}$/, '');
+        const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
 
         for (let i = 0; i < paragraphs.length; i++) {
             const para = paragraphs[i];
@@ -78,10 +78,10 @@ app.get('/api/posts/:postId', async (req, res) => {
             );
             para.videos = assets
                 .filter(a => a.type === 'video' && (a.paragraph_id || a.sentence_id))
-                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0 }));
+                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: a.file_path.startsWith('http') ? a.file_path : `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0 }));
             para.images = assets
                 .filter(a => a.type === 'image' && (a.paragraph_id || a.sentence_id))
-                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0 }));
+                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: a.file_path.startsWith('http') ? a.file_path : `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0 }));
 
             // Audios & generated videos từ thư mục output
             para.audios = {};
@@ -167,8 +167,8 @@ app.post('/api/download-voice', async (req, res) => {
     try {
         const { videoId, postId } = req.body;
         const db = await getDb();
-        const post = await db.get('SELECT title, voice_content_type FROM Post WHERE id = ?', [postId]);
-        const lang = post.title.match(/_([a-z]{2})$/)?.[1] || 'unknown';
+        const post = await db.get('SELECT project_id, voice_content_type FROM Post WHERE id = ?', [postId]);
+        const lang = post.project_id.match(/_([a-z]{2})$/)?.[1] || 'unknown';
         const contentType = post.voice_content_type || 'content';
 
         const zipName = `${videoId}_${lang}.zip`;
@@ -303,7 +303,7 @@ app.post('/api/update-sentence', async (req, res) => {
 app.post('/api/save-post-field', async (req, res) => {
     try {
         const { postId, field, value } = req.body;
-        if (!['tieu_de', 'mo_bai', 'mo_bai_vi', 'tom_tat', 'tom_tat_vi', 'tom_tat_target', 'ket_bai_vi', 'ket_bai_target'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
+        if (!['title', 'hook', 'hook_vi', 'summary', 'summary_vi', 'summary_target', 'conclusion_vi', 'conclusion_target'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
         const db = await getDb();
         await db.run(`UPDATE Post SET ${field} = ? WHERE id = ?`, [value, postId]);
         await db.close();
@@ -427,7 +427,7 @@ app.post('/api/delete-project', async (req, res) => {
     try {
         const db = await getDb();
         // Xóa tất cả posts có title là videoId hoặc bắt đầu bằng videoId_
-        const posts = await db.all('SELECT id FROM Post WHERE title = ? OR title LIKE ?', [videoId, `${videoId}\_%`]);
+        const posts = await db.all('SELECT id FROM Post WHERE project_id = ? OR project_id LIKE ?', [videoId, `${videoId}\_%`]);
         for (const post of posts) {
             const paras = await db.all('SELECT id FROM Paragraph WHERE post_id = ?', [post.id]);
             for (const para of paras) {
@@ -514,9 +514,9 @@ app.post('/api/unselect-asset', async (req, res) => {
         await db.close();
 
         // Xóa file đã tải trong folder lang
-        const post = await (await getDb()).get('SELECT title FROM Post WHERE id = (SELECT post_id FROM Paragraph WHERE id = ?)', [asset?.paragraph_id]);
+        const post = await (await getDb()).get('SELECT project_id FROM Post WHERE id = (SELECT post_id FROM Paragraph WHERE id = ?)', [asset?.paragraph_id]);
         if (post) {
-            const lang = post.title.match(/_([a-z]{2})$/)?.[1] || 'unknown';
+            const lang = post.project_id.match(/_([a-z]{2})$/)?.[1] || 'unknown';
             const subDir = type === 'video' ? '_raw_videos' : '_raw_images';
             const targetDir = path.join(MEDIA_DIR, videoId, lang, 'assets', subDir, gid);
             if (fs.existsSync(targetDir)) {
@@ -719,9 +719,9 @@ app.post('/api/trim', async (req, res) => {
 app.post('/api/open-folder', async (req, res) => {
     const { videoId, postId, gid, type } = req.body;
     const db = await getDb();
-    const post = await db.get('SELECT title FROM Post WHERE id = ?', [postId]);
+    const post = await db.get('SELECT project_id FROM Post WHERE id = ?', [postId]);
     await db.close();
-    const lang = post?.title?.match(/_([a-z]{2})$/)?.[1] || 'unknown';
+    const lang = post?.project_id?.match(/_([a-z]{2})$/)?.[1] || 'unknown';
     const subDir = type === 'video' ? '_raw_videos' : '_raw_images';
     const folderPath = path.join(MEDIA_DIR, videoId, lang, 'assets', subDir, gid);
     if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });

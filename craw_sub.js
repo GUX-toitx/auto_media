@@ -583,7 +583,7 @@ async function recoverTaskFromDB() {
     const db = await initDB();
     
     // Tìm tất cả các post đang ở trạng thái 'crawling'
-    const unfinishedPosts = await db.all('SELECT id, title FROM Post WHERE status = ?', ['crawling']);
+    const unfinishedPosts = await db.all('SELECT id, project_id FROM Post WHERE status = ?', ['crawling']);
     
     if (unfinishedPosts.length === 0) {
         console.log('[RECOVERY] Không có project nào đang dở dạng.');
@@ -596,11 +596,11 @@ async function recoverTaskFromDB() {
     
     // Lấy project đầu tiên để tiếp tục
     const post = unfinishedPosts[0];
-    console.log(`[RECOVERY] Tiếp tục project: ${post.title}`);
+    console.log(`[RECOVERY] Tiếp tục project: ${post.project_id}`);
     
     // Lấy thông tin project từ title
-    const projectId = post.title.replace(/_[a-z]{2}$/, '');
-    const targetLang = post.title.match(/_([a-z]{2})$/)?.[1] || null;
+    const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
+    const targetLang = post.project_id.match(/_([a-z]{2})$/)?.[1] || null;
     
     // Lấy tất cả paragraphs của project
     const paragraphs = await db.all(
@@ -1022,7 +1022,7 @@ async function processNextInQueue() {
         // ========================================================
         targetRow.set('Trạng thái', 'DONE');
         targetRow.set('Thư mục Lưu trữ', targetDir);
-        await db.run('UPDATE Post SET status = NULL WHERE title LIKE ?', [`${projectId}%`]);
+        await db.run('UPDATE Post SET status = NULL WHERE project_id LIKE ?', [`${projectId}%`]);
         
         // Notify dashboard project hoàn thành
         fetch(`http://localhost:${PORT}/api/crawl-status/notify`, {
@@ -1034,7 +1034,7 @@ async function processNextInQueue() {
         console.error(`[LỖI] ${projectId}:`, e.message);
         targetRow.set('Trạng thái', 'ERROR');
         targetRow.set('Ghi chú', e.message);
-        await db.run('UPDATE Post SET status = NULL WHERE title LIKE ?', [`${projectId}%`]);
+        await db.run('UPDATE Post SET status = NULL WHERE project_id LIKE ?', [`${projectId}%`]);
         fetch(`http://localhost:${PORT}/api/crawl-status/notify`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ postTitle: projectId, status: null })

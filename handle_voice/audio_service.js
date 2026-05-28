@@ -195,13 +195,13 @@ export async function checkAndSaveVoice(batchUuid, postId, contentType = 'conten
         const batchSentences = sentenceData.data || [];
 
         // Xây dựng danh sách các đơn vị cần lưu audio theo đúng thứ tự DOM
-        // Thứ tự: Post(mo_bai, tom_tat) -> Paragraph(title, content) -> Sentence(title, content)
+        // Thứ tự: Post(mo_bai, summary) -> Paragraph(title, content) -> Sentence(title, content)
         const isVi = contentType === 'content_vi';
         const audioField = isVi ? '_vi_audio' : '_audio';
         const units = [];
 
-        const post = await db.get('SELECT id, mo_bai, mo_bai_vi, tom_tat, tom_tat_vi, tom_tat_target, ket_bai_vi, ket_bai_target FROM Post WHERE id = ?', [postId]);
-        if (post.mo_bai_vi || post.mo_bai) units.push({ table: 'Post', id: post.id, field: `mo_bai${audioField}` });
+        const post = await db.get('SELECT id, hook, hook_vi, summary, summary_vi, summary_target, conclusion_vi, conclusion_target FROM Post WHERE id = ?', [postId]);
+        if (post.hook_vi || post.hook) units.push({ table: 'Post', id: post.id, field: `hook${audioField}` });
 
         const paragraphs = await db.all('SELECT id, title, title_vi, content, content_vi FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);
         for (const para of paragraphs) {
@@ -216,8 +216,8 @@ export async function checkAndSaveVoice(batchUuid, postId, contentType = 'conten
         }
 
         // Tóm tắt và Kết bài sau tất cả paragraphs
-        if (isVi ? post.tom_tat_vi : post.tom_tat_target) units.push({ table: 'Post', id: post.id, field: isVi ? 'tom_tat_vi_audio' : 'tom_tat_target_audio' });
-        if (isVi ? post.ket_bai_vi : post.ket_bai_target) units.push({ table: 'Post', id: post.id, field: isVi ? 'ket_bai_vi_audio' : 'ket_bai_target_audio' });
+        if (isVi ? post.summary_vi : post.summary_target) units.push({ table: 'Post', id: post.id, field: isVi ? 'summary_vi_audio' : 'summary_target_audio' });
+        if (isVi ? post.conclusion_vi : post.conclusion_target) units.push({ table: 'Post', id: post.id, field: isVi ? 'conclusion_vi_audio' : 'conclusion_target_audio' });
 
         // Map từng batch sentence vào đúng unit theo index
         for (let i = 0; i < batchSentences.length; i++) {
@@ -241,8 +241,8 @@ export async function getAllAudioUrls(postId, contentType = 'content') {
     const sf = isVi ? '_vi_audio' : '_audio'; // suffix field
     const urls = [];
 
-    const post = await db.get(`SELECT mo_bai${sf}, tom_tat_vi_audio, tom_tat_target_audio, ket_bai_vi_audio, ket_bai_target_audio FROM Post WHERE id = ?`, [postId]);
-    if (post[`mo_bai${sf}`]) urls.push({ order: urls.length + 1, audio: post[`mo_bai${sf}`] });
+    const post = await db.get(`SELECT hook${sf}, summary_vi_audio, summary_target_audio, conclusion_vi_audio, conclusion_target_audio FROM Post WHERE id = ?`, [postId]);
+    if (post[`hook${sf}`]) urls.push({ order: urls.length + 1, audio: post[`hook${sf}`] });
 
     const paragraphs = await db.all('SELECT id FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);
     for (const para of paragraphs) {
@@ -258,9 +258,9 @@ export async function getAllAudioUrls(postId, contentType = 'content') {
     }
 
     // Tóm tắt và Kết bài sau tất cả paragraphs
-    const tomTatAudio = isVi ? post.tom_tat_vi_audio : post.tom_tat_target_audio;
+    const tomTatAudio = isVi ? post.summary_vi_audio : post.summary_target_audio;
     if (tomTatAudio) urls.push({ order: urls.length + 1, audio: tomTatAudio });
-    const ketBaiAudio = isVi ? post.ket_bai_vi_audio : post.ket_bai_target_audio;
+    const ketBaiAudio = isVi ? post.conclusion_vi_audio : post.conclusion_target_audio;
     if (ketBaiAudio) urls.push({ order: urls.length + 1, audio: ketBaiAudio });
     await db.close();
     return urls;
@@ -268,17 +268,17 @@ export async function getAllAudioUrls(postId, contentType = 'content') {
 
 export async function getIndividualAudio(postId, contentType = 'content') {
     const db = await getDb();
-    const post = await db.get('SELECT title, voice_content_type FROM Post WHERE id = ?', [postId]);
+    const post = await db.get('SELECT project_id, voice_content_type FROM Post WHERE id = ?', [postId]);
     await db.close();
     const ct = contentType || post.voice_content_type || 'content';
     const audioList = await getAllAudioUrls(postId, ct);
     const buf = await downloadIndividual(audioList);
-    return { buf, filename: `${post.title}_individual.zip` };
+    return { buf, filename: `${post.project_id}_individual.zip` };
 }
 
 export async function getMergedAudio(postId, silenceDuration, tmpDir, contentType = 'content') {
     const db = await getDb();
-    const post = await db.get('SELECT title, audio_uuid, silence_duration, voice_content_type FROM Post WHERE id = ?', [postId]);
+    const post = await db.get('SELECT project_id, audio_uuid, silence_duration, voice_content_type FROM Post WHERE id = ?', [postId]);
     await db.close();
     const ct = contentType || post.voice_content_type || 'content';
     const audioList = await getAllAudioUrls(postId, ct);
@@ -296,5 +296,5 @@ export async function getMergedAudio(postId, silenceDuration, tmpDir, contentTyp
     }
 
     const outputFile = await downloadMerged(audioList, silence, tmpDir);
-    return { outputFile, filename: `${post.title}_merged.mp3` };
+    return { outputFile, filename: `${post.project_id}_merged.mp3` };
 }
