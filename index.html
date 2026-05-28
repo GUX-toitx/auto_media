@@ -53,6 +53,13 @@
                     <p v-if="activePost.tieu_de" class="text-gray-300 text-sm mt-1 font-medium">{{ activePost.tieu_de }}</p>
                 </div>
                 <div class="flex gap-3 items-center">
+                    <!-- Preview Mode Switch -->
+                    <label class="flex items-center gap-2 cursor-pointer select-none">
+                        <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">Preview</span>
+                        <div @click="previewMode = !previewMode" class="relative w-10 h-5 rounded-full transition-colors" :class="previewMode ? 'bg-blue-600' : 'bg-gray-700'">
+                            <div class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all" :class="previewMode ? 'left-5' : 'left-0.5'"></div>
+                        </div>
+                    </label>
                     <button @click="createVoice" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
                     <button @click="retryDownloadVoice" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔄 Refresh Voice</button>
                     <button @click="openDownloadAudioModal" class="bg-yellow-600 hover:bg-yellow-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">⬇️ Chỉ Tải Voice</button>
@@ -155,7 +162,8 @@
                                             <div v-for="v in (para.videos || []).filter(v => v.sentenceId == s.id).sort((a,b) => a.order - b.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
                                                 :class="v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-700'">
                                                 <button @click="deleteAsset(v, para)" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
-                                                <video muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v, 'video', para)" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
+                                                <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v, 'video', para)" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
+                                                <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.relativePath }}</a>
                                                 <div class="flex gap-1">
                                                     <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                                     <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
@@ -174,7 +182,8 @@
                                             <div v-for="img in (para.images || []).filter(img => img.sentenceId == s.id).sort((a,b) => a.order - b.order)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
                                                 :class="img.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-700'">
                                                 <button @click="deleteAsset(img, para)" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
-                                                <img :src="img.url" @click="openPreview(img, 'image', para)" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
+                                                <img v-if="previewMode" :src="img.url" @click="openPreview(img, 'image', para)" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
+                                                <a v-else :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ img.relativePath }}</a>
                                                 <div class="flex gap-1">
                                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                                     <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
@@ -209,10 +218,11 @@
                             <div v-for="v in (para.videos || []).filter(v => v.sentenceId === null)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
                                 :class="v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
                                 <button @click="deleteAsset(v, para)" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
-                                <video muted loop preload="metadata" :src="v.url"
+                                <video v-if="previewMode" muted loop preload="metadata" :src="v.url"
                                     @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()"
                                     @click="openPreview(v, 'video', para)"
                                     class="w-full h-24 object-cover rounded mb-1 bg-black cursor-pointer"></video>
+                                <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline py-2">{{ v.relativePath }}</a>
                                 <div class="flex gap-1">
                                     <span v-if="v.selected" class="text-[9px] font-black py-1 px-2 rounded bg-blue-600 text-white min-w-[24px] text-center">#{{ v.order }}</span>
                                     <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-1 rounded uppercase transition-colors"
@@ -245,8 +255,14 @@
                             <div v-for="img in (para.images || []).filter(img => img.sentenceId === null)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border"
                                 :class="img.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
                                 <div class="relative">
-                                    <img :src="img.url" @click="openPreview(img, 'image', para)" class="w-full h-16 object-cover rounded mb-1 cursor-pointer">
-                                    <button @click="deleteAsset(img, para)" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
+                                    <template v-if="previewMode">
+                                        <img :src="img.url" @click="openPreview(img, 'image', para)" class="w-full h-16 object-cover rounded mb-1 cursor-pointer">
+                                        <button @click="deleteAsset(img, para)" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
+                                    </template>
+                                    <template v-else>
+                                        <button @click="deleteAsset(img, para)" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
+                                        <a :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline py-2">{{ img.relativePath }}</a>
+                                    </template>
                                 </div>
                                 <div class="flex gap-1">
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white min-w-[20px] text-center">#{{ img.order }}</span>
@@ -849,6 +865,7 @@ createApp({
         const sentenceModal = ref({ open: false, asset: null, para: null, type: '', sentences: [] });
         const previewModal = ref({ open: false, type: '', asset: null, para: null });
         const page = ref('posts');
+        const previewMode = ref(true);
         const profileModal = ref({ list: [], bulkText: '', cmds: [], addOpen: false, fileName: '' });
 
         const newProjectModal = ref({
@@ -1877,6 +1894,7 @@ createApp({
             onDropFiles,
             onSelectFiles,
             submitUpload,
+            previewMode,
             previewModal,
             openPreview,
             closePreview,
