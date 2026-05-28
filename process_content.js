@@ -130,6 +130,8 @@ async function analyzeWithGPT5(topic, sources) {
                         title_target: { type: 'string' },
                         content_vi: { type: 'string' },
                         content_target: { type: 'string' },
+                        image: { type: 'array', items: { type: 'string' } },
+                        video: { type: 'array', items: { type: 'string' } },
                         luan_cu: {
                             type: 'array',
                             items: {
@@ -148,7 +150,7 @@ async function analyzeWithGPT5(topic, sources) {
                             }
                         }
                     },
-                    required: ['title_vi', 'title_target', 'content_vi', 'content_target', 'luan_cu'],
+                    required: ['title_vi', 'title_target', 'content_vi', 'content_target', 'image', 'video', 'luan_cu'],
                     additionalProperties: false
                 }
             },
@@ -284,10 +286,10 @@ async function analyzeWithGPT5(topic, sources) {
         '- _target = ' + targetLang + '.',
         '',
         'MEDIA:',
-        '- Trong moi luan_cu, voi MOI nguon duoc su dung phai lay:',
-        '  + 2 URL anh',
-        '  + 2 URL video footage',
-        '- Nghia la moi nguon rieng le deu phai co du 2 anh va 2 video.',
+        '- Trong moi luan_diem, luan_cu, voi MOI nguon duoc su dung phai lay:',
+        '  + 5 URL anh',
+        '  + 5 URL video footage',
+        '- Nghia la moi nguon rieng le deu phai co du 5 anh va 5 video.',
         '- Footage va hinh anh phai sat voi noi dung dang duoc nhac toi.',
         '- Media phai co cam giac dang ho tro ke chuyen, khong chi minh hoa thong tin.',
         '- Uu tien footage co tinh cinematic va mang cam giac geopolitical documentary.',
@@ -421,6 +423,7 @@ async function saveToDb(projectId, result) {
                 doan._paragraphId = paragraphId;
                 doan._gid = gid;
             }
+            cau._paragraphId = paragraphId;
         }
         await db.run('COMMIT');
         console.log(`[process_content] ✅ Đã lưu ${result.luan_diem.length} luận điểm vào DB`);
@@ -429,63 +432,34 @@ async function saveToDb(projectId, result) {
         throw e;
     }
 
-    // Tải ảnh/video sau khi commit transaction
-    for (let i = 0; i < result.luan_diem.length; i++) {
-        const cau = result.luan_diem[i];
-        const gid = String(i + 1);
-        for (let j = 0; j < cau.luan_cu.length; j++) {
-            const doan = cau.luan_cu[j];
-            const sentenceId = doan._sentenceId;
-            const paragraphId = doan._paragraphId;
-
-                // Tải ảnh từ doan.image
-                for (let ai = 0; ai < (doan.image || []).length; ai++) {
-                    const url = doan.image[ai];
-                    if (!url || !url.startsWith('http')) continue;
-                    try {
-                        const imgDir = path.join(BASE_DIR, projectId, 'assets', '_raw_images', gid);
-                        if (!fs.existsSync(imgDir)) fs.mkdirSync(imgDir, { recursive: true });
-                        const ext = url.includes('.png') ? 'png' : url.includes('.webp') ? 'webp' : 'jpg';
-                        const fileName = `gpt_${j + 1}_${ai + 1}.${ext}`;
-                        const savePath = path.join(imgDir, fileName);
-                        const relativePath = path.join(projectId, 'assets', '_raw_images', gid, fileName);
-                        const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
-                        if (!exists) {
-                            const res = await httpsGet(url);
-                            if (res) {
-                                fs.writeFileSync(savePath, res);
-                                await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, ?, ?, ?)', [paragraphId, sentenceId, 'image', relativePath]);
-                                console.log(`[process_content] Ảnh ${ai + 1} của luận cứ ${j + 1} đã lưu`);
-                            }
-                        }
-                    } catch(e) { console.log(`[process_content] Lỗi tải ảnh: ${e.message}`); }
-                }
-
-                // Tải video từ doan.video
-                for (let vi = 0; vi < (doan.video || []).length; vi++) {
-                    const url = doan.video[vi];
-                    if (!url || !url.startsWith('http')) continue;
-                    try {
-                        const vidDir = path.join(BASE_DIR, projectId, 'assets', '_raw_videos', gid);
-                        if (!fs.existsSync(vidDir)) fs.mkdirSync(vidDir, { recursive: true });
-                        const fileName = `gpt_${j + 1}_${vi + 1}.mp4`;
-                        const savePath = path.join(vidDir, fileName);
-                        const relativePath = path.join(projectId, 'assets', '_raw_videos', gid, fileName);
-                        const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
-                        if (!exists) {
-                            const res = await httpsGet(url);
-                            if (res && res.length > 50 * 1024) {
-                                fs.writeFileSync(savePath, res);
-                                await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, ?, ?, ?)', [paragraphId, sentenceId, 'video', relativePath]);
-                                console.log(`[process_content] Video ${vi + 1} của luận cứ ${j + 1} đã lưu`);
-                            }
-                        }
-                    } catch(e) { console.log(`[process_content] Lỗi tải video: ${e.message}`); }
-                }
+    // Lưu URL ảnh/video thẳng vào Asset
+    for (const cau of result.luan_diem) {
+        // Ảnh/video của luan_diem (paragraph)
+        for (const url of (cau.image || [])) {
+            if (!url || !url.startsWith('http')) continue;
+            const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [url]);
+            if (!exists) await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [cau._paragraphId, 'image', url]);
+        }
+        for (const url of (cau.video || [])) {
+            if (!url || !url.startsWith('http')) continue;
+            const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [url]);
+            if (!exists) await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [cau._paragraphId, 'video', url]);
+        }
+        // Ảnh/video của luan_cu (sentence)
+        for (const doan of cau.luan_cu) {
+            const { _sentenceId: sentenceId, _paragraphId: paragraphId } = doan;
+            for (const url of (doan.image || [])) {
+                if (!url || !url.startsWith('http')) continue;
+                const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [url]);
+                if (!exists) await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, ?, ?, ?)', [paragraphId, sentenceId, 'image', url]);
+            }
+            for (const url of (doan.video || [])) {
+                if (!url || !url.startsWith('http')) continue;
+                const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [url]);
+                if (!exists) await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, ?, ?, ?)', [paragraphId, sentenceId, 'video', url]);
+            }
         }
     }
-
-    // Lưu tóm tắt
     const summaryPath = path.join(BASE_DIR, projectId, 'summary.json');
     fs.writeFileSync(summaryPath, JSON.stringify({
         title: result.title,
