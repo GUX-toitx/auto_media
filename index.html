@@ -123,6 +123,14 @@
                                 <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300" @click="toggleSection(para, 'sentencesOpen')">
                                     {{ para.sentencesOpen ? '▼' : '▶' }} Sentences ({{ (para.sentences || []).length }})
                                 </div>
+                                <!-- Keywords -->
+                                <div class="flex flex-wrap gap-1 mt-1 items-center">
+                                    <span v-for="kw in (para.keywords || [])" :key="kw.id" class="keyword-tag text-[10px]">
+                                        {{ kw.content }}
+                                        <b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteKeyword(kw, para)">×</b>
+                                    </span>
+                                    <input @keydown.enter="addKeyword($event, para, null)" placeholder="+ keyword" class="bg-transparent border border-dashed border-gray-700 rounded px-2 py-0.5 text-[10px] text-gray-400 outline-none w-28 focus:border-gray-500">
+                                </div>
                             </div>
                             <div v-if="para.sentencesOpen" class="space-y-1">
                                 <div v-for="(s, si) in (para.sentences || []).slice().sort((a,b) => a.order - b.order)" :key="s.id" class="bg-gray-900/60 border border-gray-800 rounded-lg p-2 space-y-1.5">
@@ -808,11 +816,6 @@
             <!-- Nguồn -->
             <div>
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Nguồn tin</label>
-                <div class="flex flex-wrap gap-2 mb-2">
-                    <button v-for="src in newProjectModal.sourceOptions" :key="src"
-                        @click="newProjectModal.toggleSource(src)"
-                        :class="['px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all border', newProjectModal.selectedSources.includes(src) ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500']">{{ src }}</button>
-                </div>
                 <div class="flex gap-2">
                     <input v-model="newProjectModal.customSource" type="text" placeholder="Nguồn khác (free text)..."
                         class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-blue-500">
@@ -874,8 +877,8 @@ createApp({
             customSource: '',
             targetLang: 'en',
             loading: false,
-            selectedSources: ['Reuters', 'AP', 'BBC', 'CNN', 'DW', 'Al Jazeera', 'NATO', 'Bộ Quốc phòng Nga', 'YouTube chính thức'],
-            sourceOptions: ['Reuters', 'AP', 'BBC', 'CNN', 'DW', 'Al Jazeera', 'NATO', 'Bộ Quốc phòng Nga', 'YouTube chính thức'],
+            selectedSources: ['https://www.storyblocks.com/','https://www.shutterstock.com/','https://www.pexels.com/','https://www.reuters.com/','https://www.reutersconnect.com/','https://apnews.com/','https://www.bloomberg.com/asia','https://www.ft.com/','https://www.bbc.com/','https://edition.cnn.com/','https://www.aljazeera.com/','http://en.kremlin.ru/','https://x.com/Reuters','https://vnexpress.net/','https://www.vietnamplus.vn/','https://dantri.com.vn/','https://thanhnien.vn/'],
+            sourceOptions: ['https://www.storyblocks.com/','https://www.shutterstock.com/','https://www.pexels.com/','https://www.reuters.com/','https://www.reutersconnect.com/','https://apnews.com/','https://www.bloomberg.com/asia','https://www.ft.com/','https://www.bbc.com/','https://edition.cnn.com/','https://www.aljazeera.com/','http://en.kremlin.ru/','https://x.com/Reuters','https://vnexpress.net/','https://www.vietnamplus.vn/','https://dantri.com.vn/','https://thanhnien.vn/'],
             langOptions: [
                 { code: 'en', name: 'Tiếng Anh' },
                 { code: 'ja', name: 'Tiếng Nhật' },
@@ -1038,19 +1041,18 @@ createApp({
 
         function removeKeyword(para, ki) { para.keywords.splice(ki, 1); saveContent(para, true); }
 
-        async function addKeyword(e, para) {
+        async function deleteKeyword(kw, para) {
+            await fetch('/api/delete-keyword', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keywordId: kw.id }) });
+            para.keywords = para.keywords.filter(k => k.id !== kw.id);
+        }
+
+        async function addKeyword(e, para, type) {
             const kw = e.target.value.trim();
             if (!kw) return;
             e.target.value = '';
-            para.keywords.push(kw);
-            showToast(`Đang tải media cho "${kw}"...`);
-            await fetchMedia(para, [kw]);
-            // reload para assets
-            const res = await fetch(`/api/posts/${activePostId.value}`);
-            const data = await res.json();
-            const updated = data.paragraphs.find(p => p.id === para.id);
-            if (updated) { para.videos = updated.videos || []; para.images = updated.images || []; }
-            showToast('✅ Đã tải xong!');
+            const r = await fetch('/api/add-keyword', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paragraphId: para.id, content: kw, type }) });
+            const { id } = await r.json();
+            para.keywords.push({ id, content: kw, type });
         }
 
         async function saveContent(para, silent = false) {
@@ -1784,15 +1786,12 @@ createApp({
             }
         };
 
-        // Theo dõi trạng thái của Project hiện tại. Hễ Crawling thì bật Polling, xong thì tự tắt.
+        // Polling media mỗi 5s khi đang xem post
         watch(
-            () => posts.value.find(p => p.id === activePostId.value)?.status,
-            (newStatus) => {
-                if (newStatus === 'crawling') {
-                    startMediaPolling();
-                } else {
-                    stopMediaPolling();
-                }
+            () => activePostId.value,
+            (newId) => {
+                if (newId) startMediaPolling();
+                else stopMediaPolling();
             },
             { immediate: true }
         );
@@ -1838,6 +1837,7 @@ createApp({
             toggleSection,
             removeKeyword,
             addKeyword,
+            deleteKeyword,
             saveContent,
             fetchMedia,
             deleteAsset,

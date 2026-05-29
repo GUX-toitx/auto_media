@@ -90,6 +90,7 @@ export async function initDB() {
 
     await db.run('ALTER TABLE Post RENAME COLUMN title TO project_id').catch(() => {});
     await db.run('ALTER TABLE Post RENAME COLUMN tieu_de TO title').catch(() => {});
+    await db.run('ALTER TABLE Keyword ADD COLUMN type TEXT DEFAULT NULL').catch(() => {});
     return db;
 }
 

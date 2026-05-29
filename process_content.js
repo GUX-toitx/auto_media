@@ -130,8 +130,7 @@ async function analyzeWithGPT5(topic, sources) {
                         title_target: { type: 'string' },
                         content_vi: { type: 'string' },
                         content_target: { type: 'string' },
-                        image: { type: 'array', items: { type: 'string' } },
-                        video: { type: 'array', items: { type: 'string' } },
+                        keywords: { type: 'array', items: { type: 'string' } },
                         luan_cu: {
                             type: 'array',
                             items: {
@@ -141,16 +140,14 @@ async function analyzeWithGPT5(topic, sources) {
                                     title_target: { type: 'string' },
                                     content_vi: { type: 'string' },
                                     content_target: { type: 'string' },
-                                    image: { type: 'array', items: { type: 'string' } },
-                                    video: { type: 'array', items: { type: 'string' } },
-                                    source: { type: 'array', items: { type: 'string' } }
+                                    keywords: { type: 'array', items: { type: 'string' } }
                                 },
-                                required: ['title_vi', 'title_target', 'content_vi', 'content_target', 'image', 'video', 'source'],
+                                required: ['title_vi', 'title_target', 'content_vi', 'content_target', 'keywords'],
                                 additionalProperties: false
                             }
                         }
                     },
-                    required: ['title_vi', 'title_target', 'content_vi', 'content_target', 'image', 'video', 'luan_cu'],
+                    required: ['title_vi', 'title_target', 'content_vi', 'content_target', 'keywords', 'luan_cu'],
                     additionalProperties: false
                 }
             },
@@ -285,16 +282,11 @@ async function analyzeWithGPT5(topic, sources) {
         '- _vi = tieng Viet.',
         '- _target = ' + targetLang + '.',
         '',
-        'MEDIA:',
-        '- Trong moi luan_diem, luan_cu, voi MOI nguon duoc su dung phai lay:',
-        '  + 5 URL anh',
-        '  + 5 URL video footage',
-        '- Nghia la moi nguon rieng le deu phai co du 5 anh va 5 video.',
-        '- Footage va hinh anh phai sat voi noi dung dang duoc nhac toi.',
-        '- Media phai co cam giac dang ho tro ke chuyen, khong chi minh hoa thong tin.',
-        '- Uu tien footage co tinh cinematic va mang cam giac geopolitical documentary.',
-        '- Uu tien footage satellite, ban do, drone, trade route, military movement, summit, port, skyline va global logistics.',
-        '- Uu tien shutterstock, storyblock, Reuters, AP, AFP, BBC, DW, CNA, Bloomberg, Al Jazeera, CNBC, VnExpress, Bao VietNamNet, Bao Thanh Nien, Bao Tuoi Tre, Bao Nhan Dan va official YouTube.',
+        'MEDIA KEYWORDS:',
+        '- Voi moi luan_diem va luan_cu, tao keywords la mang 3-5 keyword tieng Anh de search footage.',
+        '- Keyword theo phong cach cinematic footage, cu the, dung duoc tren Storyblocks/Shutterstock/Pexels.',
+        '- Vi du: satellite view military base, missile launch slow motion, warship sailing ocean cinematic.',
+        '- Keyword phai sat voi noi dung cu the cua tung luan_cu, khong chung chung.',
         '',
         'KET BAI: tuong ung voi conclusion',
         '- BAT BUOC phai co phan conclusion_vi va conclusion_target rieng.',
@@ -401,9 +393,6 @@ async function saveToDb(projectId, result) {
             const iFolder = path.join(BASE_DIR, projectId, 'assets', '_raw_images', gid);
             [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 
-            
-            await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [paragraphId, cau.title_vi]);
-
             // Mỗi luan_cu = 1 Sentence (không split câu)
             for (let j = 0; j < cau.luan_cu.length; j++) {
                 const doan = cau.luan_cu[j];
@@ -432,31 +421,14 @@ async function saveToDb(projectId, result) {
         throw e;
     }
 
-    // Lưu URL ảnh/video thẳng vào Asset
+    // Lưu keywords vào bảng Keyword
     for (const cau of result.luan_diem) {
-        // Ảnh/video của luan_diem (paragraph)
-        for (const url of (cau.image || [])) {
-            if (!url || !url.startsWith('http')) continue;
-            const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [url]);
-            if (!exists) await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [cau._paragraphId, 'image', url]);
+        for (const kw of (cau.keywords || [])) {
+            if (kw) await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [cau._paragraphId, kw]);
         }
-        for (const url of (cau.video || [])) {
-            if (!url || !url.startsWith('http')) continue;
-            const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [url]);
-            if (!exists) await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [cau._paragraphId, 'video', url]);
-        }
-        // Ảnh/video của luan_cu (sentence)
         for (const doan of cau.luan_cu) {
-            const { _sentenceId: sentenceId, _paragraphId: paragraphId } = doan;
-            for (const url of (doan.image || [])) {
-                if (!url || !url.startsWith('http')) continue;
-                const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [url]);
-                if (!exists) await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, ?, ?, ?)', [paragraphId, sentenceId, 'image', url]);
-            }
-            for (const url of (doan.video || [])) {
-                if (!url || !url.startsWith('http')) continue;
-                const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [url]);
-                if (!exists) await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, ?, ?, ?)', [paragraphId, sentenceId, 'video', url]);
+            for (const kw of (doan.keywords || [])) {
+                if (kw) await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [doan._paragraphId, kw]);
             }
         }
     }

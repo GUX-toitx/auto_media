@@ -67,9 +67,9 @@ app.get('/api/posts/:postId', async (req, res) => {
 
             // Keywords từ DB
             para.keywords = (await db.all(
-                'SELECT content FROM Keyword WHERE paragraph_id = ? ORDER BY id',
+                'SELECT id, content, type FROM Keyword WHERE paragraph_id = ? ORDER BY id',
                 [para.id]
-            )).map(r => r.content);
+            ));
 
             // File media từ DB
             const assets = await db.all(
@@ -102,6 +102,28 @@ app.get('/api/posts/:postId', async (req, res) => {
 
         await db.close();
         res.json({ ...post, projectId, paragraphs });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API: Thêm keyword
+app.post('/api/add-keyword', async (req, res) => {
+    const { paragraphId, content, type } = req.body;
+    try {
+        const db = await getDb();
+        const r = await db.run('INSERT INTO Keyword (paragraph_id, content, type) VALUES (?, ?, ?)', [paragraphId, content, type || null]);
+        await db.close();
+        res.json({ id: r.lastID });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API: Xóa keyword
+app.post('/api/delete-keyword', async (req, res) => {
+    const { keywordId } = req.body;
+    try {
+        const db = await getDb();
+        await db.run('DELETE FROM Keyword WHERE id = ?', [keywordId]);
+        await db.close();
+        res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
