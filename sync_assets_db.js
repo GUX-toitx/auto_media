@@ -197,7 +197,7 @@ async function main() {
                 NOT EXISTS (SELECT 1 FROM Asset a WHERE a.paragraph_id = para.id AND a.type = 'image')
                 OR NOT EXISTS (SELECT 1 FROM Asset a WHERE a.paragraph_id = para.id AND a.type = 'video')
             )
-            ORDER BY para.id DESC LIMIT 20
+            ORDER BY para.id ASC LIMIT 20
         `);
 
         if (paragraphsToProcess.length === 0) {

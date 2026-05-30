@@ -912,10 +912,9 @@ async function processNextInQueue() {
                         : scene.text;
 
                     // 4. Insert Cảnh vào DB (content = ngôn ngữ đích, original_content = tiếng Việt)
-                    const maxOrder = await db.get('SELECT COALESCE(MAX("order"), 0) as max FROM Paragraph WHERE post_id = ?', [dbPostId]);
                     const paraRes = await db.run(
                         'INSERT INTO Paragraph (post_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
-                        [dbPostId, scene.text, viParagraph, maxOrder.max + 1]
+                        [dbPostId, scene.text, viParagraph, i + 1]
                     );
 
                     // Lưu ID thật của Cảnh trong DB vào object scene để Lát nữa xài
@@ -949,10 +948,12 @@ async function processNextInQueue() {
                 
                 for (let i = 0; i < allScenes.length; i++) {
                     const scene = allScenes[i];
-                    console.log(`   - [Cảnh ${scene.gid}] Đang tải media (Chế độ Đa Luồng)...`);
+                    const currentGid = scene.gid;
+                    const currentParagraphId = scene.dbParagraphId;
+                    console.log(`   - [Cảnh ${currentGid}/${allScenes.length}] paragraphId=${currentParagraphId} Bắt đầu tải media...`);
                     
-                    const vFolder = path.join(targetDir, 'assets', '_raw_videos', scene.gid);
-                    const iFolder = path.join(targetDir, 'assets', '_raw_images', scene.gid);
+                    const vFolder = path.join(targetDir, 'assets', '_raw_videos', currentGid);
+                    const iFolder = path.join(targetDir, 'assets', '_raw_images', currentGid);
                     
                     const mediaTasks = [];
                     for (const kw of scene.kws) {
@@ -961,58 +962,44 @@ async function processNextInQueue() {
                     }
 
                     // Định nghĩa hàm Sync DB trước
-                    const syncAssetsToDB = async (folderPath, assetType, paragraphIdToLink) => {
+                    const syncAssetsToDB = async (folderPath, assetType) => {
                         const videoExts = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm']);
                         const imageExts = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif']);
                         const validExts = assetType === 'video' ? videoExts : imageExts;
                         const subDir = assetType === 'video' ? '_raw_videos' : '_raw_images';
-                        
                         if (!fs.existsSync(folderPath)) return;
-                        
                         const files = fs.readdirSync(folderPath).filter(f => f.startsWith('stock_') && validExts.has(path.extname(f).toLowerCase()));
                         for (const file of files) {
-                            const relativePath = path.join(projectId, 'assets', subDir, scene.gid, file);
+                            const relativePath = path.join(projectId, 'assets', subDir, currentGid, file);
                             const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
                             if (!exists) {
-                                // IN RA LOG ĐỂ BẠN THẤY NÓ LƯU REAL-TIME
-                                console.log(`      [LIVE SYNC] Vừa lưu ngay 1 ${assetType} vào DB cho Cảnh ${scene.gid}`);
-                                await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [paragraphIdToLink, assetType, relativePath]);
+                                console.log(`      [LIVE SYNC] Cảnh ${currentGid} paragraphId=${currentParagraphId}: lưu ${assetType} ${file}`);
+                                await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [currentParagraphId, assetType, relativePath]);
                             }
                         }
                     };
 
-                    // 🟢 CHIẾN THUẬT MỚI: ĐỒNG BỘ LIÊN TỤC TRONG LÚC TẢI
                     let isSceneDownloading = true;
-                    
-                    // Tạo một vòng lặp ngầm: Cứ 2 giây quét ổ cứng 1 lần, thấy file mới là nhét vào DB
                     const liveSyncTask = async () => {
                         while (isSceneDownloading) {
-                            try { // <--- THÊM TRY CATCH Ở ĐÂY
-                                await syncAssetsToDB(vFolder, 'video', scene.dbParagraphId);
-                                await syncAssetsToDB(iFolder, 'image', scene.dbParagraphId);
-                            } catch (err) {
-                                // Nếu DB bị kẹt (locked), cứ lờ đi để vòng sau (2s sau) nó tự làm lại
-                                // Không in ra log để đỡ rác màn hình
-                            }
-                            await sleep(2000); 
+                            try {
+                                await syncAssetsToDB(vFolder, 'video');
+                                await syncAssetsToDB(iFolder, 'image');
+                            } catch (err) {}
+                            await sleep(2000);
                         }
                     };
-                    
-                    // Kích hoạt vòng lặp chạy song song (Lưu ý: KHÔNG dùng chữ await ở đây)
+
                     const syncPromise = liveSyncTask();
-
-                    // 🟢 BẮT ĐẦU CHẠY ĐA LUỒNG TẢI MEDIA
                     await runConcurrently(mediaTasks, 4);
-
-                    // Khi hàm tải xong, báo hiệu cho vòng lặp Live Sync dừng lại
                     isSceneDownloading = false;
-                    await syncPromise; // Chờ vòng lặp kết thúc hẳn để chống lỗi RAM
-                    
-                    // Chạy quét vét đáy 1 lần cuối cùng cho chắc cốp không sót file nào
-                    await syncAssetsToDB(vFolder, 'video', scene.dbParagraphId);
-                    await syncAssetsToDB(iFolder, 'image', scene.dbParagraphId);
+                    await syncPromise;
 
-                    await sleep(2000); // Nghỉ 2s trước khi qua cảnh tiếp theo
+                    // Quét vét lần cuối
+                    await syncAssetsToDB(vFolder, 'video');
+                    await syncAssetsToDB(iFolder, 'image');
+                    console.log(`   - [Cảnh ${currentGid}] ✅ Xong, chuyển sang cảnh tiếp theo`);
+                    await sleep(2000);
                 }
             }
         }

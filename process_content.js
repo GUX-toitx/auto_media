@@ -130,7 +130,8 @@ async function analyzeWithGPT5(topic, sources) {
                         title_target: { type: 'string' },
                         content_vi: { type: 'string' },
                         content_target: { type: 'string' },
-                        keywords: { type: 'array', items: { type: 'string' } },
+                        keywords_factual: { type: 'array', items: { type: 'string' } },
+                        keywords_cinematic: { type: 'array', items: { type: 'string' } },
                         luan_cu: {
                             type: 'array',
                             items: {
@@ -140,14 +141,16 @@ async function analyzeWithGPT5(topic, sources) {
                                     title_target: { type: 'string' },
                                     content_vi: { type: 'string' },
                                     content_target: { type: 'string' },
-                                    keywords: { type: 'array', items: { type: 'string' } }
+                                    keywords_factual: { type: 'array', items: { type: 'string' } },
+                                    keywords_cinematic: { type: 'array', items: { type: 'string' } }
                                 },
-                                required: ['title_vi', 'title_target', 'content_vi', 'content_target', 'keywords'],
+                                required: ['title_vi', 'title_target', 'content_vi', 'content_target', 'keywords_factual', 'keywords_cinematic'],
                                 additionalProperties: false
                             }
                         }
                     },
-                    required: ['title_vi', 'title_target', 'content_vi', 'content_target', 'keywords', 'luan_cu'],
+                    // Đã xóa image và video khỏi required
+                    required: ['title_vi', 'title_target', 'content_vi', 'content_target', 'keywords_factual', 'keywords_cinematic', 'luan_cu'],
                     additionalProperties: false
                 }
             },
@@ -283,11 +286,16 @@ async function analyzeWithGPT5(topic, sources) {
         '- _target = ' + targetLang + '.',
         '',
         'MEDIA KEYWORDS:',
-        '- Voi moi luan_diem va luan_cu, tao keywords la mang 3-5 keyword tieng Anh de search footage.',
-        '- Keyword theo phong cach cinematic footage, cu the, dung duoc tren Storyblocks/Shutterstock/Pexels.',
-        '- Vi du: satellite view military base, missile launch slow motion, warship sailing ocean cinematic.',
-        '- Keyword phai sat voi noi dung cu the cua tung luan_cu, khong chung chung.',
-        '',
+        '- Voi moi luan_diem va luan_cu, BAT BUOC phai tao 2 loai keyword tieng Anh tach biet de phuc vu he thong render tự động.',
+        '- 1. keywords_factual: 3-5 tu khoa SỰ KIỆN THỰC TẾ de bot tim kiem tren bao chi (AP News, Reuters).',
+        '  + CHI su dung danh tu rieng, ten chinh tri gia, dia danh, vu khi, hoac hanh dong the hien su kien.',
+        '  + TUYET DOI KHONG dung tu mieu ta goc may, nghe thuat hay anh sang.',
+        '  + Vi du ĐÚNG: "US Navy South China Sea", "Donald Trump press conference", "C-130J aircraft maintenance".',
+        '  + Vi du SAI: "radar screen glow", "military warship cinematic".',
+        '- 2. keywords_cinematic: 3-5 tu khoa B-ROLL NGHE THUAT de search tren Storyblocks/Envato.',
+        '  + Mieu ta chi tiet goc may quay, cam xuc, boi canh hoac chi tiet dac ta mang tinh bieu tuong.',
+        '  + Vi du: "radar screen glow macro", "satellite data flow animation", "politician shadow walking steadycam".',
+        '- Tu khoa phai cuc ky sat voi noi dung cua tung luan_cu, khong duoc lay chung chung.',
         'KET BAI: tuong ung voi conclusion',
         '- BAT BUOC phai co phan conclusion_vi va conclusion_target rieng.',
         '- Ket bai chi can mot dong narrative tong ket, KHONG chia luan cu.',
@@ -377,40 +385,21 @@ async function saveToDb(projectId, result) {
     try {
         for (let i = 0; i < result.luan_diem.length; i++) {
             const cau = result.luan_diem[i];
-            // Paragraph = Luận điểm
-            
-            
-            // Keyword = title luận điểm
             const paraRes = await db.run(
                 'INSERT INTO Paragraph (post_id, content, content_vi, title, title_vi, "order") VALUES (?, ?, ?, ?, ?, ?)',
                 [postId, stripLinks(cau.content_target), stripLinks(cau.content_vi), stripLinks(cau.title_target), stripLinks(cau.title_vi), i + 1]
             );
             const paragraphId = paraRes.lastID;
 
-            // Tạo folder assets
-            const gid = String(i + 1);
-            const vFolder = path.join(BASE_DIR, projectId, 'assets', '_raw_videos', gid);
-            const iFolder = path.join(BASE_DIR, projectId, 'assets', '_raw_images', gid);
-            [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
-
-            // Mỗi luan_cu = 1 Sentence (không split câu)
             for (let j = 0; j < cau.luan_cu.length; j++) {
                 const doan = cau.luan_cu[j];
-
-                // Lưu metadata image/video/source
-                const metaPath = path.join(BASE_DIR, projectId, 'assets', `meta_${gid}_${j + 1}.json`);
-                fs.writeFileSync(metaPath, JSON.stringify({ image: doan.image || [], video: doan.video || [], source: doan.source || [] }, null, 2));
-
                 sentenceOrder++;
                 const sentenceRes = await db.run(
                     'INSERT INTO Sentence (paragraph_id, content, content_vi, title, title_vi, "order") VALUES (?, ?, ?, ?, ?, ?)',
                     [paragraphId, stripLinks(doan.content_target), stripLinks(doan.content_vi), stripLinks(doan.title_target), stripLinks(doan.title_vi), sentenceOrder]
                 );
-                const sentenceId = sentenceRes.lastID;
-                // Luu sentenceId de tai anh/video sau khi commit
-                doan._sentenceId = sentenceId;
+                doan._sentenceId = sentenceRes.lastID;
                 doan._paragraphId = paragraphId;
-                doan._gid = gid;
             }
             cau._paragraphId = paragraphId;
         }
@@ -421,15 +410,17 @@ async function saveToDb(projectId, result) {
         throw e;
     }
 
-    // Lưu keywords vào bảng Keyword
+    // Lưu keywords
     for (const cau of result.luan_diem) {
-        for (const kw of (cau.keywords || [])) {
-            if (kw) await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [cau._paragraphId, kw]);
-        }
+        for (const kw of (cau.keywords_factual || []))
+            if (kw) await db.run('INSERT INTO Keyword (paragraph_id, content, type) VALUES (?, ?, ?)', [cau._paragraphId, kw, 'factual']);
+        for (const kw of (cau.keywords_cinematic || []))
+            if (kw) await db.run('INSERT INTO Keyword (paragraph_id, content, type) VALUES (?, ?, ?)', [cau._paragraphId, kw, 'cinematic']);
         for (const doan of cau.luan_cu) {
-            for (const kw of (doan.keywords || [])) {
-                if (kw) await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [doan._paragraphId, kw]);
-            }
+            for (const kw of (doan.keywords_factual || []))
+                if (kw) await db.run('INSERT INTO Keyword (paragraph_id, content, type) VALUES (?, ?, ?)', [doan._paragraphId, kw, 'factual']);
+            for (const kw of (doan.keywords_cinematic || []))
+                if (kw) await db.run('INSERT INTO Keyword (paragraph_id, content, type) VALUES (?, ?, ?)', [doan._paragraphId, kw, 'cinematic']);
         }
     }
     const summaryPath = path.join(BASE_DIR, projectId, 'summary.json');
