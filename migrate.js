@@ -32,6 +32,7 @@ export async function initDB() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             paragraph_id INTEGER,
             content TEXT,
+            type TEXT DEFAULT NULL,
             FOREIGN KEY(paragraph_id) REFERENCES Paragraph(id)
         );
         CREATE TABLE IF NOT EXISTS Sentence (
@@ -67,8 +68,15 @@ export async function initDB() {
     // ALTER migrations (bỏ qua nếu cột đã tồn tại)
     await db.run('ALTER TABLE Post ADD COLUMN status TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN silence_duration REAL DEFAULT 1').catch(() => {});
-    await db.run('ALTER TABLE Sentence ADD COLUMN sentence_uuid TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN title TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN mo_bai TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN mo_bai_vi TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN mo_bai_audio TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN mo_bai_vi_audio TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN voice_content_type TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN summary TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN summary_vi TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN summary_audio TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN summary_vi_audio TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN summary_target TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN summary_target_audio TEXT DEFAULT NULL').catch(() => {});
@@ -76,21 +84,29 @@ export async function initDB() {
     await db.run('ALTER TABLE Post ADD COLUMN conclusion_vi_audio TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN conclusion_target TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN conclusion_target_audio TEXT DEFAULT NULL').catch(() => {});
-    // hook = hook target lang, hook_vi = hook tiếng Việt
     await db.run('ALTER TABLE Post ADD COLUMN hook TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN hook_vi TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN hook_audio TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN hook_vi_audio TEXT DEFAULT NULL').catch(() => {});
-    
-    
-    
-    
-    
-
-
+    await db.run('ALTER TABLE Sentence ADD COLUMN sentence_uuid TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Sentence ADD COLUMN title TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Sentence ADD COLUMN title_vi TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Sentence ADD COLUMN content_vi TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Sentence ADD COLUMN content_audio TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Sentence ADD COLUMN content_vi_audio TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Sentence ADD COLUMN title_audio TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Sentence ADD COLUMN title_vi_audio TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Paragraph ADD COLUMN title TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Paragraph ADD COLUMN title_vi TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Paragraph ADD COLUMN content_vi TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Paragraph ADD COLUMN content_audio TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Paragraph ADD COLUMN content_vi_audio TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Paragraph ADD COLUMN title_audio TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Paragraph ADD COLUMN title_vi_audio TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Keyword ADD COLUMN type TEXT DEFAULT NULL').catch(() => {});
+    // Rename migrations
     await db.run('ALTER TABLE Post RENAME COLUMN title TO project_id').catch(() => {});
     await db.run('ALTER TABLE Post RENAME COLUMN tieu_de TO title').catch(() => {});
-    await db.run('ALTER TABLE Keyword ADD COLUMN type TEXT DEFAULT NULL').catch(() => {});
     return db;
 }
 
