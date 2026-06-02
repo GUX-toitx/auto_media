@@ -104,6 +104,10 @@ export async function initDB() {
     await db.run('ALTER TABLE Paragraph ADD COLUMN title_audio TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Paragraph ADD COLUMN title_vi_audio TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Keyword ADD COLUMN type TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Keyword ADD COLUMN post_id INTEGER DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Keyword ADD COLUMN section TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Asset ADD COLUMN post_id INTEGER DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Asset ADD COLUMN section TEXT DEFAULT NULL').catch(() => {});
     // Rename migrations
     await db.run('ALTER TABLE Post RENAME COLUMN title TO project_id').catch(() => {});
     await db.run('ALTER TABLE Post RENAME COLUMN tieu_de TO title').catch(() => {});

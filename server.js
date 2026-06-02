@@ -47,6 +47,19 @@ app.get('/api/posts/:postId', async (req, res) => {
         const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, summary, summary_vi, summary_audio, summary_vi_audio, summary_target, summary_target_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio FROM Post WHERE id = ?', [req.params.postId]);
         if (!post) return res.status(404).json({ error: 'Post not found' });
 
+        // Lấy keywords và assets cho từng section của post
+        const sections = {};
+        for (const section of ['hook', 'summary', 'conclusion']) {
+            const kws = await db.all('SELECT id, content, type FROM Keyword WHERE post_id = ? AND section = ? ORDER BY id', [post.id, section]);
+            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE post_id = ? AND section = ? ORDER BY id', [post.id, section]);
+            const projectId = (post.project_id || '').replace(/_[a-z]{2}$/, '');
+            sections[section] = {
+                keywords: kws,
+                videos: assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 })),
+                images: assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 })),
+            };
+        }
+
         const paragraphs = await db.all(
             'SELECT id, content, content_vi, title, title_vi, content_audio, content_vi_audio, title_audio, title_vi_audio FROM Paragraph WHERE post_id = ? ORDER BY id',
             [post.id]
@@ -101,18 +114,38 @@ app.get('/api/posts/:postId', async (req, res) => {
         }
 
         await db.close();
-        res.json({ ...post, projectId, paragraphs });
+        res.json({ ...post, projectId, paragraphs, sections });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // API: Thêm keyword
 app.post('/api/add-keyword', async (req, res) => {
-    const { paragraphId, content, type } = req.body;
+    const { paragraphId, postId, section, content, type } = req.body;
     try {
         const db = await getDb();
-        const r = await db.run('INSERT INTO Keyword (paragraph_id, content, type) VALUES (?, ?, ?)', [paragraphId, content, type || null]);
+        let r;
+        if (postId && section) {
+            r = await db.run('INSERT INTO Keyword (post_id, section, content, type) VALUES (?, ?, ?, ?)', [postId, section, content, type || null]);
+        } else {
+            r = await db.run('INSERT INTO Keyword (paragraph_id, content, type) VALUES (?, ?, ?)', [paragraphId, content, type || null]);
+        }
         await db.close();
         res.json({ id: r.lastID });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API: Di chuyển asset sang section/paragraph khác
+app.post('/api/move-asset', async (req, res) => {
+    const { assetId, targetParagraphId, targetPostId, targetSection } = req.body;
+    try {
+        const db = await getDb();
+        if (targetPostId && targetSection) {
+            await db.run('UPDATE Asset SET paragraph_id = NULL, sentence_id = NULL, post_id = ?, section = ? WHERE id = ?', [targetPostId, targetSection, assetId]);
+        } else if (targetParagraphId) {
+            await db.run('UPDATE Asset SET post_id = NULL, section = NULL, paragraph_id = ?, sentence_id = NULL WHERE id = ?', [targetParagraphId, assetId]);
+        }
+        await db.close();
+        res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -144,17 +177,64 @@ app.post('/api/save-content', async (req, res) => {
 
 // Cập nhật API lấy Media
 app.post('/api/generate-media', (req, res) => {
-    const { videoId, groupId, keywords } = req.body;
+    const { videoId, groupId, postId, section, keywords } = req.body;
     
     if (!keywords || keywords.length === 0) {
         return res.status(400).json({ error: "Không có từ khóa để tìm kiếm" });
     }
 
+    // Nếu là section của post (hook/summary/conclusion), crawl trực tiếp
+    if (postId && section) {
+        console.log(`[HỆ THỐNG] Crawl media cho section ${section} của post ${postId}`);
+        (async () => {
+            const db = await getDb();
+            const post = await db.get('SELECT project_id FROM Post WHERE id = ?', [postId]);
+            const projectId = post?.project_id;
+            // Lưu keywords vào DB
+            for (const kw of (Array.isArray(keywords) ? keywords : [keywords])) {
+                const content = typeof kw === 'object' ? kw.content : kw;
+                const type = typeof kw === 'object' ? kw.type : null;
+                const ex = await db.get('SELECT id FROM Keyword WHERE post_id = ? AND section = ? AND content = ?', [postId, section, content]);
+                if (!ex) await db.run('INSERT INTO Keyword (post_id, section, content, type) VALUES (?, ?, ?, ?)', [postId, section, content, type]);
+            }
+            await db.close();
+            // Import và crawl trực tiếp
+            const { fetchAndDownloadStock } = await import('./sync_assets_db.js').catch(() => ({}));
+            if (!fetchAndDownloadStock) {
+                console.error('[generate-media section] Không import được fetchAndDownloadStock');
+                return;
+            }
+            const vFolder = path.join(MEDIA_DIR, projectId, 'assets', '_raw_videos', section);
+            const iFolder = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', section);
+            [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+            const kwTexts = (Array.isArray(keywords) ? keywords : [keywords]).map(k => typeof k === 'object' ? k.content : k);
+            for (const kw of kwTexts) {
+                await fetchAndDownloadStock(kw, 'video', vFolder, 4).catch(() => {});
+                await fetchAndDownloadStock(kw, 'image', iFolder, 8).catch(() => {});
+            }
+            // Sync vào DB
+            const db2 = await getDb();
+            const syncDir = async (folderPath, type) => {
+                const exts = type === 'video' ? ['.mp4','.mov'] : ['.jpg','.jpeg','.png','.webp'];
+                if (!fs.existsSync(folderPath)) return;
+                for (const file of fs.readdirSync(folderPath)) {
+                    if (!exts.includes(path.extname(file).toLowerCase())) continue;
+                    const rel = path.relative(MEDIA_DIR, path.join(folderPath, file));
+                    const ex = await db2.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
+                    if (!ex) await db2.run('INSERT INTO Asset (post_id, section, paragraph_id, sentence_id, type, file_path) VALUES (?, ?, NULL, NULL, ?, ?)', [postId, section, type, rel]);
+                }
+            };
+            await syncDir(vFolder, 'video');
+            await syncDir(iFolder, 'image');
+            await db2.close();
+            console.log(`[generate-media section] ✅ Xong ${section}`);
+        })().catch(e => console.error('[generate-media section]', e.message));
+        return res.json({ success: true, message: 'Crawl section media...' });
+    }
+
     console.log(`\n[HỆ THỐNG] Bắt đầu lấy Media cho: Dự án ${videoId} | Nhóm ${groupId}`);
     console.log(`[HỆ THỐNG] Từ khóa: ${keywords.join(', ')}`);
 
-    // Chạy file craw_sub.js như một tiến trình riêng
-    // Chúng ta truyền thêm các tham số để script biết chỉ crawl cho 1 nhóm cụ thể
     const pythonProcess = spawn('node', [
         'craw_sub.js',
         '--mode', 'single',
@@ -407,6 +487,43 @@ app.post('/api/create-voice', async (req, res) => {
 
         res.json({ batch_uuid: result.batch_uuid, folderNames: result.folderNames, paragraphIds: result.paragraphIds });
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API: Crawl từ nguồn Việt Nam
+app.post('/api/crawl-vn', async (req, res) => {
+    const { paragraphId, postId, section, keyword, videoId, gid } = req.body;
+    if (!keyword?.trim()) return res.status(400).json({ error: 'Thiếu keyword' });
+    res.json({ success: true, message: 'Đang crawl nguồn Việt Nam...' });
+    (async () => {
+        const { fetchFromVnBot } = await import('./vnCrawler.js');
+        const db = await getDb();
+        const subDir = section || gid;
+        const vFolder = path.join(MEDIA_DIR, videoId, 'assets', '_raw_videos', subDir);
+        const iFolder = path.join(MEDIA_DIR, videoId, 'assets', '_raw_images', subDir);
+        [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+        await fetchFromVnBot(keyword, vFolder, iFolder, 12, 24);
+        // Sync vào DB
+        const syncDir = async (folderPath, type) => {
+            const exts = type === 'video' ? ['.mp4','.mov'] : ['.jpg','.jpeg','.png','.webp'];
+            if (!fs.existsSync(folderPath)) return;
+            for (const file of fs.readdirSync(folderPath)) {
+                if (!exts.includes(path.extname(file).toLowerCase())) continue;
+                const rel = path.relative(MEDIA_DIR, path.join(folderPath, file));
+                const ex = await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
+                if (!ex) {
+                    if (postId && section) {
+                        await db.run('INSERT INTO Asset (post_id, section, paragraph_id, sentence_id, type, file_path) VALUES (?, ?, NULL, NULL, ?, ?)', [postId, section, type, rel]);
+                    } else {
+                        await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [paragraphId, type, rel]);
+                    }
+                }
+            }
+        };
+        await syncDir(iFolder, 'image');
+        await syncDir(vFolder, 'video');
+        await db.close();
+        console.log(`[crawl-vn] Xong keyword: ${keyword}`);
+    })().catch(e => console.error('[crawl-vn]', e.message));
 });
 
 // API: Tạo mới dự án từ nội dung

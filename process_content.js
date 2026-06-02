@@ -121,6 +121,8 @@ async function analyzeWithGPT5(topic, sources) {
             title: { type: 'string' },
             hook_vi: { type: 'string' },
             hook_target: { type: 'string' },
+            hook_keywords_factual: { type: 'array', items: { type: 'string' } },
+            hook_keywords_cinematic: { type: 'array', items: { type: 'string' } },
             luan_diem: {
                 type: 'array',
                 items: {
@@ -156,18 +158,28 @@ async function analyzeWithGPT5(topic, sources) {
             },
             conclusion_vi: { type: 'string' },
             conclusion_target: { type: 'string' },
+            conclusion_keywords_factual: { type: 'array', items: { type: 'string' } },
+            conclusion_keywords_cinematic: { type: 'array', items: { type: 'string' } },
             summary_vi: { type: 'string' },
             summary_target: { type: 'string' },
+            summary_keywords_factual: { type: 'array', items: { type: 'string' } },
+            summary_keywords_cinematic: { type: 'array', items: { type: 'string' } },
         },
         required: [
             'title',
             'hook_vi',
             'hook_target',
+            'hook_keywords_factual',
+            'hook_keywords_cinematic',
             'luan_diem',
             'conclusion_vi',
             'conclusion_target',
+            'conclusion_keywords_factual',
+            'conclusion_keywords_cinematic',
             'summary_vi',
             'summary_target',
+            'summary_keywords_factual',
+            'summary_keywords_cinematic',
         ],
         additionalProperties: false
     };
@@ -296,6 +308,8 @@ async function analyzeWithGPT5(topic, sources) {
         '  + Mieu ta chi tiet goc may quay, cam xuc, boi canh hoac chi tiet dac ta mang tinh bieu tuong.',
         '  + Vi du: "radar screen glow macro", "satellite data flow animation", "politician shadow walking steadycam".',
         '- Tu khoa phai cuc ky sat voi noi dung cua tung luan_cu, khong duoc lay chung chung.',
+        '- TUONG TU voi hook, conclusion, summary: cung phai co hook_keywords_factual, hook_keywords_cinematic,',
+        '  conclusion_keywords_factual, conclusion_keywords_cinematic, summary_keywords_factual, summary_keywords_cinematic.',
         'KET BAI: tuong ung voi conclusion',
         '- BAT BUOC phai co phan conclusion_vi va conclusion_target rieng.',
         '- Ket bai chi can mot dong narrative tong ket, KHONG chia luan cu.',
@@ -379,6 +393,15 @@ async function saveToDb(projectId, result) {
          stripLinks(result.summary_vi), stripLinks(result.summary_target),
          stripLinks(result.conclusion_vi), stripLinks(result.conclusion_target), postId]
     );
+
+    // Lưu keywords cho hook, conclusion, summary
+    const savePostKeywords = async (section, factuals, cinematics) => {
+        for (const kw of (factuals || [])) if (kw) await db.run('INSERT INTO Keyword (post_id, section, content, type) VALUES (?, ?, ?, ?)', [postId, section, kw, 'factual']);
+        for (const kw of (cinematics || [])) if (kw) await db.run('INSERT INTO Keyword (post_id, section, content, type) VALUES (?, ?, ?, ?)', [postId, section, kw, 'cinematic']);
+    };
+    await savePostKeywords('hook', result.hook_keywords_factual, result.hook_keywords_cinematic);
+    await savePostKeywords('conclusion', result.conclusion_keywords_factual, result.conclusion_keywords_cinematic);
+    await savePostKeywords('summary', result.summary_keywords_factual, result.summary_keywords_cinematic);
 
     let sentenceOrder = 0;
     await db.run('BEGIN TRANSACTION');

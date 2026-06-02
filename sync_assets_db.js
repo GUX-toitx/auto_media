@@ -128,7 +128,7 @@ async function runConcurrently(tasks, limit) {
     return Promise.allSettled(results);
 }
 
-async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = VIDEOS_PER_SOURCE) {
+export async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = VIDEOS_PER_SOURCE) {
     if (!keyword) return 0;
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
@@ -162,7 +162,7 @@ async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = 
 // ==========================================
 // SYNC ASSET VÀO DB
 // ==========================================
-async function syncAssetsToDB(db, folderPath, assetType, paragraphId, sentenceId, projectId, gid) {
+async function syncAssetsToDB(db, folderPath, assetType, paragraphId, sentenceId, projectId, gid, postId = null, section = null) {
     const videoExts = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm']);
     const imageExts = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif']);
     const validExts = assetType === 'video' ? videoExts : imageExts;
@@ -173,7 +173,11 @@ async function syncAssetsToDB(db, folderPath, assetType, paragraphId, sentenceId
         const relativePath = path.join(projectId, 'assets', subDir, gid, file);
         const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
         if (!exists) {
-            await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, ?, ?, ?)', [paragraphId, sentenceId || null, assetType, relativePath]);
+            if (postId && section) {
+                await db.run('INSERT INTO Asset (post_id, section, paragraph_id, sentence_id, type, file_path) VALUES (?, ?, NULL, NULL, ?, ?)', [postId, section, assetType, relativePath]);
+            } else {
+                await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, ?, ?, ?)', [paragraphId, sentenceId || null, assetType, relativePath]);
+            }
             console.log(`      [SYNC] ${assetType} -> ${file}`);
         }
     }
@@ -200,9 +204,92 @@ async function main() {
             ORDER BY para.id ASC LIMIT 20
         `);
 
+        // Luôn kiểm tra và crawl sections song song với paragraphs
+        const sectionsToProcessAlways = await db.all(`
+            SELECT DISTINCT k.post_id, k.section, p.project_id
+            FROM Keyword k
+            JOIN Post p ON p.id = k.post_id
+            WHERE k.post_id IS NOT NULL AND k.section IS NOT NULL AND p.status IS NULL
+            AND (
+                NOT EXISTS (SELECT 1 FROM Asset a WHERE a.post_id = k.post_id AND a.section = k.section AND a.type = 'image')
+                OR NOT EXISTS (SELECT 1 FROM Asset a WHERE a.post_id = k.post_id AND a.section = k.section AND a.type = 'video')
+            )
+            LIMIT 5
+        `);
+        for (const row of sectionsToProcessAlways) {
+            const { post_id, section, project_id } = row;
+            const kws = await db.all('SELECT content, type FROM Keyword WHERE post_id = ? AND section = ?', [post_id, section]);
+            if (!kws.length) continue;
+            const vFolder = path.join(MEDIA_DIR, project_id, 'assets', '_raw_videos', section);
+            const iFolder = path.join(MEDIA_DIR, project_id, 'assets', '_raw_images', section);
+            [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+            const hasVideo = await db.get('SELECT id FROM Asset WHERE post_id = ? AND section = ? AND type = ?', [post_id, section, 'video']);
+            const hasImage = await db.get('SELECT id FROM Asset WHERE post_id = ? AND section = ? AND type = ?', [post_id, section, 'image']);
+            const keywords = kws.map(k => k.content);
+            const mediaTasks = [];
+            if (!hasVideo) for (const kw of keywords) mediaTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, VIDEOS_PER_SOURCE));
+            if (!hasImage) for (const kw of keywords) mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, IMAGES_PER_SOURCE));
+            if (!mediaTasks.length) continue;
+            console.log(`[sync-assets] Crawl section ${section} của post ${post_id}`);
+            await runConcurrently(mediaTasks, 4);
+            await syncAssetsToDB(db, vFolder, 'video', null, null, project_id, section, post_id, section);
+            await syncAssetsToDB(db, iFolder, 'image', null, null, project_id, section, post_id, section);
+        }
+
         if (paragraphsToProcess.length === 0) {
+            // Kiểm tra thêm post sections (hook/summary/conclusion)
+            const sectionsToProcess = await db.all(`
+                SELECT DISTINCT k.post_id, k.section, p.project_id
+                FROM Keyword k
+                JOIN Post p ON p.id = k.post_id
+                WHERE k.post_id IS NOT NULL AND k.section IS NOT NULL AND p.status IS NULL
+                AND (
+                    NOT EXISTS (SELECT 1 FROM Asset a WHERE a.post_id = k.post_id AND a.section = k.section AND a.type = 'image')
+                    OR NOT EXISTS (SELECT 1 FROM Asset a WHERE a.post_id = k.post_id AND a.section = k.section AND a.type = 'video')
+                )
+                LIMIT 10
+            `);
+
+            if (sectionsToProcess.length === 0) {
+                await db.close();
+                await sleep(30000);
+                continue;
+            }
+
+            for (const row of sectionsToProcess) {
+                const { post_id, section, project_id } = row;
+                const kws = await db.all('SELECT content, type FROM Keyword WHERE post_id = ? AND section = ?', [post_id, section]);
+                if (!kws.length) continue;
+                const vFolder = path.join(MEDIA_DIR, project_id, 'assets', '_raw_videos', section);
+                const iFolder = path.join(MEDIA_DIR, project_id, 'assets', '_raw_images', section);
+                [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+                const mediaTasks = [];
+                const hasVideo = await db.get('SELECT id FROM Asset WHERE post_id = ? AND section = ? AND type = ?', [post_id, section, 'video']);
+                const hasImage = await db.get('SELECT id FROM Asset WHERE post_id = ? AND section = ? AND type = ?', [post_id, section, 'image']);
+                const keywords = kws.map(k => k.content);
+                if (!hasVideo) for (const kw of keywords) mediaTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, VIDEOS_PER_SOURCE));
+                if (!hasImage) for (const kw of keywords) mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, IMAGES_PER_SOURCE));
+                if (!mediaTasks.length) continue;
+                let downloading = true;
+                const syncSection = async () => {
+                    while (downloading) {
+                        try {
+                            await syncAssetsToDB(db, vFolder, 'video', null, null, project_id, section, post_id, section);
+                            await syncAssetsToDB(db, iFolder, 'image', null, null, project_id, section, post_id, section);
+                        } catch (_) {}
+                        await sleep(2000);
+                    }
+                };
+                const syncPromise = syncSection();
+                await runConcurrently(mediaTasks, 4);
+                downloading = false;
+                await syncPromise;
+                await syncAssetsToDB(db, vFolder, 'video', null, null, project_id, section, post_id, section);
+                await syncAssetsToDB(db, iFolder, 'image', null, null, project_id, section, post_id, section);
+                console.log(`[✓] Section ${section} của post ${post_id}`);
+            }
             await db.close();
-            await sleep(30000);
+            await sleep(5000);
             continue;
         }
 
