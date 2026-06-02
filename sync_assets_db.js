@@ -231,7 +231,21 @@ async function main() {
             if (!hasImage) for (const kw of keywords) mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, IMAGES_PER_SOURCE));
             if (!mediaTasks.length) continue;
             console.log(`[sync-assets] Crawl section ${section} của post ${post_id}`);
+            // Live sync mỗi 2s trong lúc crawl
+            let downloading = true;
+            const liveSyncSection = async () => {
+                while (downloading) {
+                    try {
+                        await syncAssetsToDB(db, vFolder, 'video', null, null, project_id, section, post_id, section);
+                        await syncAssetsToDB(db, iFolder, 'image', null, null, project_id, section, post_id, section);
+                    } catch (_) {}
+                    await sleep(2000);
+                }
+            };
+            const syncPromise = liveSyncSection();
             await runConcurrently(mediaTasks, 4);
+            downloading = false;
+            await syncPromise;
             await syncAssetsToDB(db, vFolder, 'video', null, null, project_id, section, post_id, section);
             await syncAssetsToDB(db, iFolder, 'image', null, null, project_id, section, post_id, section);
         }
