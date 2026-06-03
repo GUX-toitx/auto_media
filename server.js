@@ -51,7 +51,7 @@ app.get('/api/posts/:postId', async (req, res) => {
         const sections = {};
         for (const section of ['hook', 'summary', 'conclusion']) {
             const kws = await db.all('SELECT id, content, type FROM Keyword WHERE post_id = ? AND section = ? ORDER BY id', [post.id, section]);
-            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE post_id = ? AND section = ? ORDER BY id', [post.id, section]);
+            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE post_id = ? AND section = ? ORDER BY selected DESC, COALESCE(source_id, id), id', [post.id, section]);
             const projectId = (post.project_id || '').replace(/_[a-z]{2}$/, '');
             sections[section] = {
                 keywords: kws,
@@ -675,18 +675,21 @@ app.post('/api/toggle', async (req, res) => {
         const selected = action === 'select' ? 1 : 0;
 
         if (action === 'unselect') {
-            const asset = await db.get('SELECT paragraph_id, sentence_id, "order" FROM Asset WHERE file_path = ?', [relativePath]);
+            const asset = await db.get('SELECT paragraph_id, sentence_id, post_id, section, "order" FROM Asset WHERE file_path = ?', [relativePath]);
             if (asset) {
-                const pid = asset.paragraph_id || await db.get('SELECT paragraph_id FROM Sentence WHERE id = ?', [asset.sentence_id]).then(r => r?.paragraph_id);
-                await db.run(
-                    'UPDATE Asset SET "order" = "order" - 1 WHERE paragraph_id = ? AND selected = 1 AND "order" > ?',
-                    [pid, asset.order]
-                );
-                await db.run('UPDATE Asset SET selected = 0, "order" = 0, sentence_id = NULL, paragraph_id = ? WHERE file_path = ?', [pid, relativePath]);
+                if (asset.post_id && asset.section) {
+                    // Section asset: giảm order các asset cùng section
+                    await db.run('UPDATE Asset SET "order" = "order" - 1 WHERE post_id = ? AND section = ? AND selected = 1 AND "order" > ?', [asset.post_id, asset.section, asset.order]);
+                    await db.run('UPDATE Asset SET selected = 0, "order" = 0 WHERE file_path = ?', [relativePath]);
+                } else {
+                    const pid = asset.paragraph_id || await db.get('SELECT paragraph_id FROM Sentence WHERE id = ?', [asset.sentence_id]).then(r => r?.paragraph_id);
+                    await db.run('UPDATE Asset SET "order" = "order" - 1 WHERE paragraph_id = ? AND selected = 1 AND "order" > ?', [pid, asset.order]);
+                    await db.run('UPDATE Asset SET selected = 0, "order" = 0, sentence_id = NULL, paragraph_id = ? WHERE file_path = ?', [pid, relativePath]);
+                }
             }
         } else {
             // Tính duration cho video nếu chưa có
-            const existing = await db.get('SELECT duration, type FROM Asset WHERE file_path = ?', [relativePath]);
+            const existing = await db.get('SELECT duration, type, post_id, section FROM Asset WHERE file_path = ?', [relativePath]);
             let duration = existing?.duration || null;
             if (!duration && existing?.type === 'video') {
                 try {
@@ -696,10 +699,15 @@ app.post('/api/toggle', async (req, res) => {
                     duration = parseFloat(out.toString().trim());
                 } catch (e) {}
             }
-            await db.run(
-                'UPDATE Asset SET selected = 1, "order" = ?, sentence_id = ?, duration = COALESCE(?, duration), paragraph_id = CASE WHEN ? IS NOT NULL THEN NULL ELSE paragraph_id END WHERE file_path = ?',
-                [order || 0, sentenceId || null, duration, sentenceId || null, relativePath]
-            );
+            if (existing?.post_id && existing?.section) {
+                // Section asset: chỉ update selected/order, giữ post_id/section
+                await db.run('UPDATE Asset SET selected = 1, "order" = ?, duration = COALESCE(?, duration) WHERE file_path = ?', [order || 0, duration, relativePath]);
+            } else {
+                await db.run(
+                    'UPDATE Asset SET selected = 1, "order" = ?, sentence_id = ?, duration = COALESCE(?, duration), paragraph_id = CASE WHEN ? IS NOT NULL THEN NULL ELSE paragraph_id END WHERE file_path = ?',
+                    [order || 0, sentenceId || null, duration, sentenceId || null, relativePath]
+                );
+            }
         }
 
         await db.close();
@@ -801,50 +809,78 @@ app.post('/api/trim', async (req, res) => {
     const trimmedRelative = path.relative(MEDIA_DIR, trimmedPath);
     try {
         const { execSync } = await import('child_process');
+        // Lấy totalDur TRƯỚC khi xóa file gốc
+        const totalDur = (() => {
+            try {
+                const out = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${fullPath}"`);
+                return parseFloat(out.toString().trim());
+            } catch(e) { return 0; }
+        })();
         const dur = end - start;
-        execSync(`ffmpeg -ss ${start} -t ${dur} -i "${fullPath}" -c copy -y "${trimmedPath}"`);
+        // Dùng -ss trước -i (nhanh, keyframe snap) và re-encode nếu cần
+        execSync(`ffmpeg -ss ${start} -t ${dur} -i "${fullPath}" -c copy -avoid_negative_ts make_zero -y "${trimmedPath}"`);
 
         const db = await getDb();
-        const orig = await db.get('SELECT id, paragraph_id, sentence_id, type, selected, "order" FROM Asset WHERE file_path = ?', [relativePath]);
+        const orig = await db.get('SELECT id, paragraph_id, sentence_id, post_id, section, type, selected, "order" FROM Asset WHERE file_path = ?', [relativePath]);
         if (orig) {
-            // Unselect file gốc
-            await db.run('UPDATE Asset SET selected = 0, "order" = 0 WHERE id = ?', [orig.id]);
+            const isSection = !!(orig.post_id && orig.section);
+            // Xóa file gốc khỏi DB
+            await db.run('DELETE FROM Asset WHERE id = ?', [orig.id]);
             // File trim chính - kế thừa selected/order của file gốc
-            await db.run(
-                'INSERT INTO Asset (paragraph_id, sentence_id, type, selected, "order", duration, file_path) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                [orig.paragraph_id, orig.sentence_id, orig.type, orig.selected, orig.order, duration || null, trimmedRelative]
-            );
+            if (isSection) {
+                await db.run(
+                    'INSERT INTO Asset (post_id, section, type, selected, "order", duration, source_id, file_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [orig.post_id, orig.section, orig.type, orig.selected, orig.order, duration || null, orig.id, trimmedRelative]
+                );
+            } else {
+                await db.run(
+                    'INSERT INTO Asset (paragraph_id, sentence_id, type, selected, "order", duration, source_id, file_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [orig.paragraph_id, orig.sentence_id, orig.type, orig.selected, orig.order, duration || null, orig.id, trimmedRelative]
+                );
+            }
             // Phần trước [0, start]
             if (start > 0.5) {
                 const beforePath = `${base}_trim_before_${ts}${ext}`;
                 const beforeRelative = path.relative(MEDIA_DIR, beforePath);
                 try {
                     execSync(`ffmpeg -ss 0 -t ${start} -i "${fullPath}" -c copy -y "${beforePath}"`);
-                    await db.run(
-                        'INSERT INTO Asset (paragraph_id, sentence_id, type, selected, "order", duration, file_path) VALUES (?, NULL, ?, 0, 0, ?, ?)',
-                        [orig.paragraph_id || await db.get('SELECT paragraph_id FROM Sentence WHERE id = ?', [orig.sentence_id]).then(r => r?.paragraph_id), orig.type, Math.round(start * 10) / 10, beforeRelative]
-                    );
-                } catch(e) { /* bỏ qua nếu lỗi */ }
+                    if (isSection) {
+                        await db.run(
+                            'INSERT INTO Asset (post_id, section, type, selected, "order", duration, source_id, file_path) VALUES (?, ?, ?, 0, 0, ?, ?, ?)',
+                            [orig.post_id, orig.section, orig.type, Math.round(start * 10) / 10, orig.id, beforeRelative]
+                        );
+                    } else {
+                        const paraId = orig.paragraph_id || await db.get('SELECT paragraph_id FROM Sentence WHERE id = ?', [orig.sentence_id]).then(r => r?.paragraph_id);
+                        await db.run(
+                            'INSERT INTO Asset (paragraph_id, sentence_id, type, selected, "order", duration, source_id, file_path) VALUES (?, NULL, ?, 0, 0, ?, ?, ?)',
+                            [paraId, orig.type, Math.round(start * 10) / 10, orig.id, beforeRelative]
+                        );
+                    }
+                } catch(e) { console.error('[trim before error]', e.message); }
             }
             // Phần sau [end, total]
-            const totalDur = await (async () => {
-                try {
-                    const { execSync } = await import('child_process');
-                    const out = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${fullPath}"`);
-                    return parseFloat(out.toString().trim());
-                } catch(e) { return orig.duration || 0; }
-            })();
+            console.log('[trim debug] start:', start, 'end:', end, 'totalDur:', totalDur, 'duration param:', duration);
             if (totalDur && (totalDur - end) > 0.5) {
                 const afterPath = `${base}_trim_after_${ts}${ext}`;
                 const afterRelative = path.relative(MEDIA_DIR, afterPath);
+                console.log('[trim] totalDur:', totalDur, 'end:', end, 'after duration:', totalDur - end, 'afterPath:', afterPath);
                 try {
                     execSync(`ffmpeg -ss ${end} -i "${fullPath}" -c copy -y "${afterPath}"`);
-                    const paraId = orig.paragraph_id || await db.get('SELECT paragraph_id FROM Sentence WHERE id = ?', [orig.sentence_id]).then(r => r?.paragraph_id);
-                    await db.run(
-                        'INSERT INTO Asset (paragraph_id, sentence_id, type, selected, "order", duration, file_path) VALUES (?, NULL, ?, 0, 0, ?, ?)',
-                        [paraId, orig.type, Math.round((totalDur - end) * 10) / 10, afterRelative]
-                    );
-                } catch(e) { /* bỏ qua nếu lỗi */ }
+                    if (isSection) {
+                        await db.run(
+                            'INSERT INTO Asset (post_id, section, type, selected, "order", duration, source_id, file_path) VALUES (?, ?, ?, 0, 0, ?, ?, ?)',
+                            [orig.post_id, orig.section, orig.type, Math.round((totalDur - end) * 10) / 10, orig.id, afterRelative]
+                        );
+                    } else {
+                        const paraId = orig.paragraph_id || await db.get('SELECT paragraph_id FROM Sentence WHERE id = ?', [orig.sentence_id]).then(r => r?.paragraph_id);
+                        await db.run(
+                            'INSERT INTO Asset (paragraph_id, sentence_id, type, selected, "order", duration, source_id, file_path) VALUES (?, NULL, ?, 0, 0, ?, ?, ?)',
+                            [paraId, orig.type, Math.round((totalDur - end) * 10) / 10, orig.id, afterRelative]
+                        );
+                    }
+                } catch(e) { console.error('[trim after error]', e.message); }
+            } else {
+                console.log('[trim] skip after: totalDur=', totalDur, 'end=', end);
             }
         }
         await db.close();
@@ -983,7 +1019,10 @@ app.get('/api/get-prompt', (req, res) => {
     res.json({ prompt: raw.trim().replace(/\n/g, ' ') });
 });
 
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
 app.use(express.static(__dirname));
 app.use(express.static(MEDIA_DIR, {
     setHeaders: (res, path) => {
