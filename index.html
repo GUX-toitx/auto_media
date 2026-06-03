@@ -73,15 +73,19 @@
 
             <div class="space-y-4 mt-[180px]">
                 <!-- Mở bài -->
-                <div v-if="activePost.hook || activePost.hook_vi" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
+                <div v-if="activePost.hook_details?.length" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
                     <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Mở bài</p>
-                    <div class="grid grid-cols-2 gap-2">
-                        <div contenteditable="true" @blur="savePostField('hook_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.hook_vi }}</div>
-                        <div contenteditable="true" @blur="savePostField('hook', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.hook }}</div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-2 mt-1">
-                        <div><audio v-if="activePost.hook_vi_audio" controls :src="activePost.hook_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
-                        <div><audio v-if="activePost.hook_audio" controls :src="activePost.hook_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                    <div class="space-y-1">
+                        <div v-for="d in activePost.hook_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1">
+                            <div class="grid grid-cols-2 gap-1">
+                                <div contenteditable="true" @blur="saveHookDetailField(d, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500">{{ d.content_vi }}</div>
+                                <div contenteditable="true" @blur="saveHookDetailField(d, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500">{{ d.content }}</div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-1">
+                                <div><audio v-if="d.content_vi_audio" controls :src="d.content_vi_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                <div><audio v-if="d.content_audio" controls :src="d.content_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                            </div>
+                        </div>
                     </div>
                     <!-- Keywords -->
                     <div class="space-y-1 mt-1">
@@ -190,15 +194,19 @@
                 </div>
 
                 <!-- Tóm tắt -->
-                <div v-if="activePost.summary_vi || activePost.summary_target" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
+                <div v-if="activePost.summary_details?.length" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
                     <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Tóm tắt</p>
-                    <div class="grid grid-cols-2 gap-2">
-                        <div contenteditable="true" @blur="savePostField('summary_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.summary_vi }}</div>
-                        <div contenteditable="true" @blur="savePostField('summary_target', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.summary_target }}</div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-2 mt-1">
-                        <div><audio v-if="activePost.summary_vi_audio" controls :src="activePost.summary_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
-                        <div><audio v-if="activePost.summary_target_audio" controls :src="activePost.summary_target_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                    <div class="space-y-1">
+                        <div v-for="d in activePost.summary_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1">
+                            <div class="grid grid-cols-2 gap-1">
+                                <div contenteditable="true" @blur="saveSummaryDetailField(d, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500">{{ d.content_vi }}</div>
+                                <div contenteditable="true" @blur="saveSummaryDetailField(d, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500">{{ d.content }}</div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-1">
+                                <div><audio v-if="d.content_vi_audio" controls :src="d.content_vi_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                <div><audio v-if="d.content_audio" controls :src="d.content_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                            </div>
+                        </div>
                     </div>
                     <!-- Keywords -->
                     <div class="space-y-1 mt-1">
@@ -327,14 +335,19 @@
                                 </div>
                                 <!-- Content row -->
                                 <div class="space-y-1">
-                                    <div class="grid grid-cols-2 gap-2">
-                                        <div contenteditable="true" @blur="saveParaField(para, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-900 border border-gray-700 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ para.content_vi }}</div>
-                                        <div contenteditable="true" @blur="saveParaField(para, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-900 border border-gray-700 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ para.content }}</div>
+                                    <div v-if="para.details?.length" class="space-y-1">
+                                        <div v-for="d in para.details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1">
+                                            <div class="grid grid-cols-2 gap-1">
+                                                <div contenteditable="true" @blur="saveParaDetailField(d, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500">{{ d.content_vi }}</div>
+                                                <div contenteditable="true" @blur="saveParaDetailField(d, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500">{{ d.content }}</div>
+                                            </div>
+                                            <div class="grid grid-cols-2 gap-1">
+                                                <div><audio v-if="d.content_vi_audio" controls :src="d.content_vi_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                                <div><audio v-if="d.content_audio" controls :src="d.content_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div class="grid grid-cols-2 gap-2">
-                                        <div><audio v-if="para.content_vi_audio" controls :src="para.content_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
-                                        <div><audio v-if="para.content_audio" controls :src="para.content_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
-                                    </div>
+                                    <div v-else class="text-[9px] text-gray-600 italic">Chưa có detail</div>
                                 </div>
                             </div>
                             <div class="flex items-center gap-2">
@@ -385,16 +398,21 @@
                                                     <div><audio v-if="s.title_audio" controls :src="s.title_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
                                                 </div>
                                             </div>
-                                            <!-- Sentence content -->
+                                            <!-- Sentence content - hiển thị details -->
                                             <div class="space-y-1">
-                                                <div class="grid grid-cols-2 gap-2">
-                                                    <div contenteditable="true" @blur="saveSentenceField(s, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ s.content_vi || s.content }}</div>
-                                                    <div contenteditable="true" @blur="saveSentenceField(s, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] overflow-y-auto whitespace-pre-wrap outline-none focus:border-blue-500">{{ s.content }}</div>
+                                                <div v-if="s.details?.length" class="space-y-1">
+                                                    <div v-for="d in s.details" :key="d.id" class="bg-gray-950/80 border border-gray-800 rounded-lg p-1.5 space-y-1">
+                                                        <div class="grid grid-cols-2 gap-1">
+                                                            <div contenteditable="true" @blur="saveDetailField(d, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500">{{ d.content_vi }}</div>
+                                                            <div contenteditable="true" @blur="saveDetailField(d, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500">{{ d.content }}</div>
+                                                        </div>
+                                                        <div class="grid grid-cols-2 gap-1">
+                                                            <div><audio v-if="d.content_vi_audio" controls :src="d.content_vi_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                                            <div><audio v-if="d.content_audio" controls :src="d.content_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                                        </div>
+                                                    </div>
                                                 </div>
-                                                <div class="grid grid-cols-2 gap-2">
-                                                    <div><audio v-if="s.content_vi_audio" controls :src="s.content_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
-                                                    <div><audio v-if="s.content_audio" controls :src="s.content_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
-                                                </div>
+                                                <div v-else class="text-[9px] text-gray-600 italic">Chưa có detail</div>
                                             </div>
                                         </div>
                                     </div>
@@ -1439,6 +1457,38 @@ createApp({
             setTimeout(() => { e.target._crawling = false; }, 2000);
         }
 
+        async function saveDetailField(detail, field, event) {
+            const value = event.target.innerText.trim();
+            if (value === (detail[field] || '').trim()) return;
+            detail[field] = value;
+            await fetch('/api/save-detail-field', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ detailId: detail.id, field, value }) });
+        }
+
+        async function saveHookDetailField(detail, field, event) {
+            const value = event.target.innerText.trim();
+            if (value === (detail[field] || '').trim()) return;
+            detail[field] = value;
+            await fetch('/api/save-hook-detail-field', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ detailId: detail.id, field, value }) });
+        }
+
+        async function saveSummaryDetailField(detail, field, event) {
+            const value = event.target.innerText.trim();
+            if (value === (detail[field] || '').trim()) return;
+            detail[field] = value;
+            await fetch('/api/save-summary-detail-field', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ detailId: detail.id, field, value }) });
+        }
+
+        async function saveParaDetailField(detail, field, event) {
+            const value = event.target.innerText.trim();
+            if (value === (detail[field] || '').trim()) return;
+            detail[field] = value;
+            await fetch('/api/save-para-detail-field', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ detailId: detail.id, field, value }) });
+        }
+
         async function deleteSectionKeyword(kw, section) {
             await fetch('/api/delete-keyword', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keywordId: kw.id }) });
             if (activePost.value.sections?.[section]) {
@@ -2351,6 +2401,7 @@ createApp({
             crawlVnSection,
             addSectionKeyword,
             deleteSectionKeyword,
+            saveDetailField, saveParaDetailField,
             toggleSectionAsset,
             moveModal,
             openMoveModal,

@@ -112,27 +112,46 @@ export async function getReferenceSpeakers(lang) {
 export async function generateAudios(projectDir, postId, lang, speakerUuid, contentType = 'content', dictionaryUuids = [], textsFromDOM = null) {
     const projectName = path.basename(projectDir);
     const db = await getDb();
-    const sentences = await db.all(
-        `SELECT id, content, content_vi, "order" FROM Sentence WHERE paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?) ORDER BY "order"`,
-        [postId]
-    );
+
+    // Xây dựng danh sách theo đúng thứ tự DOM:
+    // HookDetail -> summary -> Paragraph(title, details -> Sentence(title, details)) -> conclusion
+    const isVi = contentType === 'content_vi';
+    const tf = isVi ? 'content_vi' : 'content'; // text field
+    const rows = [];
+
+    const post = await db.get('SELECT id, conclusion_vi, conclusion_target FROM Post WHERE id = ?', [postId]);
+
+    const hookDetails = await db.all('SELECT id, content, content_vi FROM HookDetail WHERE post_id = ? ORDER BY "order"', [postId]);
+    for (const d of hookDetails) if ((d[tf] || '').trim()) rows.push({ src: 'hook', id: d.id, text: d[tf] });
+
+    const summaryDetails = await db.all('SELECT id, content, content_vi FROM SummaryDetail WHERE post_id = ? ORDER BY "order"', [postId]);
+    for (const d of summaryDetails) if ((d[tf] || '').trim()) rows.push({ src: 'summary', id: d.id, text: d[tf] });
+
+    const paragraphs = await db.all('SELECT id, title, title_vi FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);
+    for (const para of paragraphs) {
+        const titleText = isVi ? para.title_vi : para.title;
+        if ((titleText || '').trim()) rows.push({ src: 'para_title', id: para.id, text: titleText });
+
+        const paraDetails = await db.all('SELECT id, content, content_vi FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"', [para.id]);
+        for (const d of paraDetails) if ((d[tf] || '').trim()) rows.push({ src: 'para', id: d.id, text: d[tf] });
+
+        const sentences = await db.all('SELECT id, title, title_vi FROM Sentence WHERE paragraph_id = ? ORDER BY "order"', [para.id]);
+        for (const s of sentences) {
+            const stitle = isVi ? s.title_vi : s.title;
+            if ((stitle || '').trim()) rows.push({ src: 'sent_title', id: s.id, text: stitle });
+            const details = await db.all('SELECT id, content, content_vi FROM SentenceDetail WHERE sentence_id = ? ORDER BY "order"', [s.id]);
+            for (const d of details) if ((d[tf] || '').trim()) rows.push({ src: 'sent', id: d.id, text: d[tf] });
+        }
+    }
+
+    const conclusionText = isVi ? post.conclusion_vi : post.conclusion_target;
+    if ((conclusionText || '').trim()) rows.push({ src: 'post_conclusion', id: post.id, text: conclusionText });
+
     await db.close();
 
-    let texts, folderNames, paragraphIds;
-
-    if (textsFromDOM && textsFromDOM.length > 0) {
-        // Dùng texts từ DOM (bao gồm Post, Paragraph, Sentence theo đúng thứ tự hiển thị)
-        texts = textsFromDOM;
-        folderNames = textsFromDOM.map((_, i) => String(i + 1));
-        paragraphIds = sentences.map(s => s.id); // giữ để map sau
-    } else {
-        // Fallback: chỉ lấy từ Sentence
-        const field = contentType === 'content_vi' ? 'content_vi' : 'content';
-        const valid = sentences.filter(s => (s[field] || s.content).trim());
-        texts = valid.map(s => (s[field] || s.content).trim());
-        folderNames = valid.map(s => String(s.order));
-        paragraphIds = valid.map(s => s.id);
-    }
+    const texts = rows.map(r => r.text.trim());
+    const folderNames = rows.map((_, i) => String(i + 1));
+    const rowIds = rows.map(r => ({ src: r.src, id: r.id }));
 
     if (!texts.length) throw new Error(`Không có nội dung nào trong post id: ${postId}`);
 
@@ -144,15 +163,17 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid, cont
 
         const db2 = await getDb();
         await db2.run('UPDATE Post SET silence_duration = ? WHERE id = ?', [createRes.data?.silence_duration ?? 1, postId]);
-        for (const bs of batchSentences) {
-            const sentenceId = sentences.find(s => s.order === bs.index)?.id;
-            if (sentenceId) {
-                await db2.run('UPDATE Sentence SET sentence_uuid = ? WHERE id = ?', [bs.uuid, sentenceId]);
+        for (let i = 0; i < batchSentences.length; i++) {
+            const row = rowIds[i];
+            if (row && batchSentences[i]?.uuid) {
+                const tblMap = { hook: 'HookDetail', summary: 'SummaryDetail', para: 'ParagraphDetail', sent: 'SentenceDetail', para_title: 'Paragraph', sent_title: 'Sentence' };
+                const tbl = tblMap[row.src];
+                if (tbl) await db2.run(`UPDATE ${tbl} SET sentence_uuid = ? WHERE id = ?`, [batchSentences[i].uuid, row.id]);
             }
         }
         await db2.close();
 
-        return { batch_uuid: batchUuid, folderNames, paragraphIds };
+        return { batch_uuid: batchUuid, folderNames, paragraphIds: rowIds.map(r => r.id) };
     } catch (err) {
         console.error(`[generateAudios] LỖI createBatch:`, err.message);
         throw err;
@@ -194,30 +215,45 @@ export async function checkAndSaveVoice(batchUuid, postId, contentType = 'conten
         const sentenceData = await api(`/user/sentence?page=0&limit=-1&condition=${encodeURIComponent(condition)}`).then(r => r.json());
         const batchSentences = sentenceData.data || [];
 
-        // Xây dựng danh sách các đơn vị cần lưu audio theo đúng thứ tự DOM
-        // Thứ tự: Post(mo_bai, summary) -> Paragraph(title, content) -> Sentence(title, content)
+        // Xây dựng units theo đúng thứ tự DOM:
+        // HookDetail -> summary -> Paragraph(title, details -> Sentence(title, details)) -> conclusion
         const isVi = contentType === 'content_vi';
         const audioField = isVi ? '_vi_audio' : '_audio';
         const units = [];
 
-        const post = await db.get('SELECT id, hook, hook_vi, summary, summary_vi, summary_target, conclusion_vi, conclusion_target FROM Post WHERE id = ?', [postId]);
-        if (post.hook_vi || post.hook) units.push({ table: 'Post', id: post.id, field: `hook${audioField}` });
+        const post = await db.get('SELECT id, conclusion_vi, conclusion_target FROM Post WHERE id = ?', [postId]);
 
-        const paragraphs = await db.all('SELECT id, title, title_vi, content, content_vi FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);
+        const hookDetails = await db.all('SELECT id, content, content_vi FROM HookDetail WHERE post_id = ? ORDER BY "order"', [postId]);
+        for (const d of hookDetails) {
+            if (d.content_vi || d.content) units.push({ table: 'HookDetail', id: d.id, field: `content${audioField}` });
+        }
+
+        const summaryDetails = await db.all('SELECT id, content, content_vi FROM SummaryDetail WHERE post_id = ? ORDER BY "order"', [postId]);
+        for (const d of summaryDetails) {
+            if (d.content_vi || d.content) units.push({ table: 'SummaryDetail', id: d.id, field: `content${audioField}` });
+        }
+
+        const paragraphs = await db.all('SELECT id, title, title_vi FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);
         for (const para of paragraphs) {
             if (para.title_vi || para.title) units.push({ table: 'Paragraph', id: para.id, field: `title${audioField}` });
-            if (para.content_vi || para.content) units.push({ table: 'Paragraph', id: para.id, field: `content${audioField}` });
 
-            const sentences = await db.all('SELECT id, title, title_vi, content, content_vi FROM Sentence WHERE paragraph_id = ? ORDER BY "order"', [para.id]);
+            const paraDetails = await db.all('SELECT id, content, content_vi FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"', [para.id]);
+            for (const d of paraDetails) {
+                if (d.content_vi || d.content) units.push({ table: 'ParagraphDetail', id: d.id, field: `content${audioField}` });
+            }
+
+            const sentences = await db.all('SELECT id, title, title_vi FROM Sentence WHERE paragraph_id = ? ORDER BY "order"', [para.id]);
             for (const s of sentences) {
                 if (s.title_vi || s.title) units.push({ table: 'Sentence', id: s.id, field: `title${audioField}` });
-                if (s.content_vi || s.content) units.push({ table: 'Sentence', id: s.id, field: `content${audioField}` });
+                const details = await db.all('SELECT id, content, content_vi FROM SentenceDetail WHERE sentence_id = ? ORDER BY "order"', [s.id]);
+                for (const d of details) {
+                    if (d.content_vi || d.content) units.push({ table: 'SentenceDetail', id: d.id, field: `content${audioField}` });
+                }
             }
         }
 
-        // Tóm tắt và Kết bài sau tất cả paragraphs
-        if (isVi ? post.summary_vi : post.summary_target) units.push({ table: 'Post', id: post.id, field: isVi ? 'summary_vi_audio' : 'summary_target_audio' });
-        if (isVi ? post.conclusion_vi : post.conclusion_target) units.push({ table: 'Post', id: post.id, field: isVi ? 'conclusion_vi_audio' : 'conclusion_target_audio' });
+        const conclusionText = isVi ? post.conclusion_vi : post.conclusion_target;
+        if (conclusionText) units.push({ table: 'Post', id: post.id, field: isVi ? 'conclusion_vi_audio' : 'conclusion_target_audio' });
 
         // Map từng batch sentence vào đúng unit theo index
         for (let i = 0; i < batchSentences.length; i++) {
@@ -234,34 +270,43 @@ export async function checkAndSaveVoice(batchUuid, postId, contentType = 'conten
     return { status };
 }
 
-// Lấy tất cả audio URLs theo thứ tự DOM: Post -> Paragraph(title,content) -> Sentence(title,content)
 export async function getAllAudioUrls(postId, contentType = 'content') {
     const db = await getDb();
     const isVi = contentType === 'content_vi';
-    const sf = isVi ? '_vi_audio' : '_audio'; // suffix field
+    const sf = isVi ? '_vi_audio' : '_audio';
     const urls = [];
 
-    const post = await db.get(`SELECT hook${sf}, summary_vi_audio, summary_target_audio, conclusion_vi_audio, conclusion_target_audio FROM Post WHERE id = ?`, [postId]);
-    if (post[`hook${sf}`]) urls.push({ order: urls.length + 1, audio: post[`hook${sf}`] });
+    const post = await db.get(`SELECT conclusion_vi_audio, conclusion_target_audio FROM Post WHERE id = ?`, [postId]);
 
+    // HookDetail
+    const hookDetails = await db.all(`SELECT content${sf} FROM HookDetail WHERE post_id = ? ORDER BY "order"`, [postId]);
+    for (const d of hookDetails) if (d[`content${sf}`]) urls.push({ order: urls.length + 1, audio: d[`content${sf}`] });
+
+    // SummaryDetail
+    const summaryDetails = await db.all(`SELECT content${sf} FROM SummaryDetail WHERE post_id = ? ORDER BY "order"`, [postId]);
+    for (const d of summaryDetails) if (d[`content${sf}`]) urls.push({ order: urls.length + 1, audio: d[`content${sf}`] });
+
+    // Paragraphs
     const paragraphs = await db.all('SELECT id FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);
     for (const para of paragraphs) {
-        const p = await db.get(`SELECT title${sf}, content${sf} FROM Paragraph WHERE id = ?`, [para.id]);
+        const p = await db.get(`SELECT title${sf} FROM Paragraph WHERE id = ?`, [para.id]);
         if (p[`title${sf}`]) urls.push({ order: urls.length + 1, audio: p[`title${sf}`] });
-        if (p[`content${sf}`]) urls.push({ order: urls.length + 1, audio: p[`content${sf}`] });
 
-        const sentences = await db.all(`SELECT title${sf}, content${sf} FROM Sentence WHERE paragraph_id = ? ORDER BY "order"`, [para.id]);
+        const paraDetails = await db.all(`SELECT content${sf} FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"`, [para.id]);
+        for (const d of paraDetails) if (d[`content${sf}`]) urls.push({ order: urls.length + 1, audio: d[`content${sf}`] });
+
+        const sentences = await db.all(`SELECT id, title${sf} FROM Sentence WHERE paragraph_id = ? ORDER BY "order"`, [para.id]);
         for (const s of sentences) {
             if (s[`title${sf}`]) urls.push({ order: urls.length + 1, audio: s[`title${sf}`] });
-            if (s[`content${sf}`]) urls.push({ order: urls.length + 1, audio: s[`content${sf}`] });
+            const details = await db.all(`SELECT content${sf} FROM SentenceDetail WHERE sentence_id = ? ORDER BY "order"`, [s.id]);
+            for (const d of details) if (d[`content${sf}`]) urls.push({ order: urls.length + 1, audio: d[`content${sf}`] });
         }
     }
 
-    // Tóm tắt và Kết bài sau tất cả paragraphs
-    const tomTatAudio = isVi ? post.summary_vi_audio : post.summary_target_audio;
-    if (tomTatAudio) urls.push({ order: urls.length + 1, audio: tomTatAudio });
-    const ketBaiAudio = isVi ? post.conclusion_vi_audio : post.conclusion_target_audio;
-    if (ketBaiAudio) urls.push({ order: urls.length + 1, audio: ketBaiAudio });
+    // Conclusion
+    const conclusionAudio = isVi ? post.conclusion_vi_audio : post.conclusion_target_audio;
+    if (conclusionAudio) urls.push({ order: urls.length + 1, audio: conclusionAudio });
+
     await db.close();
     return urls;
 }

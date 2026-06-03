@@ -109,6 +109,53 @@ export async function initDB() {
     await db.run('ALTER TABLE Asset ADD COLUMN post_id INTEGER DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Asset ADD COLUMN section TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Asset ADD COLUMN source_id INTEGER DEFAULT NULL').catch(() => {});
+    await db.run(`CREATE TABLE IF NOT EXISTS SentenceDetail (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sentence_id INTEGER NOT NULL,
+        content TEXT,
+        content_vi TEXT,
+        content_audio TEXT,
+        content_vi_audio TEXT,
+        sentence_uuid TEXT,
+        "order" INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY(sentence_id) REFERENCES Sentence(id)
+    )`).catch(() => {});
+    await db.run('ALTER TABLE SentenceDetail ADD COLUMN sentence_uuid TEXT DEFAULT NULL').catch(() => {});
+    await db.run(`CREATE TABLE IF NOT EXISTS ParagraphDetail (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        paragraph_id INTEGER NOT NULL,
+        content TEXT,
+        content_vi TEXT,
+        content_audio TEXT,
+        content_vi_audio TEXT,
+        sentence_uuid TEXT,
+        "order" INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY(paragraph_id) REFERENCES Paragraph(id)
+    )`).catch(() => {});
+    await db.run('ALTER TABLE ParagraphDetail ADD COLUMN sentence_uuid TEXT DEFAULT NULL').catch(() => {});
+    await db.run(`CREATE TABLE IF NOT EXISTS HookDetail (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_id INTEGER NOT NULL,
+        content TEXT,
+        content_vi TEXT,
+        content_audio TEXT,
+        content_vi_audio TEXT,
+        sentence_uuid TEXT,
+        "order" INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY(post_id) REFERENCES Post(id)
+    )`).catch(() => {});
+    await db.run('ALTER TABLE Paragraph ADD COLUMN sentence_uuid TEXT DEFAULT NULL').catch(() => {});
+    await db.run(`CREATE TABLE IF NOT EXISTS SummaryDetail (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_id INTEGER NOT NULL,
+        content TEXT,
+        content_vi TEXT,
+        content_audio TEXT,
+        content_vi_audio TEXT,
+        sentence_uuid TEXT,
+        "order" INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY(post_id) REFERENCES Post(id)
+    )`).catch(() => {});
     // Rename migrations
     await db.run('ALTER TABLE Post RENAME COLUMN title TO project_id').catch(() => {});
     await db.run('ALTER TABLE Post RENAME COLUMN tieu_de TO title').catch(() => {});

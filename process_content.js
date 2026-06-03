@@ -394,6 +394,29 @@ async function saveToDb(projectId, result) {
          stripLinks(result.conclusion_vi), stripLinks(result.conclusion_target), postId]
     );
 
+    // Tách HookDetail
+    const splitText = (text) => text ? text.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean) : [];
+    const hookViParts = splitText(stripLinks(result.hook_vi));
+    const hookTargetParts = splitText(stripLinks(result.hook_target));
+    const hookMaxLen = Math.max(hookViParts.length, hookTargetParts.length);
+    for (let k = 0; k < hookMaxLen; k++) {
+        await db.run(
+            'INSERT INTO HookDetail (post_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
+            [postId, hookTargetParts[k] || null, hookViParts[k] || null, k + 1]
+        );
+    }
+
+    // Tách SummaryDetail
+    const summaryViParts = splitText(stripLinks(result.summary_vi));
+    const summaryTargetParts = splitText(stripLinks(result.summary_target));
+    const summaryMaxLen = Math.max(summaryViParts.length, summaryTargetParts.length);
+    for (let k = 0; k < summaryMaxLen; k++) {
+        await db.run(
+            'INSERT INTO SummaryDetail (post_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
+            [postId, summaryTargetParts[k] || null, summaryViParts[k] || null, k + 1]
+        );
+    }
+
     // Lưu keywords cho hook, conclusion, summary
     const savePostKeywords = async (section, factuals, cinematics) => {
         for (const kw of (factuals || [])) if (kw) await db.run('INSERT INTO Keyword (post_id, section, content, type) VALUES (?, ?, ?, ?)', [postId, section, kw, 'factual']);
@@ -414,6 +437,18 @@ async function saveToDb(projectId, result) {
             );
             const paragraphId = paraRes.lastID;
 
+            // Tách ParagraphDetail
+            const splitText = (text) => text ? text.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean) : [];
+            const paraViParts = splitText(stripLinks(cau.content_vi));
+            const paraTargetParts = splitText(stripLinks(cau.content_target));
+            const paraMaxLen = Math.max(paraViParts.length, paraTargetParts.length);
+            for (let k = 0; k < paraMaxLen; k++) {
+                await db.run(
+                    'INSERT INTO ParagraphDetail (paragraph_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
+                    [paragraphId, paraTargetParts[k] || null, paraViParts[k] || null, k + 1]
+                );
+            }
+
             for (let j = 0; j < cau.luan_cu.length; j++) {
                 const doan = cau.luan_cu[j];
                 sentenceOrder++;
@@ -421,8 +456,21 @@ async function saveToDb(projectId, result) {
                     'INSERT INTO Sentence (paragraph_id, content, content_vi, title, title_vi, "order") VALUES (?, ?, ?, ?, ?, ?)',
                     [paragraphId, stripLinks(doan.content_target), stripLinks(doan.content_vi), stripLinks(doan.title_target), stripLinks(doan.title_vi), sentenceOrder]
                 );
-                doan._sentenceId = sentenceRes.lastID;
+                const sentenceId = sentenceRes.lastID;
+                doan._sentenceId = sentenceId;
                 doan._paragraphId = paragraphId;
+
+                // Tách câu theo dấu chấm/hỏi/chấm than và lưu SentenceDetail
+                const splitText = (text) => text ? text.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean) : [];
+                const viParts = splitText(stripLinks(doan.content_vi));
+                const targetParts = splitText(stripLinks(doan.content_target));
+                const maxLen = Math.max(viParts.length, targetParts.length);
+                for (let k = 0; k < maxLen; k++) {
+                    await db.run(
+                        'INSERT INTO SentenceDetail (sentence_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
+                        [sentenceId, targetParts[k] || null, viParts[k] || null, k + 1]
+                    );
+                }
             }
             cau._paragraphId = paragraphId;
         }

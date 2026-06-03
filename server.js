@@ -47,6 +47,17 @@ app.get('/api/posts/:postId', async (req, res) => {
         const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, summary, summary_vi, summary_audio, summary_vi_audio, summary_target, summary_target_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio FROM Post WHERE id = ?', [req.params.postId]);
         if (!post) return res.status(404).json({ error: 'Post not found' });
 
+        // HookDetail
+        post.hook_details = await db.all(
+            'SELECT id, content, content_vi, content_audio, content_vi_audio, "order" FROM HookDetail WHERE post_id = ? ORDER BY "order"',
+            [post.id]
+        );
+        // SummaryDetail
+        post.summary_details = await db.all(
+            'SELECT id, content, content_vi, content_audio, content_vi_audio, "order" FROM SummaryDetail WHERE post_id = ? ORDER BY "order"',
+            [post.id]
+        );
+
         // Lấy keywords và assets cho từng section của post
         const sections = {};
         for (const section of ['hook', 'summary', 'conclusion']) {
@@ -72,11 +83,22 @@ app.get('/api/posts/:postId', async (req, res) => {
             const para = paragraphs[i];
             const gid = String(i + 1);
 
-            // Sentences kèm audio
-            para.sentences = (await db.all(
+            // ParagraphDetail
+            para.details = await db.all(
+                'SELECT id, content, content_vi, content_audio, content_vi_audio, "order" FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"',
+                [para.id]
+            );
+            const rawSentences = await db.all(
                 'SELECT id, content, content_vi, title, title_vi, content_audio, content_vi_audio, title_audio, title_vi_audio, audio, sentence_uuid, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"',
                 [para.id]
-            )).map(s => ({ ...s, sentenceUuid: s.sentence_uuid, audioUrl: s.audio ? (s.audio.startsWith('http') ? s.audio : `/${s.audio}`) : null }));
+            );
+            para.sentences = await Promise.all(rawSentences.map(async s => {
+                const details = await db.all(
+                    'SELECT id, content, content_vi, content_audio, content_vi_audio, "order" FROM SentenceDetail WHERE sentence_id = ? ORDER BY "order"',
+                    [s.id]
+                );
+                return { ...s, sentenceUuid: s.sentence_uuid, audioUrl: s.audio ? (s.audio.startsWith('http') ? s.audio : `/${s.audio}`) : null, details };
+            }));
 
             // Keywords từ DB
             para.keywords = (await db.all(
@@ -432,6 +454,72 @@ app.post('/api/save-sentence-field', async (req, res) => {
         await db.run(`UPDATE Sentence SET ${field} = ? WHERE id = ?`, [value, sentenceId]);
         await db.close();
         res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/save-detail-field', async (req, res) => {
+    try {
+        const { detailId, field, value } = req.body;
+        if (!['content', 'content_vi'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
+        const db = await getDb();
+        await db.run(`UPDATE SentenceDetail SET ${field} = ? WHERE id = ?`, [value, detailId]);
+        await db.close();
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/save-hook-detail-field', async (req, res) => {
+    try {
+        const { detailId, field, value } = req.body;
+        if (!['content', 'content_vi'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
+        const db = await getDb();
+        await db.run(`UPDATE HookDetail SET ${field} = ? WHERE id = ?`, [value, detailId]);
+        await db.close();
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/save-summary-detail-field', async (req, res) => {
+    try {
+        const { detailId, field, value } = req.body;
+        if (!['content', 'content_vi'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
+        const db = await getDb();
+        await db.run(`UPDATE SummaryDetail SET ${field} = ? WHERE id = ?`, [value, detailId]);
+        await db.close();
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/save-para-detail-field', async (req, res) => {
+    try {
+        const { detailId, field, value } = req.body;
+        if (!['content', 'content_vi'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
+        const db = await getDb();
+        await db.run(`UPDATE ParagraphDetail SET ${field} = ? WHERE id = ?`, [value, detailId]);
+        await db.close();
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/split-sentence', async (req, res) => {
+    try {
+        const { sentenceId } = req.body;
+        const db = await getDb();
+        const s = await db.get('SELECT content, content_vi FROM Sentence WHERE id = ?', [sentenceId]);
+        if (!s) return res.status(404).json({ error: 'Not found' });
+        const split = (text) => text ? text.split(/(?<=[.!?])\s+/).map(t => t.trim()).filter(Boolean) : [];
+        const viParts = split(s.content_vi);
+        const targetParts = split(s.content);
+        const maxLen = Math.max(viParts.length, targetParts.length);
+        await db.run('DELETE FROM SentenceDetail WHERE sentence_id = ?', [sentenceId]);
+        const details = [];
+        for (let i = 0; i < maxLen; i++) {
+            const r = await db.run('INSERT INTO SentenceDetail (sentence_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
+                [sentenceId, targetParts[i] || null, viParts[i] || null, i + 1]);
+            details.push({ id: r.lastID, content: targetParts[i]||null, content_vi: viParts[i]||null, content_audio: null, content_vi_audio: null, order: i+1 });
+        }
+        await db.close();
+        res.json({ details });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
