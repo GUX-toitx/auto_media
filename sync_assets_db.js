@@ -186,6 +186,17 @@ async function syncAssetsToDB(db, folderPath, assetType, paragraphId, sentenceId
 // ==========================================
 // MAIN - chạy loop liên tục
 // ==========================================
+async function notifyStatus(projectId, status) {
+    try {
+        console.log(`[notify] project=${projectId} status=${status}`);
+        await fetch('http://localhost:3000/api/crawl-status/notify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postTitle: projectId, status })
+        });
+    } catch(e) { console.error('[notify error]', e.message); }
+}
+
 async function main() {
     console.log('[sync-assets] Đã khởi động, đang chờ project mới...');
     while (true) {
@@ -231,6 +242,7 @@ async function main() {
             if (!hasImage) for (const kw of keywords) mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, IMAGES_PER_SOURCE));
             if (!mediaTasks.length) continue;
             console.log(`[sync-assets] Crawl section ${section} của post ${post_id}`);
+            await notifyStatus(project_id, 'crawling');
             // Live sync mỗi 2s trong lúc crawl
             let downloading = true;
             const liveSyncSection = async () => {
@@ -248,6 +260,7 @@ async function main() {
             await syncPromise;
             await syncAssetsToDB(db, vFolder, 'video', null, null, project_id, section, post_id, section);
             await syncAssetsToDB(db, iFolder, 'image', null, null, project_id, section, post_id, section);
+            await notifyStatus(project_id, '');
         }
 
         if (paragraphsToProcess.length === 0) {
@@ -331,6 +344,7 @@ async function main() {
                 if (!hasVideo) for (const kw of keywords) mediaTasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, VIDEOS_PER_SOURCE));
                 if (!hasImage) for (const kw of keywords) mediaTasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, IMAGES_PER_SOURCE));
                 if (!mediaTasks.length) continue;
+                await notifyStatus(projectId, 'crawling');
 
                 let downloading = true;
                 const liveSyncTask = async () => {
@@ -351,6 +365,7 @@ async function main() {
                 await syncAssetsToDB(db, iFolder, 'image', para.id, null, projectId, gid);
                 await sleep(2000);
             }
+            await notifyStatus(projectId, '');
             console.log(`[✓] Xong project: ${projectId}`);
         }
 

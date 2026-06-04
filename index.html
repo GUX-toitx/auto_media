@@ -78,8 +78,8 @@
                     <div class="space-y-1">
                         <div v-for="d in activePost.hook_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1">
                             <div class="grid grid-cols-2 gap-1">
-                                <div contenteditable="true" @blur="saveHookDetailField(d, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500">{{ d.content_vi }}</div>
-                                <div contenteditable="true" @blur="saveHookDetailField(d, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500">{{ d.content }}</div>
+                                <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveHookDetailField(d, 'content_vi', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content_vi" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500"></div>
+                                <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveHookDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
                             </div>
                             <div class="grid grid-cols-2 gap-1">
                                 <div><audio v-if="d.content_vi_audio" controls :src="d.content_vi_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
@@ -118,6 +118,7 @@
                         </div>
                         <div v-if="activePost.sections['hook']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.hook?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                <button @click="deleteSectionAsset(v,'hook')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-50 flex items-center justify-center font-bold shadow-lg">&times;</button>
                                 <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video',null,'hook')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                 <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
                                 <div class="flex gap-1">
@@ -159,6 +160,7 @@
                         <div v-if="activePost.sections?.['hook']?._videoOpen && (activePost.sections?.hook?.videos || []).filter(v=>!v.selected).length" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.hook?.videos || []).filter(v=>!v.selected)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
                                 :class="v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
+                                <button @click="deleteSectionAsset(v,'hook')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-50 flex items-center justify-center font-bold shadow-lg">&times;</button>
                                 <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v, 'video', null, 'hook')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                 <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
                                 <div class="flex gap-1">
@@ -181,6 +183,7 @@
                         <div v-if="activePost.sections?.['hook']?._imageOpen && (activePost.sections?.hook?.images || []).filter(v=>!v.selected).length" class="grid grid-cols-6 gap-1 mt-1">
                             <div v-for="img in (activePost.sections?.hook?.images || []).filter(v=>!v.selected)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
                                 :class="img.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
+                                <button @click="deleteSectionAsset(img,'hook')" class="absolute top-0.5 right-0.5 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-50 flex items-center justify-center font-bold shadow-lg">&times;</button>
                                 <img v-if="previewMode" :src="img.url" @click="openPreview(img, 'image', null, 'hook')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
                                 <a v-else :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
                                 <div class="flex gap-1">
@@ -199,8 +202,8 @@
                     <div class="space-y-1">
                         <div v-for="d in activePost.summary_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1">
                             <div class="grid grid-cols-2 gap-1">
-                                <div contenteditable="true" @blur="saveSummaryDetailField(d, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500">{{ d.content_vi }}</div>
-                                <div contenteditable="true" @blur="saveSummaryDetailField(d, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500">{{ d.content }}</div>
+                                <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveSummaryDetailField(d, 'content_vi', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content_vi" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500"></div>
+                                <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveSummaryDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
                             </div>
                             <div class="grid grid-cols-2 gap-1">
                                 <div><audio v-if="d.content_vi_audio" controls :src="d.content_vi_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
@@ -1548,6 +1551,20 @@ createApp({
             }
         }
 
+        async function deleteSectionAsset(asset, section) {
+            if (!confirm('Xóa file này?')) return;
+            const res = await fetch('/api/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath }) });
+            const r = await res.json();
+            if (r.success) {
+                const sec = activePost.value.sections[section];
+                if (asset.selected && asset.order > 0) {
+                    [...(sec.videos || []), ...(sec.images || [])].filter(a => a.selected && a.order > asset.order).forEach(a => a.order--);
+                }
+                sec.videos = (sec.videos || []).filter(v => v.relativePath !== asset.relativePath);
+                sec.images = (sec.images || []).filter(v => v.relativePath !== asset.relativePath);
+            }
+        }
+
         async function crawlVn(e, para, paraIndex) {
             const kw = e.target.value.trim();
             if (!kw) return;
@@ -2402,7 +2419,10 @@ createApp({
             addSectionKeyword,
             deleteSectionKeyword,
             saveDetailField, saveParaDetailField,
+            saveHookDetailField,
+            saveSummaryDetailField,
             toggleSectionAsset,
+            deleteSectionAsset,
             moveModal,
             openMoveModal,
             doMoveAsset,

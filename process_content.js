@@ -119,8 +119,18 @@ async function analyzeWithGPT5(topic, sources) {
         type: 'object',
         properties: {
             title: { type: 'string' },
-            hook_vi: { type: 'string' },
-            hook_target: { type: 'string' },
+            hook_sentences: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        vi: { type: 'string' },
+                        en: { type: 'string' }
+                    },
+                    required: ['vi', 'en'],
+                    additionalProperties: false
+                }
+            },
             hook_keywords_factual: { type: 'array', items: { type: 'string' } },
             hook_keywords_cinematic: { type: 'array', items: { type: 'string' } },
             luan_diem: {
@@ -130,8 +140,18 @@ async function analyzeWithGPT5(topic, sources) {
                     properties: {
                         title_vi: { type: 'string' },
                         title_target: { type: 'string' },
-                        content_vi: { type: 'string' },
-                        content_target: { type: 'string' },
+                        content_sentences: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    vi: { type: 'string' },
+                                    en: { type: 'string' }
+                                },
+                                required: ['vi', 'en'],
+                                additionalProperties: false
+                            }
+                        },
                         keywords_factual: { type: 'array', items: { type: 'string' } },
                         keywords_cinematic: { type: 'array', items: { type: 'string' } },
                         luan_cu: {
@@ -141,43 +161,70 @@ async function analyzeWithGPT5(topic, sources) {
                                 properties: {
                                     title_vi: { type: 'string' },
                                     title_target: { type: 'string' },
-                                    content_vi: { type: 'string' },
-                                    content_target: { type: 'string' },
+                                    content_sentences: {
+                                        type: 'array',
+                                        items: {
+                                            type: 'object',
+                                            properties: {
+                                                vi: { type: 'string' },
+                                                en: { type: 'string' }
+                                            },
+                                            required: ['vi', 'en'],
+                                            additionalProperties: false
+                                        }
+                                    },
                                     keywords_factual: { type: 'array', items: { type: 'string' } },
                                     keywords_cinematic: { type: 'array', items: { type: 'string' } }
                                 },
-                                required: ['title_vi', 'title_target', 'content_vi', 'content_target', 'keywords_factual', 'keywords_cinematic'],
+                                required: ['title_vi', 'title_target', 'content_sentences', 'keywords_factual', 'keywords_cinematic'],
                                 additionalProperties: false
                             }
                         }
                     },
                     // Đã xóa image và video khỏi required
-                    required: ['title_vi', 'title_target', 'content_vi', 'content_target', 'keywords_factual', 'keywords_cinematic', 'luan_cu'],
+                    required: ['title_vi', 'title_target', 'content_sentences', 'keywords_factual', 'keywords_cinematic', 'luan_cu'],
                     additionalProperties: false
                 }
             },
-            conclusion_vi: { type: 'string' },
-            conclusion_target: { type: 'string' },
+            conclusion_sentences: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        vi: { type: 'string' },
+                        en: { type: 'string' }
+                    },
+                    required: ['vi', 'en'],
+                    additionalProperties: false
+                }
+            },
             conclusion_keywords_factual: { type: 'array', items: { type: 'string' } },
             conclusion_keywords_cinematic: { type: 'array', items: { type: 'string' } },
-            summary_vi: { type: 'string' },
-            summary_target: { type: 'string' },
+            summary_sentences: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        vi: { type: 'string' },
+                        en: { type: 'string' }
+                    },
+                    required: ['vi', 'en'],
+                    additionalProperties: false
+                }
+            },
             summary_keywords_factual: { type: 'array', items: { type: 'string' } },
             summary_keywords_cinematic: { type: 'array', items: { type: 'string' } },
         },
         required: [
             'title',
-            'hook_vi',
-            'hook_target',
+            'hook_sentences',
             'hook_keywords_factual',
             'hook_keywords_cinematic',
             'luan_diem',
-            'conclusion_vi',
-            'conclusion_target',
+            'conclusion_sentences',
             'conclusion_keywords_factual',
             'conclusion_keywords_cinematic',
-            'summary_vi',
-            'summary_target',
+            'summary_sentences',
             'summary_keywords_factual',
             'summary_keywords_cinematic',
         ],
@@ -296,6 +343,10 @@ async function analyzeWithGPT5(topic, sources) {
         '- Viet song ngu dong thoi.',
         '- _vi = tieng Viet.',
         '- _target = ' + targetLang + '.',
+        '- BAT BUOC: Tat ca content_sentences, hook_sentences, summary_sentences, conclusion_sentences PHAI LA ARRAY CUA CAC CAP {vi, en}.',
+        '- Moi phan tu trong array la mot cau hoan chinh VI va EN tuong ung.',
+        '- Vi du: [{vi: "Cau 1 tieng Viet.", en: "Sentence 1 in English."}, {vi: "Cau 2.", en: "Sentence 2."}]',
+        '- KHONG DUOC de content_vi hoac content_target rieng le.',
         '',
         'MEDIA KEYWORDS:',
         '- Voi moi luan_diem va luan_cu, BAT BUOC phai tao 2 loai keyword tieng Anh tach biet de phuc vu he thong render tự động.',
@@ -369,7 +420,8 @@ async function analyzeWithGPT5(topic, sources) {
     console.log(outputText);
     console.log('[process_content] === END GPT OUTPUT ===');
     
-    return JSON.parse(outputText);
+    const result = JSON.parse(outputText);
+    return result;
 }
 
 async function saveToDb(projectId, result) {
@@ -386,34 +438,36 @@ async function saveToDb(projectId, result) {
     const post = await db.get('SELECT id FROM Post WHERE project_id = ?', [postTitle]);
     const postId = post.id;
 
-    // Lưu title, hook, summary, conclusion - GPT đã sinh song ngữ sẵn
+    // Lưu title, hook_vi/hook_target từ hook_sentences, summary, conclusion
+    const hookVi = result.hook_sentences?.map(s => s.vi).filter(Boolean).join(' ') || '';
+    const hookTarget = result.hook_sentences?.map(s => s.en).filter(Boolean).join(' ') || '';
+    const summaryVi = result.summary_sentences?.map(s => s.vi).filter(Boolean).join(' ') || '';
+    const summaryTarget = result.summary_sentences?.map(s => s.en).filter(Boolean).join(' ') || '';
+    const conclusionVi = result.conclusion_sentences?.map(s => s.vi).filter(Boolean).join(' ') || '';
+    const conclusionTarget = result.conclusion_sentences?.map(s => s.en).filter(Boolean).join(' ') || '';
+    
     await db.run(
         'UPDATE Post SET title = ?, hook = ?, hook_vi = ?, summary_vi = ?, summary_target = ?, conclusion_vi = ?, conclusion_target = ? WHERE id = ?',
-        [stripLinks(result.title), stripLinks(result.hook_target), stripLinks(result.hook_vi),
-         stripLinks(result.summary_vi), stripLinks(result.summary_target),
-         stripLinks(result.conclusion_vi), stripLinks(result.conclusion_target), postId]
+        [stripLinks(result.title), stripLinks(hookTarget), stripLinks(hookVi),
+         stripLinks(summaryVi), stripLinks(summaryTarget),
+         stripLinks(conclusionVi), stripLinks(conclusionTarget), postId]
     );
 
-    // Tách HookDetail
-    const splitText = (text) => text ? text.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean) : [];
-    const hookViParts = splitText(stripLinks(result.hook_vi));
-    const hookTargetParts = splitText(stripLinks(result.hook_target));
-    const hookMaxLen = Math.max(hookViParts.length, hookTargetParts.length);
-    for (let k = 0; k < hookMaxLen; k++) {
+    // HookDetail từ array
+    for (let k = 0; k < (result.hook_sentences || []).length; k++) {
+        const pair = result.hook_sentences[k];
         await db.run(
             'INSERT INTO HookDetail (post_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
-            [postId, hookTargetParts[k] || null, hookViParts[k] || null, k + 1]
+            [postId, stripLinks(pair.en || ''), stripLinks(pair.vi || ''), k + 1]
         );
     }
 
-    // Tách SummaryDetail
-    const summaryViParts = splitText(stripLinks(result.summary_vi));
-    const summaryTargetParts = splitText(stripLinks(result.summary_target));
-    const summaryMaxLen = Math.max(summaryViParts.length, summaryTargetParts.length);
-    for (let k = 0; k < summaryMaxLen; k++) {
+    // SummaryDetail từ array
+    for (let k = 0; k < (result.summary_sentences || []).length; k++) {
+        const pair = result.summary_sentences[k];
         await db.run(
             'INSERT INTO SummaryDetail (post_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
-            [postId, summaryTargetParts[k] || null, summaryViParts[k] || null, k + 1]
+            [postId, stripLinks(pair.en || ''), stripLinks(pair.vi || ''), k + 1]
         );
     }
 
@@ -431,44 +485,42 @@ async function saveToDb(projectId, result) {
     try {
         for (let i = 0; i < result.luan_diem.length; i++) {
             const cau = result.luan_diem[i];
+            // ParagraphDetail từ content_sentences array
+            const contentVi = cau.content_sentences?.map(s => s.vi).filter(Boolean).join(' ') || '';
+            const contentTarget = cau.content_sentences?.map(s => s.en).filter(Boolean).join(' ') || '';
             const paraRes = await db.run(
                 'INSERT INTO Paragraph (post_id, content, content_vi, title, title_vi, "order") VALUES (?, ?, ?, ?, ?, ?)',
-                [postId, stripLinks(cau.content_target), stripLinks(cau.content_vi), stripLinks(cau.title_target), stripLinks(cau.title_vi), i + 1]
+                [postId, stripLinks(contentTarget), stripLinks(contentVi), stripLinks(cau.title_target), stripLinks(cau.title_vi), i + 1]
             );
             const paragraphId = paraRes.lastID;
 
-            // Tách ParagraphDetail
-            const splitText = (text) => text ? text.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean) : [];
-            const paraViParts = splitText(stripLinks(cau.content_vi));
-            const paraTargetParts = splitText(stripLinks(cau.content_target));
-            const paraMaxLen = Math.max(paraViParts.length, paraTargetParts.length);
-            for (let k = 0; k < paraMaxLen; k++) {
+            for (let k = 0; k < (cau.content_sentences || []).length; k++) {
+                const pair = cau.content_sentences[k];
                 await db.run(
                     'INSERT INTO ParagraphDetail (paragraph_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
-                    [paragraphId, paraTargetParts[k] || null, paraViParts[k] || null, k + 1]
+                    [paragraphId, stripLinks(pair.en || ''), stripLinks(pair.vi || ''), k + 1]
                 );
             }
 
             for (let j = 0; j < cau.luan_cu.length; j++) {
                 const doan = cau.luan_cu[j];
                 sentenceOrder++;
+                const contentVi = doan.content_sentences?.map(s => s.vi).filter(Boolean).join(' ') || '';
+                const contentTarget = doan.content_sentences?.map(s => s.en).filter(Boolean).join(' ') || '';
                 const sentenceRes = await db.run(
                     'INSERT INTO Sentence (paragraph_id, content, content_vi, title, title_vi, "order") VALUES (?, ?, ?, ?, ?, ?)',
-                    [paragraphId, stripLinks(doan.content_target), stripLinks(doan.content_vi), stripLinks(doan.title_target), stripLinks(doan.title_vi), sentenceOrder]
+                    [paragraphId, stripLinks(contentTarget), stripLinks(contentVi), stripLinks(doan.title_target), stripLinks(doan.title_vi), sentenceOrder]
                 );
                 const sentenceId = sentenceRes.lastID;
                 doan._sentenceId = sentenceId;
                 doan._paragraphId = paragraphId;
 
-                // Tách câu theo dấu chấm/hỏi/chấm than và lưu SentenceDetail
-                const splitText = (text) => text ? text.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean) : [];
-                const viParts = splitText(stripLinks(doan.content_vi));
-                const targetParts = splitText(stripLinks(doan.content_target));
-                const maxLen = Math.max(viParts.length, targetParts.length);
-                for (let k = 0; k < maxLen; k++) {
+                // SentenceDetail từ content_sentences array
+                for (let k = 0; k < (doan.content_sentences || []).length; k++) {
+                    const pair = doan.content_sentences[k];
                     await db.run(
                         'INSERT INTO SentenceDetail (sentence_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
-                        [sentenceId, targetParts[k] || null, viParts[k] || null, k + 1]
+                        [sentenceId, stripLinks(pair.en || ''), stripLinks(pair.vi || ''), k + 1]
                     );
                 }
             }
