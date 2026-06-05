@@ -118,7 +118,7 @@
                         </div>
                         <div v-if="activePost.sections['hook']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.hook?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
-                                <button @click="deleteSectionAsset(v,'hook')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-50 flex items-center justify-center font-bold shadow-lg">&times;</button>
+                                <button @click="deleteSectionAsset(v,'hook')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-10 flex items-center justify-center font-bold shadow-lg">&times;</button>
                                 <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video',null,'hook')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                 <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
                                 <div class="flex gap-1">
@@ -156,11 +156,15 @@
                                 <span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
                                 Videos ({{ (activePost.sections?.hook?.videos || []).filter(v=>!v.selected).length }})
                             </span>
+                            <button @click="deleteSectionAll('hook','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
+                            <button v-if="(activePost.sections?.hook?.videos || []).filter(v=>!v.selected && v._toDelete).length" @click="deleteSelectedSectionAssets('hook','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (activePost.sections?.hook?.videos || []).filter(v=>!v.selected && v._toDelete).length }})</button>
+                            <button @click="uploadSectionAsset('hook','video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
                         </div>
                         <div v-if="activePost.sections?.['hook']?._videoOpen && (activePost.sections?.hook?.videos || []).filter(v=>!v.selected).length" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.hook?.videos || []).filter(v=>!v.selected)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
-                                :class="v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
-                                <button @click="deleteSectionAsset(v,'hook')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-50 flex items-center justify-center font-bold shadow-lg">&times;</button>
+                                :class="[v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800', v._toDelete ? 'ring-2 ring-red-500' : '']">
+                                <input type="checkbox" v-model="v._toDelete" class="absolute top-1 left-1 z-10 w-4 h-4 cursor-pointer">
+                                <button @click="deleteSectionAsset(v,'hook')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-10 flex items-center justify-center font-bold shadow-lg">&times;</button>
                                 <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v, 'video', null, 'hook')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                 <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
                                 <div class="flex gap-1">
@@ -179,11 +183,14 @@
                                 <span class="w-1.5 h-1.5 bg-orange-500 rounded-full"></span>
                                 Images ({{ (activePost.sections?.hook?.images || []).filter(v=>!v.selected).length }})
                             </span>
+                            <button @click="deleteSectionAll('hook','image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
+                            <button v-if="(activePost.sections?.hook?.images || []).filter(v=>!v.selected && v._toDelete).length" @click="deleteSelectedSectionAssets('hook','image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (activePost.sections?.hook?.images || []).filter(v=>!v.selected && v._toDelete).length }})</button>
+                            <button @click="uploadSectionAsset('hook','image')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
                         </div>
                         <div v-if="activePost.sections?.['hook']?._imageOpen && (activePost.sections?.hook?.images || []).filter(v=>!v.selected).length" class="grid grid-cols-6 gap-1 mt-1">
                             <div v-for="img in (activePost.sections?.hook?.images || []).filter(v=>!v.selected)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
                                 :class="img.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
-                                <button @click="deleteSectionAsset(img,'hook')" class="absolute top-0.5 right-0.5 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-50 flex items-center justify-center font-bold shadow-lg">&times;</button>
+                                <button @click="deleteSectionAsset(img,'hook')" class="absolute top-0.5 right-0.5 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-10 flex items-center justify-center font-bold shadow-lg">&times;</button>
                                 <img v-if="previewMode" :src="img.url" @click="openPreview(img, 'image', null, 'hook')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
                                 <a v-else :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
                                 <div class="flex gap-1">
@@ -279,10 +286,15 @@
                                 <span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
                                 Videos ({{ (activePost.sections?.summary?.videos || []).filter(v=>!v.selected).length }})
                             </span>
+                            <button @click="deleteSectionAll('summary','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
+                            <button v-if="(activePost.sections?.summary?.videos || []).filter(v=>!v.selected && v._toDelete).length" @click="deleteSelectedSectionAssets('summary','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (activePost.sections?.summary?.videos || []).filter(v=>!v.selected && v._toDelete).length }})</button>
+                            <button @click="uploadSectionAsset('summary','video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
                         </div>
                         <div v-if="activePost.sections?.['summary']?._videoOpen && (activePost.sections?.summary?.videos || []).filter(v=>!v.selected).length" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.summary?.videos || []).filter(v=>!v.selected)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
-                                :class="v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
+                                :class="[v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800', v._toDelete ? 'ring-2 ring-red-500' : '']">
+                                <input type="checkbox" v-model="v._toDelete" class="absolute top-1 left-1 z-10 w-4 h-4 cursor-pointer">
+                                <button @click="deleteSectionAsset(v,'summary')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-10 flex items-center justify-center font-bold shadow-lg">&times;</button>
                                 <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v, 'video', null, 'summary')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                 <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
                                 <div class="flex gap-1">
@@ -301,10 +313,15 @@
                                 <span class="w-1.5 h-1.5 bg-orange-500 rounded-full"></span>
                                 Images ({{ (activePost.sections?.summary?.images || []).filter(v=>!v.selected).length }})
                             </span>
+                            <button @click="deleteSectionAll('summary','image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
+                            <button v-if="(activePost.sections?.summary?.images || []).filter(v=>!v.selected && v._toDelete).length" @click="deleteSelectedSectionAssets('summary','image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (activePost.sections?.summary?.images || []).filter(v=>!v.selected && v._toDelete).length }})</button>
+                            <button @click="uploadSectionAsset('summary','image')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
                         </div>
                         <div v-if="activePost.sections?.['summary']?._imageOpen && (activePost.sections?.summary?.images || []).filter(v=>!v.selected).length" class="grid grid-cols-6 gap-1 mt-1">
                             <div v-for="img in (activePost.sections?.summary?.images || []).filter(v=>!v.selected)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
-                                :class="img.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
+                                :class="[img.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800', img._toDelete ? 'ring-2 ring-red-500' : '']">
+                                <input type="checkbox" v-model="img._toDelete" class="absolute top-0.5 left-0.5 z-10 w-4 h-4 cursor-pointer">
+                                <button @click="deleteSectionAsset(img,'summary')" class="absolute top-0.5 right-0.5 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-10 flex items-center justify-center font-bold shadow-lg">&times;</button>
                                 <img v-if="previewMode" :src="img.url" @click="openPreview(img, 'image', null, 'summary')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
                                 <a v-else :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
                                 <div class="flex gap-1">
@@ -427,7 +444,7 @@
                                         <div v-if="s._videoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
                                             <div v-for="v in (para.videos || []).filter(v => v.sentenceId == s.id).sort((a,b) => a.order - b.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
                                                 :class="v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-700'">
-                                                <button @click="deleteAsset(v, para)" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
+                                                <button @click="deleteAsset(v, para)" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-10 flex items-center justify-center">×</button>
                                                 <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v, 'video', para)" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                                 <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.relativePath }}</a>
                                                 <div class="flex gap-1">
@@ -473,6 +490,7 @@
                                 Videos ({{ (para.videos || []).filter(v => v.sentenceId === null).length }})
                             </span>
                             <button @click="deleteAll(para, i+1, 'video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
+                            <button v-if="(para.videos || []).filter(v => v.sentenceId === null && !v.selected && v._toDelete).length" @click="deleteSelectedParaAssets(para, 'video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (para.videos || []).filter(v => v.sentenceId === null && !v.selected && v._toDelete).length }})</button>
                             <div class="ml-auto flex gap-1.5">
                                 <button @click="refetchMedia(para)" class="text-[9px] px-2.5 py-1 rounded-md bg-orange-600/80 hover:bg-orange-500 text-white font-black tracking-wide transition-all active:scale-95">🔄 Lấy lại</button>
                                 <button @click="aiGenerate(para, 'video')" class="text-[9px] px-2.5 py-1 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white font-black tracking-wide transition-all active:scale-95">✨ AI Generate</button>
@@ -482,8 +500,9 @@
                         <div v-if="para.videoOpen" class="grid grid-cols-4 gap-2 mt-1">
                             <div v-if="!(para.videos || []).filter(v => v.sentenceId === null).length" class="text-[10px] text-gray-700 italic">Trống</div>
                             <div v-for="v in (para.videos || []).filter(v => v.sentenceId === null)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
-                                :class="v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
-                                <button @click="deleteAsset(v, para)" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
+                                :class="[v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800', v._toDelete ? 'ring-2 ring-red-500' : '']">
+                                <input type="checkbox" v-model="v._toDelete" class="absolute top-1 left-1 z-10 w-4 h-4 cursor-pointer">
+                                <button @click="deleteAsset(v, para)" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-10 flex items-center justify-center">×</button>
                                 <video v-if="previewMode" muted loop preload="metadata" :src="v.url"
                                     @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()"
                                     @click="openPreview(v, 'video', para)"
@@ -511,6 +530,7 @@
                                 Images ({{ (para.images || []).filter(img => img.sentenceId === null).length }})
                             </span>
                             <button @click="deleteAll(para, i+1, 'image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
+                            <button v-if="(para.images || []).filter(img => img.sentenceId === null && !img.selected && img._toDelete).length" @click="deleteSelectedParaAssets(para, 'image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (para.images || []).filter(img => img.sentenceId === null && !img.selected && img._toDelete).length }})</button>
                             <div class="ml-auto flex gap-1.5">
                                 <button @click="refetchMedia(para)" class="text-[9px] px-2.5 py-1 rounded-md bg-orange-600/80 hover:bg-orange-500 text-white font-black tracking-wide transition-all active:scale-95">🔄 Lấy lại</button>
                                 <button @click="aiGenerate(para, 'image')" class="text-[9px] px-2.5 py-1 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white font-black tracking-wide transition-all active:scale-95">✨ AI Generate</button>
@@ -520,8 +540,9 @@
                         <div v-if="para.imageOpen" class="grid grid-cols-6 gap-2 mt-1">
                             <div v-if="!(para.images || []).filter(img => img.sentenceId === null).length" class="text-[10px] text-gray-700 italic">Trống</div>
                             <div v-for="img in (para.images || []).filter(img => img.sentenceId === null)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border"
-                                :class="img.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
+                                :class="[img.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800', img._toDelete ? 'ring-2 ring-red-500' : '']">
                                 <div class="relative">
+                                    <input type="checkbox" v-model="img._toDelete" class="absolute top-0.5 left-0.5 z-10 w-4 h-4 cursor-pointer">
                                     <template v-if="previewMode">
                                         <img :src="img.url" @click="openPreview(img, 'image', para)" class="w-full h-16 object-cover rounded mb-1 cursor-pointer">
                                         <button @click="deleteAsset(img, para)" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
@@ -625,10 +646,15 @@
                                 <span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
                                 Videos ({{ (activePost.sections?.conclusion?.videos || []).filter(v=>!v.selected).length }})
                             </span>
+                            <button @click="deleteSectionAll('conclusion','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
+                            <button v-if="(activePost.sections?.conclusion?.videos || []).filter(v=>!v.selected && v._toDelete).length" @click="deleteSelectedSectionAssets('conclusion','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (activePost.sections?.conclusion?.videos || []).filter(v=>!v.selected && v._toDelete).length }})</button>
+                            <button @click="uploadSectionAsset('conclusion','video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
                         </div>
                         <div v-if="activePost.sections?.['conclusion']?._videoOpen && (activePost.sections?.conclusion?.videos || []).filter(v=>!v.selected).length" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.conclusion?.videos || []).filter(v=>!v.selected)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
-                                :class="v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
+                                :class="[v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800', v._toDelete ? 'ring-2 ring-red-500' : '']">
+                                <input type="checkbox" v-model="v._toDelete" class="absolute top-1 left-1 z-10 w-4 h-4 cursor-pointer">
+                                <button @click="deleteSectionAsset(v,'conclusion')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-10 flex items-center justify-center font-bold shadow-lg">&times;</button>
                                 <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v, 'video', null, 'conclusion')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                 <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
                                 <div class="flex gap-1">
@@ -647,10 +673,15 @@
                                 <span class="w-1.5 h-1.5 bg-orange-500 rounded-full"></span>
                                 Images ({{ (activePost.sections?.conclusion?.images || []).filter(v=>!v.selected).length }})
                             </span>
+                            <button @click="deleteSectionAll('conclusion','image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
+                            <button v-if="(activePost.sections?.conclusion?.images || []).filter(v=>!v.selected && v._toDelete).length" @click="deleteSelectedSectionAssets('conclusion','image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (activePost.sections?.conclusion?.images || []).filter(v=>!v.selected && v._toDelete).length }})</button>
+                            <button @click="uploadSectionAsset('conclusion','image')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
                         </div>
                         <div v-if="activePost.sections?.['conclusion']?._imageOpen && (activePost.sections?.conclusion?.images || []).filter(v=>!v.selected).length" class="grid grid-cols-6 gap-1 mt-1">
                             <div v-for="img in (activePost.sections?.conclusion?.images || []).filter(v=>!v.selected)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
-                                :class="img.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800'">
+                                :class="[img.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800', img._toDelete ? 'ring-2 ring-red-500' : '']">
+                                <input type="checkbox" v-model="img._toDelete" class="absolute top-0.5 left-0.5 z-10 w-4 h-4 cursor-pointer">
+                                <button @click="deleteSectionAsset(img,'conclusion')" class="absolute top-0.5 right-0.5 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-10 flex items-center justify-center font-bold shadow-lg">&times;</button>
                                 <img v-if="previewMode" :src="img.url" @click="openPreview(img, 'image', null, 'conclusion')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
                                 <a v-else :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
                                 <div class="flex gap-1">
@@ -1565,6 +1596,52 @@ createApp({
             }
         }
 
+        async function deleteSectionAll(section, type) {
+            if (!confirm(`Xóa tất cả ${type === 'video' ? 'video' : 'ảnh'} chưa chọn trong ${section}?`)) return;
+            const res = await fetch('/api/delete-section-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: activePostId.value, section, type }) });
+            const r = await res.json();
+            if (r.success) {
+                const sec = activePost.value.sections[section];
+                if (type === 'video') sec.videos = sec.videos.filter(v => v.selected);
+                else sec.images = sec.images.filter(v => v.selected);
+            }
+        }
+
+        async function deleteSelectedSectionAssets(section, type) {
+            const sec = activePost.value.sections[section];
+            const items = type === 'video' ? (sec.videos || []) : (sec.images || []);
+            const toDelete = items.filter(a => !a.selected && a._toDelete);
+            if (!toDelete.length) return;
+            if (!confirm(`Xóa ${toDelete.length} ${type === 'video' ? 'video' : 'ảnh'} đã chọn?`)) return;
+            
+            for (const asset of toDelete) {
+                await fetch('/api/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath }) });
+            }
+            
+            if (type === 'video') {
+                sec.videos = sec.videos.filter(v => !v._toDelete || v.selected);
+            } else {
+                sec.images = sec.images.filter(v => !v._toDelete || v.selected);
+            }
+        }
+
+        async function deleteSelectedParaAssets(para, type) {
+            const items = type === 'video' ? (para.videos || []) : (para.images || []);
+            const toDelete = items.filter(a => a.sentenceId === null && !a.selected && a._toDelete);
+            if (!toDelete.length) return;
+            if (!confirm(`Xóa ${toDelete.length} ${type === 'video' ? 'video' : 'ảnh'} đã chọn?`)) return;
+            
+            for (const asset of toDelete) {
+                await fetch('/api/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath }) });
+            }
+            
+            if (type === 'video') {
+                para.videos = para.videos.filter(v => !v._toDelete || v.selected || v.sentenceId !== null);
+            } else {
+                para.images = para.images.filter(v => !v._toDelete || v.selected || v.sentenceId !== null);
+            }
+        }
+
         async function crawlVn(e, para, paraIndex) {
             const kw = e.target.value.trim();
             if (!kw) return;
@@ -1728,6 +1805,10 @@ createApp({
             if (r.success) await reloadParaAssets(para);
         }
 
+        function uploadSectionAsset(section, type) {
+            uploadModal.value = { open: true, type, section, para: null, gid: section, files: [], dragging: false, uploading: false, url: '', downloading: false };
+        }
+
         function uploadAsset(para, gid, type) {
             uploadModal.value = { open: true, type, para, gid: String(gid), files: [], dragging: false, uploading: false, url: '', downloading: false };
         }
@@ -1763,13 +1844,14 @@ createApp({
         }
 
         async function submitUpload() {
-            const { type, para, gid, files } = uploadModal.value;
+            const { type, para, section, gid, files } = uploadModal.value;
             if (!files.length) return;
             uploadModal.value.uploading = true;
             const form = new FormData();
             form.append('videoId', activeProjectId.value);
             form.append('groupId', gid);
-            form.append('paragraphId', String(para.id));
+            if (para) form.append('paragraphId', String(para.id));
+            if (section) form.append('section', section);
             form.append('type', type);
             files.forEach(f => form.append('files', f));
             try {
@@ -1778,10 +1860,14 @@ createApp({
                 if (r.success) {
                     showToast(`✅ Đã tải ${files.length} file!`);
                     uploadModal.value.open = false;
-                    const postRes = await fetch(`/api/posts/${activePostId.value}`);
-                    const data = await postRes.json();
-                    const updated = data.paragraphs.find(p => p.id === para.id);
-                    if (updated) { para.videos = updated.videos || []; para.images = updated.images || []; }
+                    if (para) {
+                        const postRes = await fetch(`/api/posts/${activePostId.value}`);
+                        const data = await postRes.json();
+                        const updated = data.paragraphs.find(p => p.id === para.id);
+                        if (updated) { para.videos = updated.videos || []; para.images = updated.images || []; }
+                    } else if (section) {
+                        await reloadSectionAssets(section);
+                    }
                 } else alert('❌ ' + r.error);
             } catch (e) { alert('❌ ' + e.message); }
             uploadModal.value.uploading = false;
@@ -2310,13 +2396,28 @@ createApp({
                 const updatedData = await res.json();
                 
                 if (updatedData && updatedData.paragraphs) {
-                    // Cập nhật sections (hook/summary/conclusion) - giữ toggle state
+                    // Cập nhật sections (hook/summary/conclusion) - giữ toggle state và _toDelete
                     if (updatedData.sections) {
                         for (const s of ['hook', 'summary', 'conclusion']) {
                             if (updatedData.sections[s]) {
                                 const prev = activePost.value.sections?.[s];
                                 updatedData.sections[s]._videoOpen = prev?._videoOpen ?? false;
                                 updatedData.sections[s]._imageOpen = prev?._imageOpen ?? false;
+                                // Preserve _toDelete
+                                if (prev?.videos) {
+                                    updatedData.sections[s].videos = updatedData.sections[s].videos.map(v => {
+                                        const old = prev.videos.find(ov => ov.relativePath === v.relativePath);
+                                        if (old?._toDelete) v._toDelete = true;
+                                        return v;
+                                    });
+                                }
+                                if (prev?.images) {
+                                    updatedData.sections[s].images = updatedData.sections[s].images.map(img => {
+                                        const old = prev.images.find(oi => oi.relativePath === img.relativePath);
+                                        if (old?._toDelete) img._toDelete = true;
+                                        return img;
+                                    });
+                                }
                             }
                         }
                         activePost.value.sections = updatedData.sections;
@@ -2333,12 +2434,20 @@ createApp({
                             });
                         }
                     }
-                    // Cập nhật videos/images cho tất cả paragraph hiện có
+                    // Cập nhật videos/images cho tất cả paragraph hiện có - giữ _toDelete
                     activePost.value.paragraphs.forEach((curPara, index) => {
                         const updPara = updatedData.paragraphs[index];
                         if (updPara) {
-                            curPara.videos = updPara.videos || [];
-                            curPara.images = updPara.images || [];
+                            curPara.videos = (updPara.videos || []).map(v => {
+                                const old = (curPara.videos || []).find(ov => ov.relativePath === v.relativePath);
+                                if (old?._toDelete) v._toDelete = true;
+                                return v;
+                            });
+                            curPara.images = (updPara.images || []).map(img => {
+                                const old = (curPara.images || []).find(oi => oi.relativePath === img.relativePath);
+                                if (old?._toDelete) img._toDelete = true;
+                                return img;
+                            });
                             curPara.sentences = updPara.sentences || curPara.sentences;
                         }
                     });
@@ -2423,6 +2532,10 @@ createApp({
             saveSummaryDetailField,
             toggleSectionAsset,
             deleteSectionAsset,
+            deleteSectionAll,
+            deleteSelectedSectionAssets,
+            deleteSelectedParaAssets,
+            uploadSectionAsset,
             moveModal,
             openMoveModal,
             doMoveAsset,

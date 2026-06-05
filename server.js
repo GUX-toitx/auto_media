@@ -836,7 +836,7 @@ app.post('/api/download-url', async (req, res) => {
 
 app.post('/api/upload', upload.array('files'), async (req, res) => {
     try {
-        const { videoId, groupId, paragraphId, type } = req.body;
+        const { videoId, groupId, paragraphId, section, type } = req.body;
         const targetDir = path.join(MEDIA_DIR, videoId, 'assets', type === 'video' ? '_raw_videos' : '_raw_images', groupId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
@@ -848,10 +848,22 @@ app.post('/api/upload', upload.array('files'), async (req, res) => {
             fs.renameSync(file.path, destPath);
 
             const relativePath = path.relative(MEDIA_DIR, destPath);
-            await db.run(
-                'INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)',
-                [paragraphId, type, relativePath]
-            );
+            if (section) {
+                // Upload cho section (hook/summary/conclusion)
+                const post = await db.get('SELECT id FROM Post WHERE project_id LIKE ?', [`%${videoId}%`]);
+                if (post) {
+                    await db.run(
+                        'INSERT INTO Asset (post_id, section, type, file_path) VALUES (?, ?, ?, ?)',
+                        [post.id, section, type, relativePath]
+                    );
+                }
+            } else {
+                // Upload cho paragraph
+                await db.run(
+                    'INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)',
+                    [paragraphId, type, relativePath]
+                );
+            }
         }
         await db.close();
         res.json({ success: true, count: req.files.length });
