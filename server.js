@@ -34,7 +34,7 @@ const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 app.get('/api/posts', async (req, res) => {
     try {
         const db = await getDb();
-        const posts = await db.all('SELECT id, project_id, status, audio_uuid, title, voice_content_type FROM Post ORDER BY id DESC');
+        const posts = await db.all('SELECT id, project_id, status, audio_uuid, COALESCE(title, project_id) AS title, voice_content_type FROM Post ORDER BY id DESC');
         await db.close();
         res.json(posts);
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -316,9 +316,37 @@ app.post('/api/download-voice', async (req, res) => {
             } catch(e) { console.error(`[download-voice] skip audio ${i+1}:`, e.message); }
         }
 
-        // Assets selected theo sentence
+        // Assets selected theo section (hook, summary, conclusion)
+        const sectionAssets = await db.all(
+            'SELECT file_path, "order", duration, section FROM Asset WHERE selected = 1 AND post_id = ? AND section IS NOT NULL ORDER BY section, "order"',
+            [postId]
+        );
+        for (const asset of sectionAssets) {
+            const srcPath = path.join(MEDIA_DIR, asset.file_path);
+            if (fs.existsSync(srcPath)) {
+                const ext = path.extname(asset.file_path);
+                const durSuffix = asset.duration ? `_${Math.round(asset.duration)}s` : '';
+                archive.file(srcPath, { name: `media/${asset.section}/${asset.order}${durSuffix}${ext}` });
+            }
+        }
+
+        // Assets selected theo sentence (paragraphs)
         const paragraphs = await db.all('SELECT id, "order" FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);
         for (const para of paragraphs) {
+            // Assets cho luận điểm (sentence_id IS NULL)
+            const paraAssets = await db.all(
+                'SELECT file_path, "order", duration FROM Asset WHERE selected = 1 AND paragraph_id = ? AND sentence_id IS NULL ORDER BY "order"',
+                [para.id]
+            );
+            for (const asset of paraAssets) {
+                const srcPath = path.join(MEDIA_DIR, asset.file_path);
+                if (fs.existsSync(srcPath)) {
+                    const ext = path.extname(asset.file_path);
+                    const durSuffix = asset.duration ? `_${Math.round(asset.duration)}s` : '';
+                    archive.file(srcPath, { name: `media/${para.order}_0/${asset.order}${durSuffix}${ext}` });
+                }
+            }
+            // Assets cho luận cứ (sentence)
             const sentences = await db.all('SELECT id, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"', [para.id]);
             for (const s of sentences) {
                 const assets = await db.all(
