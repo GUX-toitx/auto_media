@@ -197,27 +197,51 @@ app.post('/api/move-asset', async (req, res) => {
     const { assetId, targetParagraphId, targetPostId, targetSection, targetDetailId, detailType } = req.body;
     try {
         const db = await getDb();
-        
-        // Reset all foreign keys
-        await db.run('UPDATE Asset SET paragraph_id = NULL, sentence_id = NULL, post_id = NULL, section = NULL, hook_detail_id = NULL, summary_detail_id = NULL, conclusion_detail_id = NULL, paragraph_detail_id = NULL, sentence_detail_id = NULL WHERE id = ?', [assetId]);
-        
-        // Assign to new target
-        if (detailType === 'hook_detail' && targetDetailId) {
-            await db.run('UPDATE Asset SET hook_detail_id = ? WHERE id = ?', [targetDetailId, assetId]);
-        } else if (detailType === 'summary_detail' && targetDetailId) {
-            await db.run('UPDATE Asset SET summary_detail_id = ? WHERE id = ?', [targetDetailId, assetId]);
-        } else if (detailType === 'conclusion_detail' && targetDetailId) {
-            await db.run('UPDATE Asset SET conclusion_detail_id = ? WHERE id = ?', [targetDetailId, assetId]);
-        } else if (detailType === 'paragraph_detail' && targetDetailId) {
-            await db.run('UPDATE Asset SET paragraph_detail_id = ? WHERE id = ?', [targetDetailId, assetId]);
-        } else if (detailType === 'sentence_detail' && targetDetailId) {
-            await db.run('UPDATE Asset SET sentence_detail_id = ? WHERE id = ?', [targetDetailId, assetId]);
+        const asset = await db.get('SELECT * FROM Asset WHERE id = ?', [assetId]);
+        if (!asset) { await db.close(); return res.status(404).json({ error: 'Asset not found' }); }
+
+        const isFromSection = !!(asset.post_id && asset.section &&
+            !asset.hook_detail_id && !asset.summary_detail_id && !asset.conclusion_detail_id &&
+            !asset.paragraph_detail_id && !asset.sentence_detail_id);
+        const isFromDetail = !!(asset.hook_detail_id || asset.summary_detail_id || asset.conclusion_detail_id ||
+            asset.paragraph_detail_id || asset.sentence_detail_id);
+
+        const detailCols = {
+            hook_detail: 'hook_detail_id', summary_detail: 'summary_detail_id',
+            conclusion_detail: 'conclusion_detail_id', paragraph_detail: 'paragraph_detail_id',
+            sentence_detail: 'sentence_detail_id'
+        };
+
+        if (detailType && targetDetailId) {
+            const col = detailCols[detailType];
+            if (isFromSection) {
+                // Copy file
+                const srcPath = path.join(MEDIA_DIR, asset.file_path);
+                const ext = path.extname(asset.file_path);
+                const newFileName = path.basename(asset.file_path, ext) + `_copy_${Date.now()}` + ext;
+                const newFilePath = path.join(path.dirname(srcPath), newFileName);
+                if (fs.existsSync(srcPath)) fs.copyFileSync(srcPath, newFilePath);
+                const newRel = path.relative(MEDIA_DIR, newFilePath);
+                // Insert asset mới gán vào detail
+                await db.run(`INSERT INTO Asset (${col}, type, file_path, duration) VALUES (?, ?, ?, ?)`,
+                    [targetDetailId, asset.type, newRel, asset.duration]);
+            } else {
+                // Từ detail -> detail: chỉ update id
+                await db.run(`UPDATE Asset SET
+                    hook_detail_id = NULL, summary_detail_id = NULL, conclusion_detail_id = NULL,
+                    paragraph_detail_id = NULL, sentence_detail_id = NULL,
+                    post_id = NULL, section = NULL, paragraph_id = NULL, sentence_id = NULL
+                    WHERE id = ?`, [assetId]);
+                await db.run(`UPDATE Asset SET ${col} = ? WHERE id = ?`, [targetDetailId, assetId]);
+            }
         } else if (targetPostId && targetSection) {
-            await db.run('UPDATE Asset SET post_id = ?, section = ? WHERE id = ?', [targetPostId, targetSection, assetId]);
+            await db.run('UPDATE Asset SET paragraph_id = NULL, sentence_id = NULL, post_id = ?, section = ?, hook_detail_id = NULL, summary_detail_id = NULL, conclusion_detail_id = NULL, paragraph_detail_id = NULL, sentence_detail_id = NULL WHERE id = ?',
+                [targetPostId, targetSection, assetId]);
         } else if (targetParagraphId) {
-            await db.run('UPDATE Asset SET paragraph_id = ? WHERE id = ?', [targetParagraphId, assetId]);
+            await db.run('UPDATE Asset SET paragraph_id = ?, sentence_id = NULL, post_id = NULL, section = NULL, hook_detail_id = NULL, summary_detail_id = NULL, conclusion_detail_id = NULL, paragraph_detail_id = NULL, sentence_detail_id = NULL WHERE id = ?',
+                [targetParagraphId, assetId]);
         }
-        
+
         await db.close();
         res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
