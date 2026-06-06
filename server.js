@@ -52,17 +52,30 @@ app.get('/api/posts/:postId', async (req, res) => {
             'SELECT id, content, content_vi, content_audio, content_vi_audio, "order" FROM HookDetail WHERE post_id = ? ORDER BY "order"',
             [post.id]
         );
+        // Load assets for each hook_detail
+        for (const detail of post.hook_details) {
+            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE hook_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
+            detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
+            detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
+        }
+        
         // SummaryDetail
         post.summary_details = await db.all(
             'SELECT id, content, content_vi, content_audio, content_vi_audio, "order" FROM SummaryDetail WHERE post_id = ? ORDER BY "order"',
             [post.id]
         );
+        // Load assets for each summary_detail
+        for (const detail of post.summary_details) {
+            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE summary_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
+            detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
+            detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
+        }
 
         // Lấy keywords và assets cho từng section của post
         const sections = {};
         for (const section of ['hook', 'summary', 'conclusion']) {
             const kws = await db.all('SELECT id, content, type FROM Keyword WHERE post_id = ? AND section = ? ORDER BY id', [post.id, section]);
-            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE post_id = ? AND section = ? ORDER BY selected DESC, COALESCE(source_id, id), id', [post.id, section]);
+            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE post_id = ? AND section = ? AND hook_detail_id IS NULL AND summary_detail_id IS NULL ORDER BY selected DESC, COALESCE(source_id, id), id', [post.id, section]);
             const projectId = (post.project_id || '').replace(/_[a-z]{2}$/, '');
             sections[section] = {
                 keywords: kws,
@@ -88,6 +101,12 @@ app.get('/api/posts/:postId', async (req, res) => {
                 'SELECT id, content, content_vi, content_audio, content_vi_audio, "order" FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"',
                 [para.id]
             );
+            // Load assets for each paragraph_detail
+            for (const detail of para.details) {
+                const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE paragraph_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
+                detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
+                detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
+            }
             const rawSentences = await db.all(
                 'SELECT id, content, content_vi, title, title_vi, content_audio, content_vi_audio, title_audio, title_vi_audio, audio, sentence_uuid, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"',
                 [para.id]
@@ -97,6 +116,12 @@ app.get('/api/posts/:postId', async (req, res) => {
                     'SELECT id, content, content_vi, content_audio, content_vi_audio, "order" FROM SentenceDetail WHERE sentence_id = ? ORDER BY "order"',
                     [s.id]
                 );
+                // Load assets for each sentence_detail
+                for (const detail of details) {
+                    const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE sentence_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
+                    detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
+                    detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
+                }
                 return { ...s, sentenceUuid: s.sentence_uuid, audioUrl: s.audio ? (s.audio.startsWith('http') ? s.audio : `/${s.audio}`) : null, details };
             }));
 
@@ -106,9 +131,9 @@ app.get('/api/posts/:postId', async (req, res) => {
                 [para.id]
             ));
 
-            // File media từ DB
+            // File media từ DB (exclude assets assigned to details)
             const assets = await db.all(
-                'SELECT id, type, selected, "order", file_path, sentence_id, paragraph_id, duration FROM Asset WHERE paragraph_id = ? OR sentence_id IN (SELECT id FROM Sentence WHERE paragraph_id = ?) ORDER BY id',
+                'SELECT id, type, selected, "order", file_path, sentence_id, paragraph_id, duration FROM Asset WHERE (paragraph_id = ? OR sentence_id IN (SELECT id FROM Sentence WHERE paragraph_id = ?)) AND paragraph_detail_id IS NULL AND sentence_detail_id IS NULL ORDER BY id',
                 [para.id, para.id]
             );
             para.videos = assets
@@ -158,14 +183,28 @@ app.post('/api/add-keyword', async (req, res) => {
 
 // API: Di chuyển asset sang section/paragraph khác
 app.post('/api/move-asset', async (req, res) => {
-    const { assetId, targetParagraphId, targetPostId, targetSection } = req.body;
+    const { assetId, targetParagraphId, targetPostId, targetSection, targetDetailId, detailType } = req.body;
     try {
         const db = await getDb();
-        if (targetPostId && targetSection) {
-            await db.run('UPDATE Asset SET paragraph_id = NULL, sentence_id = NULL, post_id = ?, section = ? WHERE id = ?', [targetPostId, targetSection, assetId]);
+        
+        // Reset all foreign keys
+        await db.run('UPDATE Asset SET paragraph_id = NULL, sentence_id = NULL, post_id = NULL, section = NULL, hook_detail_id = NULL, summary_detail_id = NULL, paragraph_detail_id = NULL, sentence_detail_id = NULL WHERE id = ?', [assetId]);
+        
+        // Assign to new target
+        if (detailType === 'hook_detail' && targetDetailId) {
+            await db.run('UPDATE Asset SET hook_detail_id = ? WHERE id = ?', [targetDetailId, assetId]);
+        } else if (detailType === 'summary_detail' && targetDetailId) {
+            await db.run('UPDATE Asset SET summary_detail_id = ? WHERE id = ?', [targetDetailId, assetId]);
+        } else if (detailType === 'paragraph_detail' && targetDetailId) {
+            await db.run('UPDATE Asset SET paragraph_detail_id = ? WHERE id = ?', [targetDetailId, assetId]);
+        } else if (detailType === 'sentence_detail' && targetDetailId) {
+            await db.run('UPDATE Asset SET sentence_detail_id = ? WHERE id = ?', [targetDetailId, assetId]);
+        } else if (targetPostId && targetSection) {
+            await db.run('UPDATE Asset SET post_id = ?, section = ? WHERE id = ?', [targetPostId, targetSection, assetId]);
         } else if (targetParagraphId) {
-            await db.run('UPDATE Asset SET post_id = NULL, section = NULL, paragraph_id = ?, sentence_id = NULL WHERE id = ?', [targetParagraphId, assetId]);
+            await db.run('UPDATE Asset SET paragraph_id = ? WHERE id = ?', [targetParagraphId, assetId]);
         }
+        
         await db.close();
         res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -752,6 +791,22 @@ app.post('/api/delete', async (req, res) => {
 });
 
 // API: Toggle đổi tên
+app.post('/api/delete-asset', async (req, res) => {
+    const { assetId } = req.body;
+    try {
+        const db = await getDb();
+        const asset = await db.get('SELECT file_path FROM Asset WHERE id = ?', [assetId]);
+        if (asset) {
+            await db.run('DELETE FROM Asset WHERE id = ?', [assetId]);
+            // Optionally delete file
+            const fullPath = path.join(MEDIA_DIR, asset.file_path);
+            if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+        }
+        await db.close();
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/unselect-asset', async (req, res) => {
     const { videoId, relativePath, order, gid, type } = req.body;
     try {

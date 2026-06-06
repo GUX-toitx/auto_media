@@ -76,7 +76,10 @@
                 <div v-if="activePost.hook_details?.length" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
                     <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Mở bài</p>
                     <div class="space-y-1">
-                        <div v-for="d in activePost.hook_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1">
+                        <div v-for="d in activePost.hook_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
+                             @drop="handleDetailDrop($event, d, 'hook_detail')"
+                             @dragover.prevent
+                             @dragenter.prevent>
                             <div class="grid grid-cols-2 gap-1">
                                 <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveHookDetailField(d, 'content_vi', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content_vi" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500"></div>
                                 <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveHookDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
@@ -84,6 +87,43 @@
                             <div class="grid grid-cols-2 gap-1">
                                 <div><audio v-if="d.content_vi_audio" controls :src="d.content_vi_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                                 <div><audio v-if="d.content_audio" controls :src="d.content_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                            </div>
+                            <!-- Assets for this detail -->
+                            <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
+                                <div v-if="d.videos?.length" class="space-y-0.5">
+                                    <p class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
+                                    <div class="grid grid-cols-4 gap-1">
+                                        <div v-for="(v, vi) in d.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
+                                             draggable="true"
+                                             @dragstart="handleAssetDragStart($event, v, 'video', d, 'hook_detail')">
+                                            <button @click="deleteDetailAsset(v, d, 'hook_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
+                                            <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video')" class="w-full h-16 object-cover rounded mb-1 bg-black cursor-pointer"></video>
+                                            <a v-else :href="v.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
+                                            <div class="flex gap-0.5">
+                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ vi+1 }}</span>
+                                                <button @click="openEdit(v,'video')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                <button @click="openAssignDetailModal(v,'video')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div v-if="d.images?.length" class="space-y-0.5 mt-1">
+                                    <p class="text-[8px] text-gray-500 mb-0.5">Images ({{d.images.length}})</p>
+                                    <div class="grid grid-cols-4 gap-1">
+                                        <div v-for="(img, ii) in d.images" :key="img.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
+                                             draggable="true"
+                                             @dragstart="handleAssetDragStart($event, img, 'image', d, 'hook_detail')">
+                                            <button @click="deleteDetailAsset(img, d, 'hook_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
+                                            <img v-if="previewMode" :src="img.url" @click="openPreview(img,'image')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
+                                            <a v-else :href="img.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
+                                            <div class="flex gap-0.5">
+                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ ii+1 }}</span>
+                                                <button @click="openEdit(img,'image')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                <button @click="openAssignDetailModal(img,'image')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -117,7 +157,10 @@
                             {{ activePost.sections['hook']._selVideoOpen === false ? '▶' : '▼' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos đã chọn ({{ (activePost.sections?.hook?.videos||[]).filter(a=>a.selected).length }})
                         </div>
                         <div v-if="activePost.sections['hook']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
-                            <div v-for="v in (activePost.sections?.hook?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                            <div v-for="v in (activePost.sections?.hook?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" 
+                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
+                                 draggable="true"
+                                 @dragstart="handleSectionAssetDragStart($event, v, 'video', 'hook')">
                                 <button @click="deleteSectionAsset(v,'hook')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-10 flex items-center justify-center font-bold shadow-lg">&times;</button>
                                 <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video',null,'hook')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                 <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
@@ -125,7 +168,7 @@
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v,'hook','video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(v,'video',null,'hook')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openMoveModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
+                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -136,14 +179,17 @@
                             {{ activePost.sections['hook']._selImageOpen === false ? '▶' : '▼' }} <span class="w-1.5 h-1.5 bg-orange-500 rounded-full mx-1"></span> Images đã chọn ({{ (activePost.sections?.hook?.images||[]).filter(a=>a.selected).length }})
                         </div>
                         <div v-if="activePost.sections['hook']._selImageOpen !== false" class="grid grid-cols-6 gap-1 mt-1">
-                            <div v-for="img in (activePost.sections?.hook?.images||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                            <div v-for="img in (activePost.sections?.hook?.images||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="img.relativePath" 
+                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
+                                 draggable="true"
+                                 @dragstart="handleSectionAssetDragStart($event, img, 'image', 'hook')">
                                 <img v-if="previewMode" :src="img.url" @click="openPreview(img,'image',null,'hook')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
                                 <a v-else :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
                                 <div class="flex gap-1">
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img,'hook','image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(img,'image',null,'hook')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openMoveModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
+                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -170,7 +216,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v, 'hook', 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openMoveModal(v, 'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Di chuyển">↗</button>
+                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -196,7 +242,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img, 'hook', 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openMoveModal(img, 'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Di chuyển">↗</button>
+                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -207,7 +253,10 @@
                 <div v-if="activePost.summary_details?.length" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
                     <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Tóm tắt</p>
                     <div class="space-y-1">
-                        <div v-for="d in activePost.summary_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1">
+                        <div v-for="d in activePost.summary_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
+                             @drop="handleDetailDrop($event, d, 'summary_detail')"
+                             @dragover.prevent
+                             @dragenter.prevent>
                             <div class="grid grid-cols-2 gap-1">
                                 <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveSummaryDetailField(d, 'content_vi', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content_vi" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500"></div>
                                 <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveSummaryDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
@@ -215,6 +264,43 @@
                             <div class="grid grid-cols-2 gap-1">
                                 <div><audio v-if="d.content_vi_audio" controls :src="d.content_vi_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                                 <div><audio v-if="d.content_audio" controls :src="d.content_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                            </div>
+                            <!-- Assets for this detail -->
+                            <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
+                                <div v-if="d.videos?.length" class="space-y-0.5">
+                                    <p class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
+                                    <div class="grid grid-cols-4 gap-1">
+                                        <div v-for="(v, vi) in d.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
+                                             draggable="true"
+                                             @dragstart="handleAssetDragStart($event, v, 'video', d, 'summary_detail')">
+                                            <button @click="deleteDetailAsset(v, d, 'summary_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
+                                            <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video')" class="w-full h-16 object-cover rounded mb-1 bg-black cursor-pointer"></video>
+                                            <a v-else :href="v.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
+                                            <div class="flex gap-0.5">
+                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ vi+1 }}</span>
+                                                <button @click="openEdit(v,'video')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                <button @click="openAssignDetailModal(v,'video')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div v-if="d.images?.length" class="space-y-0.5 mt-1">
+                                    <p class="text-[8px] text-gray-500 mb-0.5">Images ({{d.images.length}})</p>
+                                    <div class="grid grid-cols-4 gap-1">
+                                        <div v-for="(img, ii) in d.images" :key="img.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
+                                             draggable="true"
+                                             @dragstart="handleAssetDragStart($event, img, 'image', d, 'summary_detail')">
+                                            <button @click="deleteDetailAsset(img, d, 'summary_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
+                                            <img v-if="previewMode" :src="img.url" @click="openPreview(img,'image')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
+                                            <a v-else :href="img.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
+                                            <div class="flex gap-0.5">
+                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ ii+1 }}</span>
+                                                <button @click="openEdit(img,'image')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                <button @click="openAssignDetailModal(img,'image')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -248,14 +334,17 @@
                             {{ activePost.sections['summary']._selVideoOpen === false ? '▶' : '▼' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos đã chọn ({{ (activePost.sections?.summary?.videos||[]).filter(a=>a.selected).length }})
                         </div>
                         <div v-if="activePost.sections['summary']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
-                            <div v-for="v in (activePost.sections?.summary?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                            <div v-for="v in (activePost.sections?.summary?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" 
+                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
+                                 draggable="true"
+                                 @dragstart="handleSectionAssetDragStart($event, v, 'video', 'summary')">
                                 <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video',null,'summary')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                 <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
                                 <div class="flex gap-1">
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v,'summary','video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(v,'video',null,'summary')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openMoveModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
+                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -266,14 +355,17 @@
                             {{ activePost.sections['summary']._selImageOpen === false ? '▶' : '▼' }} <span class="w-1.5 h-1.5 bg-orange-500 rounded-full mx-1"></span> Images đã chọn ({{ (activePost.sections?.summary?.images||[]).filter(a=>a.selected).length }})
                         </div>
                         <div v-if="activePost.sections['summary']._selImageOpen !== false" class="grid grid-cols-6 gap-1 mt-1">
-                            <div v-for="img in (activePost.sections?.summary?.images||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                            <div v-for="img in (activePost.sections?.summary?.images||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="img.relativePath" 
+                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
+                                 draggable="true"
+                                 @dragstart="handleSectionAssetDragStart($event, img, 'image', 'summary')">
                                 <img v-if="previewMode" :src="img.url" @click="openPreview(img,'image',null,'summary')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
                                 <a v-else :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
                                 <div class="flex gap-1">
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img,'summary','image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(img,'image',null,'summary')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openMoveModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
+                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -300,7 +392,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v, 'summary', 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openMoveModal(v, 'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Di chuyển">↗</button>
+                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -327,7 +419,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img, 'summary', 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openMoveModal(img, 'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Di chuyển">↗</button>
+                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -356,7 +448,10 @@
                                 <!-- Content row -->
                                 <div class="space-y-1">
                                     <div v-if="para.details?.length" class="space-y-1">
-                                        <div v-for="d in para.details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1">
+                                        <div v-for="d in para.details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
+                                             @drop="handleDetailDrop($event, d, 'paragraph_detail')"
+                                             @dragover.prevent
+                                             @dragenter.prevent>
                                             <div class="grid grid-cols-2 gap-1">
                                                 <div contenteditable="true" @blur="saveParaDetailField(d, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500">{{ d.content_vi }}</div>
                                                 <div contenteditable="true" @blur="saveParaDetailField(d, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500">{{ d.content }}</div>
@@ -364,6 +459,43 @@
                                             <div class="grid grid-cols-2 gap-1">
                                                 <div><audio v-if="d.content_vi_audio" controls :src="d.content_vi_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                                                 <div><audio v-if="d.content_audio" controls :src="d.content_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                            </div>
+                                            <!-- Assets for this detail -->
+                                            <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
+                                                <div v-if="d.videos?.length" class="space-y-0.5">
+                                                    <p class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
+                                                    <div class="grid grid-cols-4 gap-1">
+                                                        <div v-for="(v, vi) in d.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
+                                                             draggable="true"
+                                                             @dragstart="handleAssetDragStart($event, v, 'video', d, 'paragraph_detail')">
+                                                            <button @click="deleteDetailAsset(v, d, 'paragraph_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
+                                                            <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video')" class="w-full h-16 object-cover rounded mb-1 bg-black cursor-pointer"></video>
+                                                            <a v-else :href="v.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
+                                                            <div class="flex gap-0.5">
+                                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ vi+1 }}</span>
+                                                                <button @click="openEdit(v,'video')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                                <button @click="openAssignDetailModal(v,'video')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div v-if="d.images?.length" class="space-y-0.5 mt-1">
+                                                    <p class="text-[8px] text-gray-500 mb-0.5">Images ({{d.images.length}})</p>
+                                                    <div class="grid grid-cols-4 gap-1">
+                                                        <div v-for="(img, ii) in d.images" :key="img.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
+                                                             draggable="true"
+                                                             @dragstart="handleAssetDragStart($event, img, 'image', d, 'paragraph_detail')">
+                                                            <button @click="deleteDetailAsset(img, d, 'paragraph_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
+                                                            <img v-if="previewMode" :src="img.url" @click="openPreview(img,'image')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
+                                                            <a v-else :href="img.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
+                                                            <div class="flex gap-0.5">
+                                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ ii+1 }}</span>
+                                                                <button @click="openEdit(img,'image')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                                <button @click="openAssignDetailModal(img,'image')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -408,13 +540,17 @@
                                     {{ para._paraVideoOpen ? '▼' : '▶' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos luận điểm ({{ (para.videos || []).filter(v => v.selected && v.sentenceId === null).length }})
                                 </div>
                                 <div v-if="para._paraVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
-                                    <div v-for="v in (para.videos || []).filter(v => v.selected && v.sentenceId === null).sort((a,b) => a.order - b.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                    <div v-for="v in (para.videos || []).filter(v => v.selected && v.sentenceId === null).sort((a,b) => a.order - b.order)" :key="v.relativePath" 
+                                         class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
+                                         draggable="true"
+                                         @dragstart="handleParaAssetDragStart($event, v, 'video', para)">
                                         <button @click="unselectAsset(v, para, 0, 'video')" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
                                         <video muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v, 'video', para)" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                         <div class="flex gap-1">
                                             <button class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</button>
                                             <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-green-600 uppercase">✓</button>
                                             <button @click="openEdit(v, 'video', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                            <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                         </div>
                                     </div>
                                 </div>
@@ -424,13 +560,17 @@
                                     {{ para._paraImageOpen ? '▼' : '▶' }} <span class="w-1.5 h-1.5 bg-orange-500 rounded-full mx-1"></span> Images luận điểm ({{ (para.images || []).filter(img => img.selected && img.sentenceId === null).length }})
                                 </div>
                                 <div v-if="para._paraImageOpen !== false" class="grid grid-cols-6 gap-1 mt-1">
-                                    <div v-for="img in (para.images || []).filter(img => img.selected && img.sentenceId === null).sort((a,b) => a.order - b.order)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                    <div v-for="img in (para.images || []).filter(img => img.selected && img.sentenceId === null).sort((a,b) => a.order - b.order)" :key="img.relativePath" 
+                                         class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
+                                         draggable="true"
+                                         @dragstart="handleParaAssetDragStart($event, img, 'image', para)">
                                         <button @click="unselectAsset(img, para, 0, 'image')" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
                                         <img :src="img.url" @click="openPreview(img, 'image', para)" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
                                         <div class="flex gap-1">
                                             <button class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</button>
                                             <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-green-600 uppercase">✓</button>
                                             <button @click="openEdit(img, 'image', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                            <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                         </div>
                                     </div>
                                 </div>
@@ -455,7 +595,10 @@
                                             <!-- Sentence content - hiển thị details -->
                                             <div class="space-y-1">
                                                 <div v-if="s.details?.length" class="space-y-1">
-                                                    <div v-for="d in s.details" :key="d.id" class="bg-gray-950/80 border border-gray-800 rounded-lg p-1.5 space-y-1">
+                                                    <div v-for="d in s.details" :key="d.id" class="bg-gray-950/80 border border-gray-800 rounded-lg p-1.5 space-y-1"
+                                                         @drop="handleDetailDrop($event, d, 'sentence_detail')"
+                                                         @dragover.prevent
+                                                         @dragenter.prevent>
                                                         <div class="grid grid-cols-2 gap-1">
                                                             <div contenteditable="true" @blur="saveDetailField(d, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500">{{ d.content_vi }}</div>
                                                             <div contenteditable="true" @blur="saveDetailField(d, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500">{{ d.content }}</div>
@@ -463,6 +606,43 @@
                                                         <div class="grid grid-cols-2 gap-1">
                                                             <div><audio v-if="d.content_vi_audio" controls :src="d.content_vi_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                                                             <div><audio v-if="d.content_audio" controls :src="d.content_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                                        </div>
+                                                        <!-- Assets for this detail -->
+                                                        <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
+                                                            <div v-if="d.videos?.length" class="space-y-0.5">
+                                                                <p class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
+                                                                <div class="grid grid-cols-4 gap-1">
+                                                                    <div v-for="(v, vi) in d.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
+                                                                         draggable="true"
+                                                                         @dragstart="handleAssetDragStart($event, v, 'video', d, 'sentence_detail')">
+                                                                        <button @click="deleteDetailAsset(v, d, 'sentence_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
+                                                                        <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video')" class="w-full h-16 object-cover rounded mb-1 bg-black cursor-pointer"></video>
+                                                                        <a v-else :href="v.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
+                                                                        <div class="flex gap-0.5">
+                                                                            <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ vi+1 }}</span>
+                                                                            <button @click="openEdit(v,'video')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                                            <button @click="openAssignDetailModal(v,'video')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div v-if="d.images?.length" class="space-y-0.5 mt-1">
+                                                                <p class="text-[8px] text-gray-500 mb-0.5">Images ({{d.images.length}})</p>
+                                                                <div class="grid grid-cols-4 gap-1">
+                                                                    <div v-for="(img, ii) in d.images" :key="img.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
+                                                                         draggable="true"
+                                                                         @dragstart="handleAssetDragStart($event, img, 'image', d, 'sentence_detail')">
+                                                                        <button @click="deleteDetailAsset(img, d, 'sentence_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
+                                                                        <img v-if="previewMode" :src="img.url" @click="openPreview(img,'image')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
+                                                                        <a v-else :href="img.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
+                                                                        <div class="flex gap-0.5">
+                                                                            <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ ii+1 }}</span>
+                                                                            <button @click="openEdit(img,'image')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                                            <button @click="openAssignDetailModal(img,'image')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -485,6 +665,7 @@
                                                     <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                                     <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
                                                         :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
+                                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                                     <button @click="openEdit(v, 'video', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
                                                 </div>
                                             </div>
@@ -505,6 +686,7 @@
                                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                                     <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
                                                         :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
+                                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                                     <button @click="openEdit(img, 'image', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
                                                 </div>
                                             </div>
@@ -546,7 +728,7 @@
                                     <span v-if="v.selected" class="text-[9px] font-black py-1 px-2 rounded bg-blue-600 text-white min-w-[24px] text-center">#{{ v.order }}</span>
                                     <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-1 rounded uppercase transition-colors"
                                         :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openMoveModal(v, 'video')" class="text-[9px] font-black py-1 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Di chuyển">↗</button>
+                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-1 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                     <button @click="openEdit(v, 'video', para)" :disabled="!v.selected"
                                         class="text-[9px] font-black py-1 px-2 rounded transition-colors"
                                         :class="v.selected ? 'bg-yellow-500 hover:bg-yellow-400 text-black' : 'bg-gray-800 text-gray-700 cursor-not-allowed'">Edit</button>
@@ -590,7 +772,7 @@
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white min-w-[20px] text-center">#{{ img.order }}</span>
                                     <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
                                         :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openMoveModal(img, 'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Di chuyển">↗</button>
+                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                     <button @click="openEdit(img, 'image', para)" :disabled="!img.selected"
                                         class="text-[9px] font-black py-0.5 px-1.5 rounded transition-colors"
                                         :class="img.selected ? 'bg-yellow-500 hover:bg-yellow-400 text-black' : 'bg-gray-800 text-gray-700 cursor-not-allowed'">Edit</button>
@@ -642,14 +824,17 @@
                             {{ activePost.sections['conclusion']._selVideoOpen === false ? '▶' : '▼' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos đã chọn ({{ (activePost.sections?.conclusion?.videos||[]).filter(a=>a.selected).length }})
                         </div>
                         <div v-if="activePost.sections['conclusion']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
-                            <div v-for="v in (activePost.sections?.conclusion?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                            <div v-for="v in (activePost.sections?.conclusion?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" 
+                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
+                                 draggable="true"
+                                 @dragstart="handleSectionAssetDragStart($event, v, 'video', 'conclusion')">
                                 <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video',null,'conclusion')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                 <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
                                 <div class="flex gap-1">
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v,'conclusion','video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(v,'video',null,'conclusion')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openMoveModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
+                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -660,14 +845,17 @@
                             {{ activePost.sections['conclusion']._selImageOpen === false ? '▶' : '▼' }} <span class="w-1.5 h-1.5 bg-orange-500 rounded-full mx-1"></span> Images đã chọn ({{ (activePost.sections?.conclusion?.images||[]).filter(a=>a.selected).length }})
                         </div>
                         <div v-if="activePost.sections['conclusion']._selImageOpen !== false" class="grid grid-cols-6 gap-1 mt-1">
-                            <div v-for="img in (activePost.sections?.conclusion?.images||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                            <div v-for="img in (activePost.sections?.conclusion?.images||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="img.relativePath" 
+                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
+                                 draggable="true"
+                                 @dragstart="handleSectionAssetDragStart($event, img, 'image', 'conclusion')">
                                 <img v-if="previewMode" :src="img.url" @click="openPreview(img,'image',null,'conclusion')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
                                 <a v-else :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
                                 <div class="flex gap-1">
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img,'conclusion','image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(img,'image',null,'conclusion')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openMoveModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
+                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -694,7 +882,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v, 'conclusion', 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openMoveModal(v, 'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Di chuyển">↗</button>
+                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -721,7 +909,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img, 'conclusion', 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openMoveModal(img, 'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Di chuyển">↗</button>
+                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -1272,6 +1460,98 @@
     </div>
 
     <!-- MOVE ASSET MODAL -->
+    <!-- Assign to Detail Modal - Expandable Sections -->
+    <div v-if="assignDetailModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50" @click.self="assignDetailModal.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-[600px] space-y-3">
+            <div class="flex justify-between items-center">
+                <h3 class="text-sm font-black text-white">🎯 Gán Asset vào Detail</h3>
+                <button @click="assignDetailModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+            
+            <div class="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+                <!-- Hook Section -->
+                <div class="border border-gray-700 rounded-lg overflow-hidden">
+                    <button @click="selectTargetSection('hook')" 
+                            @dblclick="assignToSection('hook')"
+                            class="w-full text-left px-3 py-2 bg-gray-800 hover:bg-gray-700 text-[11px] font-bold text-gray-300 transition-colors flex items-center justify-between">
+                        <span>🎬 Mở bài (Hook)</span>
+                        <span class="text-gray-500">{{ assignDetailModal.selectedTarget === 'hook' ? '▼' : '▶' }}</span>
+                    </button>
+                    <div v-if="assignDetailModal.selectedTarget === 'hook'" class="bg-gray-900 border-t border-gray-700 p-2 space-y-1">
+                        <div v-if="!assignDetailModal.details.length" class="text-[10px] text-gray-600 italic px-2 py-2">Chưa có Hook Details</div>
+                        <button v-for="(d, i) in assignDetailModal.details" :key="d.id" 
+                                @click="expandDetail(d)"
+                                @dblclick="assignAssetToDetail(d.id)" 
+                                class="w-full text-left px-3 py-2 rounded bg-gray-800 hover:bg-blue-600 text-[10px] text-gray-300 transition-colors">
+                            📝 Detail #{{ i + 1 }}: {{ (d.content_vi || d.content || '').slice(0, 70) }}...
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Summary Section -->
+                <div class="border border-gray-700 rounded-lg overflow-hidden">
+                    <button @click="selectTargetSection('summary')" 
+                            @dblclick="assignToSection('summary')"
+                            class="w-full text-left px-3 py-2 bg-gray-800 hover:bg-gray-700 text-[11px] font-bold text-gray-300 transition-colors flex items-center justify-between">
+                        <span>📝 Tóm tắt (Summary)</span>
+                        <span class="text-gray-500">{{ assignDetailModal.selectedTarget === 'summary' ? '▼' : '▶' }}</span>
+                    </button>
+                    <div v-if="assignDetailModal.selectedTarget === 'summary'" class="bg-gray-900 border-t border-gray-700 p-2 space-y-1">
+                        <div v-if="!assignDetailModal.details.length" class="text-[10px] text-gray-600 italic px-2 py-2">Chưa có Summary Details</div>
+                        <button v-for="(d, i) in assignDetailModal.details" :key="d.id" 
+                                @click="expandDetail(d)"
+                                @dblclick="assignAssetToDetail(d.id)" 
+                                class="w-full text-left px-3 py-2 rounded bg-gray-800 hover:bg-blue-600 text-[10px] text-gray-300 transition-colors">
+                            📝 Detail #{{ i + 1 }}: {{ (d.content_vi || d.content || '').slice(0, 70) }}...
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Conclusion Section -->
+                <div class="border border-gray-700 rounded-lg overflow-hidden">
+                    <button @click="selectTargetSection('conclusion')" 
+                            @dblclick="assignToSection('conclusion')"
+                            class="w-full text-left px-3 py-2 bg-gray-800 hover:bg-gray-700 text-[11px] font-bold text-gray-300 transition-colors flex items-center justify-between">
+                        <span>🎯 Kết bài (Conclusion)</span>
+                        <span class="text-gray-500">{{ assignDetailModal.selectedTarget === 'conclusion' ? '▼' : '▶' }}</span>
+                    </button>
+                    <div v-if="assignDetailModal.selectedTarget === 'conclusion'" class="bg-gray-900 border-t border-gray-700 p-2 space-y-1">
+                        <div v-if="!assignDetailModal.details.length" class="text-[10px] text-gray-600 italic px-2 py-2">Chưa có Conclusion Details</div>
+                        <button v-for="(d, i) in assignDetailModal.details" :key="d.id" 
+                                @click="expandDetail(d)"
+                                @dblclick="assignAssetToDetail(d.id)" 
+                                class="w-full text-left px-3 py-2 rounded bg-gray-800 hover:bg-blue-600 text-[10px] text-gray-300 transition-colors">
+                            📝 Detail #{{ i + 1 }}: {{ (d.content_vi || d.content || '').slice(0, 70) }}...
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="border-t border-gray-700 my-2"></div>
+                
+                <!-- Paragraph Sections -->
+                <div v-for="(para, i) in (activePost?.paragraphs || [])" :key="para.id" class="border border-gray-700 rounded-lg overflow-hidden">
+                    <button @click="selectTargetParagraph(para.id)" 
+                            @dblclick="assignToParagraph(para.id)"
+                            class="w-full text-left px-3 py-2 bg-gray-800 hover:bg-gray-700 text-[11px] font-bold text-gray-300 transition-colors flex items-center justify-between">
+                        <span>🎬 Cảnh {{ i + 1 }}<span v-if="para.title_vi" class="text-gray-500 ml-1 font-normal">— {{ para.title_vi.slice(0,35) }}</span></span>
+                        <span class="text-gray-500">{{ assignDetailModal.selectedTarget === para.id ? '▼' : '▶' }}</span>
+                    </button>
+                    <div v-if="assignDetailModal.selectedTarget === para.id" class="bg-gray-900 border-t border-gray-700 p-2 space-y-1">
+                        <div v-if="!assignDetailModal.details.length" class="text-[10px] text-gray-600 italic px-2 py-2">Chưa có Paragraph Details</div>
+                        <button v-for="(d, j) in assignDetailModal.details" :key="d.id" 
+                                @click="expandDetail(d)"
+                                @dblclick="assignAssetToDetail(d.id)" 
+                                class="w-full text-left px-3 py-2 rounded bg-gray-800 hover:bg-blue-600 text-[10px] text-gray-300 transition-colors">
+                            📝 Detail #{{ j + 1 }}: {{ (d.content_vi || d.content || '').slice(0, 70) }}...
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <button @click="assignDetailModal.open = false" class="w-full py-2 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
+        </div>
+    </div>
+
     <div v-if="moveModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50" @click.self="moveModal.open = false">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-[420px] space-y-3">
             <div class="flex justify-between items-center">
@@ -1574,6 +1854,7 @@ createApp({
         }
 
         const moveModal = ref({ open: false, asset: null, type: '' });
+        const assignDetailModal = ref({ open: false, asset: null, type: '', selectedTarget: null, detailType: null, details: [] });
 
         function openMoveModal(asset, type) {
             moveModal.value = { open: true, asset, type };
@@ -2528,6 +2809,104 @@ createApp({
             }
         };
 
+        function openAssignDetailModal(asset, type) {
+            assignDetailModal.value = { open: true, asset, type, selectedTarget: null, detailType: null, details: [] };
+        }
+
+        function expandDetail(detail) {
+            // Single click on detail - just show highlight or do nothing
+            console.log('[expandDetail]', detail.id);
+        }
+
+        async function assignToSection(section) {
+            // Double-click on section header - assign to section (old behavior)
+            const { asset } = assignDetailModal.value;
+            const post = activePost.value;
+            await fetch('/api/move-asset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assetId: asset.id, targetPostId: post.id, targetSection: section })
+            });
+            assignDetailModal.value.open = false;
+            await reloadCurrentPost();
+        }
+
+        async function assignToParagraph(paraId) {
+            // Double-click on paragraph header - assign to paragraph (old behavior)
+            const { asset } = assignDetailModal.value;
+            await fetch('/api/move-asset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assetId: asset.id, targetParagraphId: paraId })
+            });
+            assignDetailModal.value.open = false;
+            await reloadCurrentPost();
+        }
+
+        function selectTargetSection(section) {
+            // Toggle expand/collapse
+            if (assignDetailModal.value.selectedTarget === section) {
+                assignDetailModal.value.selectedTarget = null;
+                assignDetailModal.value.detailType = null;
+                assignDetailModal.value.details = [];
+                return;
+            }
+            
+            let details = [];
+            let detailType = null;
+            if (section === 'hook') {
+                details = activePost.value.hook_details || [];
+                detailType = 'hook_detail';
+            } else if (section === 'summary') {
+                details = activePost.value.summary_details || [];
+                detailType = 'summary_detail';
+            } else if (section === 'conclusion') {
+                details = [];
+                detailType = 'conclusion_detail';
+            }
+            assignDetailModal.value.selectedTarget = section;
+            assignDetailModal.value.detailType = detailType;
+            assignDetailModal.value.details = details;
+        }
+
+        async function assignToSection(section) {
+            const { asset } = assignDetailModal.value;
+            const post = activePost.value;
+            await fetch('/api/move-asset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assetId: asset.id, targetPostId: post.id, targetSection: section })
+            });
+            assignDetailModal.value.open = false;
+            await reloadCurrentPost();
+        }
+
+        function selectTargetParagraph(paraId) {
+            // Toggle expand/collapse
+            if (assignDetailModal.value.selectedTarget === paraId) {
+                assignDetailModal.value.selectedTarget = null;
+                assignDetailModal.value.detailType = null;
+                assignDetailModal.value.details = [];
+                return;
+            }
+            
+            const para = activePost.value.paragraphs.find(p => p.id === paraId);
+            assignDetailModal.value.selectedTarget = paraId;
+            assignDetailModal.value.detailType = 'paragraph_detail';
+            assignDetailModal.value.details = para?.details || [];
+        }
+
+        async function assignAssetToDetail(detailId) {
+            const { asset, detailType } = assignDetailModal.value;
+            await fetch('/api/move-asset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assetId: asset.id, targetDetailId: detailId, detailType })
+            });
+            assignDetailModal.value.open = false;
+            await reloadCurrentPost();
+        }
+
         const startMediaPolling = () => {
             if (mediaPollingInterval) clearInterval(mediaPollingInterval);
             mediaPollingInterval = setInterval(() => {
@@ -2574,6 +2953,47 @@ createApp({
             }
         };
 
+        function handleSectionAssetDragStart(e, asset, type, section) {
+            e.dataTransfer.setData('asset', JSON.stringify({ assetId: asset.id, type, section, source: 'section' }));
+        }
+
+        function handleParaAssetDragStart(e, asset, type, para) {
+            e.dataTransfer.setData('asset', JSON.stringify({ assetId: asset.id, type, paraId: para.id, source: 'paragraph' }));
+        }
+
+        async function handleDetailDrop(e, detail, detailType) {
+            const data = JSON.parse(e.dataTransfer.getData('asset'));
+            await fetch('/api/move-asset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assetId: data.assetId, targetDetailId: detail.id, detailType })
+            });
+            await reloadCurrentPost();
+        }
+
+        function handleAssetDragStart(e, asset, type, detail, detailType) {
+            e.dataTransfer.setData('asset', JSON.stringify({ assetId: asset.id, type, detailId: detail.id, detailType }));
+        }
+
+        async function deleteDetailAsset(asset, detail, detailType) {
+            if (!confirm('Xóa asset này?')) return;
+            await fetch('/api/delete-asset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assetId: asset.id })
+            });
+            await reloadCurrentPost();
+        }
+
+        async function reloadCurrentPost() {
+            if (!activePostId.value) return;
+            const res = await fetch(`/api/posts/${activePostId.value}`);
+            const data = await res.json();
+            const idx = posts.value.findIndex(p => p.id === activePostId.value);
+            if (idx >= 0) posts.value[idx] = data;
+            activePost.value = data;
+        }
+
         return {
             page,
             posts,
@@ -2606,7 +3026,20 @@ createApp({
             deleteSectionAll,
             deleteSelectedSectionAssets,
             deleteSelectedParaAssets,
+            handleDetailDrop,
+            handleAssetDragStart,
+            handleSectionAssetDragStart,
+            handleParaAssetDragStart,
+            deleteDetailAsset,
             uploadSectionAsset,
+            assignDetailModal,
+            openAssignDetailModal,
+            selectTargetSection,
+            selectTargetParagraph,
+            assignAssetToDetail,
+            assignToSection,
+            assignToParagraph,
+            expandDetail,
             moveModal,
             openMoveModal,
             doMoveAsset,

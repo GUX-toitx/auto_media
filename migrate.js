@@ -109,6 +109,10 @@ export async function initDB() {
     await db.run('ALTER TABLE Asset ADD COLUMN post_id INTEGER DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Asset ADD COLUMN section TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Asset ADD COLUMN source_id INTEGER DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Asset ADD COLUMN hook_detail_id INTEGER DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Asset ADD COLUMN summary_detail_id INTEGER DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Asset ADD COLUMN paragraph_detail_id INTEGER DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Asset ADD COLUMN sentence_detail_id INTEGER DEFAULT NULL').catch(() => {});
     await db.run(`CREATE TABLE IF NOT EXISTS SentenceDetail (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sentence_id INTEGER NOT NULL,
