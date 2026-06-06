@@ -63,7 +63,7 @@
                     <button @click="createVoice" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
                     <button @click="retryDownloadVoice" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔄 Refresh Voice</button>
                     <button @click="openDownloadAudioModal" class="bg-yellow-600 hover:bg-yellow-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">⬇️ Chỉ Tải Voice</button>
-                    <button @click="downloadVoice" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice & Media Selected</button>
+                    <button @click="openDownloadVoiceModal" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice & Media Selected</button>
                     <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-600 hover:bg-orange-500 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
                         <span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}
                     </button>
@@ -1409,6 +1409,15 @@
                 <button @click="downloadAudioModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
             </div>
 
+            <!-- Ngôn ngữ -->
+            <div class="space-y-2">
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Ngôn ngữ</label>
+                <div class="flex gap-2">
+                    <button @click="downloadAudioModal.contentType = 'content'" class="flex-1 py-2 rounded-lg text-[11px] font-black transition-colors" :class="downloadAudioModal.contentType === 'content' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">🎤 Target Language</button>
+                    <button @click="downloadAudioModal.contentType = 'content_vi'" class="flex-1 py-2 rounded-lg text-[11px] font-black transition-colors" :class="downloadAudioModal.contentType === 'content_vi' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">🇻🇳 Tiếng Việt</button>
+                </div>
+            </div>
+
             <!-- Download type -->
             <div class="space-y-2">
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Kiểu tải</label>
@@ -2727,21 +2736,29 @@ createApp({
             pollingTimer.value = setInterval(poll, 3000);
         }
 
-        const downloadAudioModal = ref({ open: false, type: 'merged', silence: 0.5 });
+        const downloadAudioModal = ref({ open: false, type: 'merged', silence: 0.5, contentType: 'content' });
 
         function openDownloadAudioModal() {
-            downloadAudioModal.value = { open: true, type: 'merged', silence: 0.5 };
+            downloadAudioModal.value = { open: true, type: 'merged', silence: 0.5, contentType: 'content' };
+        }
+
+        function openDownloadVoiceModal() {
+            downloadAudioModal.value = { open: true, type: 'merged', silence: 0.5, contentType: 'content', withMedia: true };
         }
 
         async function submitDownloadAudio() {
-            const { type, silence } = downloadAudioModal.value;
-            downloadAudioModal.value.open = false;
+            const { type, silence, contentType } = downloadAudioModal.value;
             showToast('⏳ Đang xử lý...', 60000);
             try {
-                const endpoint = type === 'merged' ? '/api/download-audio/merged' : '/api/download-audio/individual';
-                const body = { postId: activePostId.value };
-                if (type === 'merged') body.silenceDuration = silence;
-                const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                let res;
+                if (downloadAudioModal.value.withMedia) {
+                    res = await fetch('/api/download-voice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoId: activeProjectId.value, postId: activePostId.value, contentType }) });
+                } else {
+                    const endpoint = type === 'merged' ? '/api/download-audio/merged' : '/api/download-audio/individual';
+                    const body = { postId: activePostId.value, contentType };
+                    if (type === 'merged') body.silenceDuration = silence;
+                    res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                }
                 if (!res.ok) { const r = await res.json(); return showToast('❌ ' + r.error); }
                 const blob = await res.blob();
                 const disposition = res.headers.get('Content-Disposition') || '';
@@ -3147,6 +3164,7 @@ createApp({
             submitRecreateSentenceVoice,
             downloadAudioModal,
             openDownloadAudioModal,
+            openDownloadVoiceModal,
             submitDownloadAudio,
             retryDownloadVoice,
             submitCreateVoice,

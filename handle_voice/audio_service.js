@@ -119,7 +119,7 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid, cont
     const tf = isVi ? 'content_vi' : 'content'; // text field
     const rows = [];
 
-    const post = await db.get('SELECT id, conclusion_vi, conclusion_target FROM Post WHERE id = ?', [postId]);
+    const post = await db.get('SELECT id FROM Post WHERE id = ?', [postId]);
 
     const hookDetails = await db.all('SELECT id, content, content_vi FROM HookDetail WHERE post_id = ? ORDER BY "order"', [postId]);
     for (const d of hookDetails) if ((d[tf] || '').trim()) rows.push({ src: 'hook', id: d.id, text: d[tf] });
@@ -144,8 +144,8 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid, cont
         }
     }
 
-    const conclusionText = isVi ? post.conclusion_vi : post.conclusion_target;
-    if ((conclusionText || '').trim()) rows.push({ src: 'post_conclusion', id: post.id, text: conclusionText });
+    const conclusionDetails = await db.all('SELECT id, content, content_vi FROM ConclusionDetail WHERE post_id = ? ORDER BY "order"', [postId]);
+    for (const d of conclusionDetails) if ((d[tf] || '').trim()) rows.push({ src: 'conclusion', id: d.id, text: d[tf] });
 
     await db.close();
 
@@ -166,7 +166,7 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid, cont
         for (let i = 0; i < batchSentences.length; i++) {
             const row = rowIds[i];
             if (row && batchSentences[i]?.uuid) {
-                const tblMap = { hook: 'HookDetail', summary: 'SummaryDetail', para: 'ParagraphDetail', sent: 'SentenceDetail', para_title: 'Paragraph', sent_title: 'Sentence' };
+                const tblMap = { hook: 'HookDetail', summary: 'SummaryDetail', conclusion: 'ConclusionDetail', para: 'ParagraphDetail', sent: 'SentenceDetail', para_title: 'Paragraph', sent_title: 'Sentence' };
                 const tbl = tblMap[row.src];
                 if (tbl) await db2.run(`UPDATE ${tbl} SET sentence_uuid = ? WHERE id = ?`, [batchSentences[i].uuid, row.id]);
             }
@@ -221,7 +221,7 @@ export async function checkAndSaveVoice(batchUuid, postId, contentType = 'conten
         const audioField = isVi ? '_vi_audio' : '_audio';
         const units = [];
 
-        const post = await db.get('SELECT id, conclusion_vi, conclusion_target FROM Post WHERE id = ?', [postId]);
+        const post = await db.get('SELECT id FROM Post WHERE id = ?', [postId]);
 
         const hookDetails = await db.all('SELECT id, content, content_vi FROM HookDetail WHERE post_id = ? ORDER BY "order"', [postId]);
         for (const d of hookDetails) {
@@ -252,8 +252,10 @@ export async function checkAndSaveVoice(batchUuid, postId, contentType = 'conten
             }
         }
 
-        const conclusionText = isVi ? post.conclusion_vi : post.conclusion_target;
-        if (conclusionText) units.push({ table: 'Post', id: post.id, field: isVi ? 'conclusion_vi_audio' : 'conclusion_target_audio' });
+        const conclusionDetails = await db.all('SELECT id, content, content_vi FROM ConclusionDetail WHERE post_id = ? ORDER BY "order"', [postId]);
+        for (const d of conclusionDetails) {
+            if (d.content_vi || d.content) units.push({ table: 'ConclusionDetail', id: d.id, field: `content${audioField}` });
+        }
 
         // Map từng batch sentence vào đúng unit theo index
         for (let i = 0; i < batchSentences.length; i++) {
@@ -276,7 +278,7 @@ export async function getAllAudioUrls(postId, contentType = 'content') {
     const sf = isVi ? '_vi_audio' : '_audio';
     const urls = [];
 
-    const post = await db.get(`SELECT conclusion_vi_audio, conclusion_target_audio FROM Post WHERE id = ?`, [postId]);
+    const post = await db.get(`SELECT id FROM Post WHERE id = ?`, [postId]);
 
     // HookDetail
     const hookDetails = await db.all(`SELECT content${sf} FROM HookDetail WHERE post_id = ? ORDER BY "order"`, [postId]);
@@ -303,9 +305,9 @@ export async function getAllAudioUrls(postId, contentType = 'content') {
         }
     }
 
-    // Conclusion
-    const conclusionAudio = isVi ? post.conclusion_vi_audio : post.conclusion_target_audio;
-    if (conclusionAudio) urls.push({ order: urls.length + 1, audio: conclusionAudio });
+    // ConclusionDetail
+    const conclusionDetails = await db.all(`SELECT content${sf} FROM ConclusionDetail WHERE post_id = ? ORDER BY "order"`, [postId]);
+    for (const d of conclusionDetails) if (d[`content${sf}`]) urls.push({ order: urls.length + 1, audio: d[`content${sf}`] });
 
     await db.close();
     return urls;
@@ -318,7 +320,8 @@ export async function getIndividualAudio(postId, contentType = 'content') {
     const ct = contentType || post.voice_content_type || 'content';
     const audioList = await getAllAudioUrls(postId, ct);
     const buf = await downloadIndividual(audioList);
-    return { buf, filename: `${post.project_id}_individual.zip` };
+    const suffix = ct === 'content_vi' ? '_vi' : '_target';
+    return { buf, filename: `${post.project_id}${suffix}_individual.zip` };
 }
 
 export async function getMergedAudio(postId, silenceDuration, tmpDir, contentType = 'content') {
@@ -341,5 +344,6 @@ export async function getMergedAudio(postId, silenceDuration, tmpDir, contentTyp
     }
 
     const outputFile = await downloadMerged(audioList, silence, tmpDir);
-    return { outputFile, filename: `${post.project_id}_merged.mp3` };
+    const suffix2 = ct === 'content_vi' ? '_vi' : '_target';
+    return { outputFile, filename: `${post.project_id}${suffix2}_merged.mp3` };
 }

@@ -365,11 +365,11 @@ app.post('/api/generate-media', (req, res) => {
 // API: Chỉ zip audio đã có + assets selected -> trả về browser
 app.post('/api/download-voice', async (req, res) => {
     try {
-        const { videoId, postId } = req.body;
+        const { videoId, postId, contentType: reqContentType } = req.body;
         const db = await getDb();
         const post = await db.get('SELECT project_id, voice_content_type FROM Post WHERE id = ?', [postId]);
-        const lang = post.project_id.match(/_([a-z]{2})$/)?.[1] || 'unknown';
-        const contentType = post.voice_content_type || 'content';
+        const lang = post.project_id.match(/_([a-z]{2})$/)?.[1] || (reqContentType === 'content_vi' ? 'vi' : 'en');
+        const contentType = reqContentType || post.voice_content_type || 'content';
 
         const zipName = `${videoId}_${lang}.zip`;
         res.setHeader('Content-Type', 'application/zip');
@@ -458,8 +458,8 @@ async function fetchBunnyAudio(audioPath) {
 
 app.post('/api/download-audio/individual', async (req, res) => {
     try {
-        const { postId } = req.body;
-        const { buf, filename } = await getIndividualAudio(postId);
+        const { postId, contentType } = req.body;
+        const { buf, filename } = await getIndividualAudio(postId, contentType);
         res.setHeader('Content-Type', 'application/zip');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.send(buf);
@@ -468,9 +468,9 @@ app.post('/api/download-audio/individual', async (req, res) => {
 
 app.post('/api/download-audio/merged', async (req, res) => {
     try {
-        const { postId, silenceDuration = 0.5 } = req.body;
+        const { postId, silenceDuration = 0.5, contentType } = req.body;
         const tmpDir = path.join(MEDIA_DIR, '_tmp_uploads', `merge_${Date.now()}`);
-        const { outputFile, filename } = await getMergedAudio(postId, silenceDuration, tmpDir);
+        const { outputFile, filename } = await getMergedAudio(postId, silenceDuration, tmpDir, contentType);
         res.setHeader('Content-Type', 'audio/mpeg');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         const stream = fs.createReadStream(outputFile);
