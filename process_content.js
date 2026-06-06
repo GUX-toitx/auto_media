@@ -471,6 +471,15 @@ async function saveToDb(projectId, result) {
         );
     }
 
+    // ConclusionDetail từ array
+    for (let k = 0; k < (result.conclusion_sentences || []).length; k++) {
+        const pair = result.conclusion_sentences[k];
+        await db.run(
+            'INSERT INTO ConclusionDetail (post_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
+            [postId, stripLinks(pair.en || ''), stripLinks(pair.vi || ''), k + 1]
+        );
+    }
+
     // Lưu keywords cho hook, conclusion, summary
     const savePostKeywords = async (section, factuals, cinematics) => {
         for (const kw of (factuals || [])) if (kw) await db.run('INSERT INTO Keyword (post_id, section, content, type) VALUES (?, ?, ?, ?)', [postId, section, kw, 'factual']);
@@ -552,6 +561,57 @@ async function saveToDb(projectId, result) {
         hook_vi: result.hook_vi,
         hook_target: result.hook_target
     }, null, 2));
+
+    // Crawl media cho tất cả sections và paragraphs
+    const { fetchAndDownloadStock } = await import('./sync_assets_db.js').catch(() => ({}));
+    if (fetchAndDownloadStock) {
+        const syncDir = async (folder, type, insertFn) => {
+            const exts = type === 'video' ? ['.mp4','.mov'] : ['.jpg','.jpeg','.png','.webp'];
+            if (!fs.existsSync(folder)) return;
+            for (const file of fs.readdirSync(folder)) {
+                if (!exts.includes(path.extname(file).toLowerCase())) continue;
+                const rel = path.relative(BASE_DIR, path.join(folder, file));
+                const ex = await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
+                if (!ex) await insertFn(rel, type);
+            }
+        };
+
+        // Sections: hook, summary, conclusion
+        for (const section of ['hook', 'summary', 'conclusion']) {
+            const kws = await db.all('SELECT content FROM Keyword WHERE post_id = ? AND section = ?', [postId, section]);
+            if (!kws.length) continue;
+            const vFolder = path.join(BASE_DIR, projectId, 'assets', '_raw_videos', section);
+            const iFolder = path.join(BASE_DIR, projectId, 'assets', '_raw_images', section);
+            [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+            for (const { content: kw } of kws) {
+                console.log(`[process_content] Crawl ${section}: ${kw}`);
+                await fetchAndDownloadStock(kw, 'video', vFolder, 4).catch(() => {});
+                await fetchAndDownloadStock(kw, 'image', iFolder, 8).catch(() => {});
+            }
+            const ins = (rel, type) => db.run('INSERT INTO Asset (post_id, section, type, file_path) VALUES (?, ?, ?, ?)', [postId, section, type, rel]);
+            await syncDir(vFolder, 'video', ins);
+            await syncDir(iFolder, 'image', ins);
+        }
+
+        // Paragraphs
+        const paragraphs = await db.all('SELECT id, "order" FROM Paragraph WHERE post_id = ? ORDER BY "order"', [postId]);
+        for (const para of paragraphs) {
+            const gid = String(para.order);
+            const kws = await db.all('SELECT content FROM Keyword WHERE paragraph_id = ?', [para.id]);
+            if (!kws.length) continue;
+            const vFolder = path.join(BASE_DIR, projectId, 'assets', '_raw_videos', gid);
+            const iFolder = path.join(BASE_DIR, projectId, 'assets', '_raw_images', gid);
+            [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+            for (const { content: kw } of kws) {
+                console.log(`[process_content] Crawl paragraph ${gid}: ${kw}`);
+                await fetchAndDownloadStock(kw, 'video', vFolder, 4).catch(() => {});
+                await fetchAndDownloadStock(kw, 'image', iFolder, 8).catch(() => {});
+            }
+            const ins = (rel, type) => db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [para.id, type, rel]);
+            await syncDir(vFolder, 'video', ins);
+            await syncDir(iFolder, 'image', ins);
+        }
+    }
 
     await db.run('UPDATE Post SET status = NULL WHERE project_id = ?', [postTitle]);
     http.request({ hostname: 'localhost', port: PORT, path: '/api/crawl-status/notify', method: 'POST', headers: { 'Content-Type': 'application/json' } }, () => {})

@@ -64,6 +64,9 @@
                     <button @click="retryDownloadVoice" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔄 Refresh Voice</button>
                     <button @click="openDownloadAudioModal" class="bg-yellow-600 hover:bg-yellow-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">⬇️ Chỉ Tải Voice</button>
                     <button @click="downloadVoice" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice & Media Selected</button>
+                    <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-600 hover:bg-orange-500 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
+                        <span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}
+                    </button>
                     <div v-if="posts.find(p => p.id === activePostId)?.status === 'crawling'" class="flex items-center gap-2 text-blue-400 ml-2">
                         <span class="animate-spin text-2xl">⏳</span>
                         <span class="text-[13px] font-black uppercase tracking-widest">Crawling...</span>
@@ -784,15 +787,59 @@
             </div><!-- end v-for paragraphs -->
 
                 <!-- Kết bài -->
-                <div v-if="activePost.conclusion_vi || activePost.conclusion_target" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
+                <div v-if="activePost.conclusion_details?.length" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
                     <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Kết bài</p>
-                    <div class="grid grid-cols-2 gap-2">
-                        <div contenteditable="true" @blur="savePostField('conclusion_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-400 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.conclusion_vi }}</div>
-                        <div contenteditable="true" @blur="savePostField('conclusion_target', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] text-gray-300 leading-relaxed min-h-[48px] whitespace-pre-wrap outline-none focus:border-blue-500">{{ activePost.conclusion_target }}</div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-2 mt-1">
-                        <div><audio v-if="activePost.conclusion_vi_audio" controls :src="activePost.conclusion_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
-                        <div><audio v-if="activePost.conclusion_target_audio" controls :src="activePost.conclusion_target_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                    <div class="space-y-1">
+                        <div v-for="d in activePost.conclusion_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
+                             @drop="handleDetailDrop($event, d, 'conclusion_detail')"
+                             @dragover.prevent
+                             @dragenter.prevent>
+                            <div class="grid grid-cols-2 gap-1">
+                                <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveConclusionDetailField(d, 'content_vi', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content_vi" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500"></div>
+                                <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveConclusionDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-1">
+                                <div><audio v-if="d.content_vi_audio" controls :src="d.content_vi_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                <div><audio v-if="d.content_audio" controls :src="d.content_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                            </div>
+                            <!-- Assets for this detail -->
+                            <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
+                                <div v-if="d.videos?.length" class="space-y-0.5">
+                                    <p class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
+                                    <div class="grid grid-cols-4 gap-1">
+                                        <div v-for="(v, vi) in d.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
+                                             draggable="true"
+                                             @dragstart="handleAssetDragStart($event, v, 'video', d, 'conclusion_detail')">
+                                            <button @click="deleteDetailAsset(v, d, 'conclusion_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">&times;</button>
+                                            <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video')" class="w-full h-16 object-cover rounded mb-1 bg-black cursor-pointer"></video>
+                                            <a v-else :href="v.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
+                                            <div class="flex gap-0.5">
+                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ vi+1 }}</span>
+                                                <button @click="openEdit(v,'video')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                <button @click="openAssignDetailModal(v,'video')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div v-if="d.images?.length" class="space-y-0.5 mt-1">
+                                    <p class="text-[8px] text-gray-500 mb-0.5">Images ({{d.images.length}})</p>
+                                    <div class="grid grid-cols-4 gap-1">
+                                        <div v-for="(img, ii) in d.images" :key="img.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
+                                             draggable="true"
+                                             @dragstart="handleAssetDragStart($event, img, 'image', d, 'conclusion_detail')">
+                                            <button @click="deleteDetailAsset(img, d, 'conclusion_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">&times;</button>
+                                            <img v-if="previewMode" :src="img.url" @click="openPreview(img,'image')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
+                                            <a v-else :href="img.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
+                                            <div class="flex gap-0.5">
+                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ ii+1 }}</span>
+                                                <button @click="openEdit(img,'image')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                <button @click="openAssignDetailModal(img,'image')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <!-- Keywords -->
                     <div class="space-y-1 mt-1">
@@ -1838,6 +1885,14 @@ createApp({
                 body: JSON.stringify({ detailId: detail.id, field, value }) });
         }
 
+        async function saveConclusionDetailField(detail, field, event) {
+            const value = event.target.innerText.trim();
+            if (value === (detail[field] || '').trim()) return;
+            detail[field] = value;
+            await fetch('/api/save-conclusion-detail-field', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ detailId: detail.id, field, value }) });
+        }
+
         async function saveParaDetailField(detail, field, event) {
             const value = event.target.innerText.trim();
             if (value === (detail[field] || '').trim()) return;
@@ -2015,6 +2070,26 @@ createApp({
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ videoId: activeProjectId.value, groupId: para.id, keywords })
             });
+        }
+
+        const crawling = ref(false);
+
+        async function triggerCrawlAll() {
+            if (!activePostId.value) return;
+            crawling.value = true;
+            showToast('🔄 Đang crawl media...', 5000);
+            await fetch('/api/crawl-all', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ postId: activePostId.value }) });
+            const poll = setInterval(async () => {
+                const r = await fetch('/api/posts').then(r => r.json());
+                const post = r.find(p => p.id === activePostId.value);
+                if (!post || post.status !== 'crawling') {
+                    clearInterval(poll);
+                    crawling.value = false;
+                    showToast('✅ Crawl xong!');
+                }
+                await selectPost({ id: activePostId.value });
+            }, 5000);
         }
 
         async function refetchMedia(para) {
@@ -2861,7 +2936,7 @@ createApp({
                 details = activePost.value.summary_details || [];
                 detailType = 'summary_detail';
             } else if (section === 'conclusion') {
-                details = [];
+                details = activePost.value.conclusion_details || [];
                 detailType = 'conclusion_detail';
             }
             assignDetailModal.value.selectedTarget = section;
@@ -3021,6 +3096,7 @@ createApp({
             saveDetailField, saveParaDetailField,
             saveHookDetailField,
             saveSummaryDetailField,
+            saveConclusionDetailField,
             toggleSectionAsset,
             deleteSectionAsset,
             deleteSectionAll,
@@ -3078,6 +3154,8 @@ createApp({
             downloadVoice,
             pollingTimer,
             startPollingVoice,
+            crawling,
+            triggerCrawlAll,
             refetchMedia,
             aiGenerate,
             submitAiGenerate,

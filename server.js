@@ -59,6 +59,17 @@ app.get('/api/posts/:postId', async (req, res) => {
             detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
         }
         
+        // ConclusionDetail
+        post.conclusion_details = await db.all(
+            'SELECT id, content, content_vi, content_audio, content_vi_audio, "order" FROM ConclusionDetail WHERE post_id = ? ORDER BY "order"',
+            [post.id]
+        );
+        for (const detail of post.conclusion_details) {
+            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE conclusion_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
+            detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
+            detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
+        }
+        
         // SummaryDetail
         post.summary_details = await db.all(
             'SELECT id, content, content_vi, content_audio, content_vi_audio, "order" FROM SummaryDetail WHERE post_id = ? ORDER BY "order"',
@@ -75,7 +86,7 @@ app.get('/api/posts/:postId', async (req, res) => {
         const sections = {};
         for (const section of ['hook', 'summary', 'conclusion']) {
             const kws = await db.all('SELECT id, content, type FROM Keyword WHERE post_id = ? AND section = ? ORDER BY id', [post.id, section]);
-            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE post_id = ? AND section = ? AND hook_detail_id IS NULL AND summary_detail_id IS NULL ORDER BY selected DESC, COALESCE(source_id, id), id', [post.id, section]);
+            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE post_id = ? AND section = ? AND hook_detail_id IS NULL AND summary_detail_id IS NULL AND conclusion_detail_id IS NULL ORDER BY selected DESC, COALESCE(source_id, id), id', [post.id, section]);
             const projectId = (post.project_id || '').replace(/_[a-z]{2}$/, '');
             sections[section] = {
                 keywords: kws,
@@ -188,13 +199,15 @@ app.post('/api/move-asset', async (req, res) => {
         const db = await getDb();
         
         // Reset all foreign keys
-        await db.run('UPDATE Asset SET paragraph_id = NULL, sentence_id = NULL, post_id = NULL, section = NULL, hook_detail_id = NULL, summary_detail_id = NULL, paragraph_detail_id = NULL, sentence_detail_id = NULL WHERE id = ?', [assetId]);
+        await db.run('UPDATE Asset SET paragraph_id = NULL, sentence_id = NULL, post_id = NULL, section = NULL, hook_detail_id = NULL, summary_detail_id = NULL, conclusion_detail_id = NULL, paragraph_detail_id = NULL, sentence_detail_id = NULL WHERE id = ?', [assetId]);
         
         // Assign to new target
         if (detailType === 'hook_detail' && targetDetailId) {
             await db.run('UPDATE Asset SET hook_detail_id = ? WHERE id = ?', [targetDetailId, assetId]);
         } else if (detailType === 'summary_detail' && targetDetailId) {
             await db.run('UPDATE Asset SET summary_detail_id = ? WHERE id = ?', [targetDetailId, assetId]);
+        } else if (detailType === 'conclusion_detail' && targetDetailId) {
+            await db.run('UPDATE Asset SET conclusion_detail_id = ? WHERE id = ?', [targetDetailId, assetId]);
         } else if (detailType === 'paragraph_detail' && targetDetailId) {
             await db.run('UPDATE Asset SET paragraph_detail_id = ? WHERE id = ?', [targetDetailId, assetId]);
         } else if (detailType === 'sentence_detail' && targetDetailId) {
@@ -546,6 +559,17 @@ app.post('/api/save-hook-detail-field', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/save-conclusion-detail-field', async (req, res) => {
+    try {
+        const { detailId, field, value } = req.body;
+        if (!['content', 'content_vi'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
+        const db = await getDb();
+        await db.run(`UPDATE ConclusionDetail SET ${field} = ? WHERE id = ?`, [value, detailId]);
+        await db.close();
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/save-summary-detail-field', async (req, res) => {
     try {
         const { detailId, field, value } = req.body;
@@ -642,6 +666,68 @@ app.post('/api/create-voice', async (req, res) => {
 
         res.json({ batch_uuid: result.batch_uuid, folderNames: result.folderNames, paragraphIds: result.paragraphIds });
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API: Kích hoạt crawl toàn bộ media cho 1 post
+app.post('/api/crawl-all', async (req, res) => {
+    const { postId } = req.body;
+    res.json({ success: true, message: 'Đang crawl...' });
+    (async () => {
+        const { fetchAndDownloadStock } = await import('./sync_assets_db.js').catch(() => ({}));
+        if (!fetchAndDownloadStock) return;
+        const db = await getDb();
+        const post = await db.get('SELECT id, project_id FROM Post WHERE id = ?', [postId]);
+        if (!post) { await db.close(); return; }
+        const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
+        await db.run('UPDATE Post SET status = ? WHERE id = ?', ['crawling', postId]);
+
+        const syncDir = async (folder, type, insertFn) => {
+            const exts = type === 'video' ? ['.mp4','.mov'] : ['.jpg','.jpeg','.png','.webp'];
+            if (!fs.existsSync(folder)) return;
+            for (const file of fs.readdirSync(folder)) {
+                if (!exts.includes(path.extname(file).toLowerCase())) continue;
+                const rel = path.relative(MEDIA_DIR, path.join(folder, file));
+                const ex = await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
+                if (!ex) await insertFn(rel, type);
+            }
+        };
+
+        // Sections
+        for (const section of ['hook', 'summary', 'conclusion']) {
+            const kws = await db.all('SELECT content FROM Keyword WHERE post_id = ? AND section = ?', [postId, section]);
+            if (!kws.length) continue;
+            const vF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_videos', section);
+            const iF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', section);
+            [vF, iF].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+            for (const { content: kw } of kws) {
+                await fetchAndDownloadStock(kw, 'video', vF, 4).catch(() => {});
+                await fetchAndDownloadStock(kw, 'image', iF, 8).catch(() => {});
+            }
+            await syncDir(vF, 'video', (rel, t) => db.run('INSERT INTO Asset (post_id, section, type, file_path) VALUES (?, ?, ?, ?)', [postId, section, t, rel]));
+            await syncDir(iF, 'image', (rel, t) => db.run('INSERT INTO Asset (post_id, section, type, file_path) VALUES (?, ?, ?, ?)', [postId, section, t, rel]));
+        }
+
+        // Paragraphs
+        const paragraphs = await db.all('SELECT id, "order" FROM Paragraph WHERE post_id = ? ORDER BY "order"', [postId]);
+        for (const para of paragraphs) {
+            const gid = String(para.order);
+            const kws = await db.all('SELECT content FROM Keyword WHERE paragraph_id = ?', [para.id]);
+            if (!kws.length) continue;
+            const vF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_videos', gid);
+            const iF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', gid);
+            [vF, iF].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+            for (const { content: kw } of kws) {
+                await fetchAndDownloadStock(kw, 'video', vF, 4).catch(() => {});
+                await fetchAndDownloadStock(kw, 'image', iF, 8).catch(() => {});
+            }
+            await syncDir(vF, 'video', (rel, t) => db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [para.id, t, rel]));
+            await syncDir(iF, 'image', (rel, t) => db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [para.id, t, rel]));
+        }
+
+        await db.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]);
+        await db.close();
+        console.log(`[crawl-all] ✅ Xong post ${postId}`);
+    })().catch(e => console.error('[crawl-all]', e.message));
 });
 
 // API: Crawl từ nguồn Việt Nam

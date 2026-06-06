@@ -149,6 +149,18 @@ export async function initDB() {
         FOREIGN KEY(post_id) REFERENCES Post(id)
     )`).catch(() => {});
     await db.run('ALTER TABLE Paragraph ADD COLUMN sentence_uuid TEXT DEFAULT NULL').catch(() => {});
+    await db.run(`CREATE TABLE IF NOT EXISTS ConclusionDetail (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_id INTEGER NOT NULL,
+        content TEXT,
+        content_vi TEXT,
+        content_audio TEXT,
+        content_vi_audio TEXT,
+        sentence_uuid TEXT,
+        "order" INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY(post_id) REFERENCES Post(id)
+    )`).catch(() => {});
+    await db.run('ALTER TABLE Asset ADD COLUMN conclusion_detail_id INTEGER DEFAULT NULL').catch(() => {});
     await db.run(`CREATE TABLE IF NOT EXISTS SummaryDetail (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         post_id INTEGER NOT NULL,
