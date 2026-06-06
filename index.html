@@ -521,7 +521,7 @@
                             <span @click="toggleSection(para, 'videoOpen')" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
                                 {{ para.videoOpen ? '▼' : '▶' }}
                                 <span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
-                                Videos ({{ (para.videos || []).filter(v => v.sentenceId === null).length }})
+                                Videos ({{ (para.videos || []).filter(v => v.sentenceId === null && !v.selected).length }})
                             </span>
                             <button @click="deleteAll(para, i+1, 'video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
                             <button v-if="(para.videos || []).filter(v => v.sentenceId === null && !v.selected && v._toDelete).length" @click="deleteSelectedParaAssets(para, 'video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (para.videos || []).filter(v => v.sentenceId === null && !v.selected && v._toDelete).length }})</button>
@@ -532,9 +532,9 @@
                             </div>
                         </div>
                         <div v-if="para.videoOpen" class="grid grid-cols-4 gap-2 mt-1">
-                            <div v-if="!(para.videos || []).filter(v => v.sentenceId === null).length" class="text-[10px] text-gray-700 italic">Trống</div>
-                            <div v-for="v in (para.videos || []).filter(v => v.sentenceId === null)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
-                                :class="[v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800', v._toDelete ? 'ring-2 ring-red-500' : '']">
+                            <div v-if="!(para.videos || []).filter(v => v.sentenceId === null && !v.selected).length" class="text-[10px] text-gray-700 italic">Trống</div>
+                            <div v-for="v in (para.videos || []).filter(v => v.sentenceId === null && !v.selected)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
+                                :class="[v._toDelete ? 'ring-2 ring-red-500 border-gray-800' : 'border-gray-800']">
                                 <input type="checkbox" v-model="v._toDelete" class="absolute top-1 left-1 z-10 w-4 h-4 cursor-pointer">
                                 <button @click="deleteAsset(v, para)" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-10 flex items-center justify-center">×</button>
                                 <video v-if="previewMode" muted loop preload="metadata" :src="v.url"
@@ -561,7 +561,7 @@
                             <span @click="toggleSection(para, 'imageOpen')" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
                                 {{ para.imageOpen ? '▼' : '▶' }}
                                 <span class="w-1.5 h-1.5 bg-orange-500 rounded-full"></span>
-                                Images ({{ (para.images || []).filter(img => img.sentenceId === null).length }})
+                                Images ({{ (para.images || []).filter(img => img.sentenceId === null && !img.selected).length }})
                             </span>
                             <button @click="deleteAll(para, i+1, 'image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
                             <button v-if="(para.images || []).filter(img => img.sentenceId === null && !img.selected && img._toDelete).length" @click="deleteSelectedParaAssets(para, 'image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (para.images || []).filter(img => img.sentenceId === null && !img.selected && img._toDelete).length }})</button>
@@ -572,9 +572,9 @@
                             </div>
                         </div>
                         <div v-if="para.imageOpen" class="grid grid-cols-6 gap-2 mt-1">
-                            <div v-if="!(para.images || []).filter(img => img.sentenceId === null).length" class="text-[10px] text-gray-700 italic">Trống</div>
-                            <div v-for="img in (para.images || []).filter(img => img.sentenceId === null)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border"
-                                :class="[img.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800', img._toDelete ? 'ring-2 ring-red-500' : '']">
+                            <div v-if="!(para.images || []).filter(img => img.sentenceId === null && !img.selected).length" class="text-[10px] text-gray-700 italic">Trống</div>
+                            <div v-for="img in (para.images || []).filter(img => img.sentenceId === null && !img.selected)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border"
+                                :class="[img._toDelete ? 'ring-2 ring-red-500 border-gray-800' : 'border-gray-800']">
                                 <div class="relative">
                                     <input type="checkbox" v-model="img._toDelete" class="absolute top-0.5 left-0.5 z-10 w-4 h-4 cursor-pointer">
                                     <template v-if="previewMode">
@@ -744,7 +744,7 @@
                     @loadedmetadata="onVideoLoaded" @timeupdate="onVideoTimeUpdate"></video>
 
                 <!-- Timeline -->
-                <div class="relative" style="height:48px">
+                <div class="relative" :ref="el => timelineRef = el" style="height:48px">
                     <div class="absolute inset-0 bg-gray-800 rounded-lg" style="pointer-events:none"></div>
                     <div class="absolute top-0 bottom-0 bg-yellow-500/30 border-x-2 border-yellow-400" style="pointer-events:none"
                         :style="{ left: (editModal.start / editModal.duration * 100) + '%', width: ((editModal.end - editModal.start) / editModal.duration * 100) + '%' }"></div>
@@ -758,12 +758,9 @@
                         :style="{ left: 'calc(' + (editModal.end / editModal.duration * 100) + '% - 6px)' }">
                         <span class="text-black text-[8px] font-black select-none">►</span>
                     </div>
-                    <input type="range" min="0" :max="editModal.duration" step="0.01" :value="editModal.start"
-                        @input="editModal.start = Math.min(+$event.target.value, editModal.end - 0.1); editModal.duration_val = Math.round((editModal.end - editModal.start)*10)/10; if(editVideoRef.value) editVideoRef.value.currentTime = editModal.start"
-                        style="position:absolute;top:0;left:0;width:100%;height:48px;opacity:0;cursor:ew-resize;z-index:2;margin:0">
-                    <input type="range" min="0" :max="editModal.duration" step="0.01" :value="editModal.end"
-                        @input="editModal.end = Math.max(+$event.target.value, editModal.start + 0.1); editModal.duration_val = Math.round((editModal.end - editModal.start)*10)/10"
-                        style="position:absolute;top:0;left:0;width:100%;height:48px;opacity:0;cursor:ew-resize;z-index:3;margin:0">
+                    <!-- Trim drag overlay -->
+                    <div style="position:absolute;top:0;left:0;width:100%;height:48px;z-index:5;cursor:ew-resize"
+                        @pointerdown="startTrimFromTimeline($event)"></div>
                 </div>
 
                 <div class="flex items-center justify-between text-xs text-gray-400">
@@ -1994,7 +1991,6 @@ createApp({
             const move = (ev) => {
                 dragged = true;
                 const t = getTimeFromEvent(ev);
-                console.log('[drag]', handle, t);
                 if (handle === 'start') {
                     editModal.value.start = Math.min(t, editModal.value.end - 0.1);
                     if (editVideoRef.value) editVideoRef.value.currentTime = editModal.value.start;
@@ -2006,9 +2002,40 @@ createApp({
             const up = () => {
                 document.removeEventListener('pointermove', move);
                 document.removeEventListener('pointerup', up);
-                if (dragged) {
-                    timelineRef.value?.addEventListener('click', e => e.stopImmediatePropagation(), { once: true, capture: true });
+            };
+            document.addEventListener('pointermove', move);
+            document.addEventListener('pointerup', up);
+        }
+
+        function startTrimFromTimeline(e) {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const pct = (e.clientX - rect.left) / rect.width;
+            const t = pct * editModal.value.duration;
+            const distStart = Math.abs(t - editModal.value.start);
+            const distEnd = Math.abs(t - editModal.value.end);
+            const handle = distStart <= distEnd ? 'start' : 'end';
+            // Set initial value
+            if (handle === 'start') {
+                editModal.value.start = Math.max(0, Math.min(t, editModal.value.end - 0.1));
+                if (editVideoRef.value) editVideoRef.value.currentTime = editModal.value.start;
+            } else {
+                editModal.value.end = Math.min(editModal.value.duration, Math.max(t, editModal.value.start + 0.1));
+            }
+            editModal.value.duration_val = Math.round((editModal.value.end - editModal.value.start) * 10) / 10;
+            // Start dragging
+            const move = (ev) => {
+                const mt = getTimeFromEvent(ev, rect);
+                if (handle === 'start') {
+                    editModal.value.start = Math.max(0, Math.min(mt, editModal.value.end - 0.1));
+                    if (editVideoRef.value) editVideoRef.value.currentTime = editModal.value.start;
+                } else {
+                    editModal.value.end = Math.min(editModal.value.duration, Math.max(mt, editModal.value.start + 0.1));
                 }
+                editModal.value.duration_val = Math.round((editModal.value.end - editModal.value.start) * 10) / 10;
+            };
+            const up = () => {
+                document.removeEventListener('pointermove', move);
+                document.removeEventListener('pointerup', up);
             };
             document.addEventListener('pointermove', move);
             document.addEventListener('pointerup', up);
@@ -2593,6 +2620,7 @@ createApp({
             onVideoTimeUpdate,
             seekVideo,
             startTrimDrag,
+            startTrimFromTimeline,
             onImgLoaded,
             setCropRatio,
             startCropDrag,
