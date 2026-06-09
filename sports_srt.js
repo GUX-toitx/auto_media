@@ -79,13 +79,15 @@ async function main() {
     const args = process.argv.slice(2);
     const srtPath = args[0];
     const projectId = args[1];
+    const srtTranslatedPath = args[2] || null;
 
     if (!srtPath || !projectId) {
-        console.error('Usage: node sports_srt.js <file.srt> <projectId>');
+        console.error('Usage: node sports_srt.js <file.srt> <projectId> [file_translated.srt]');
         process.exit(1);
     }
 
     const sentences = parseSrt(srtPath);
+    const translatedSentences = srtTranslatedPath ? parseSrt(srtTranslatedPath) : null;
     console.log(`[sports_srt] Đọc được ${sentences.length} câu từ ${srtPath}`);
 
     const db = await getDb();
@@ -96,14 +98,15 @@ async function main() {
     // Bước 1: Lưu toàn bộ paragraph vào DB trước
     const paragraphIds = [];
     for (const { index, timecode, text } of sentences) {
+        const translatedText = translatedSentences?.find(s => s.index === index)?.text || text;
         const paraRes = await db.run(
             'INSERT INTO Paragraph (post_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
-            [postId, text, text, index]
+            [postId, translatedText, text, index]
         );
         const paragraphId = paraRes.lastID;
         await db.run(
             'INSERT INTO ParagraphDetail (paragraph_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
-            [paragraphId, text, text, 1]
+            [paragraphId, translatedText, text, 1]
         );
         paragraphIds.push({ index, text, paragraphId });
     }

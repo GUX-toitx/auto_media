@@ -999,15 +999,24 @@ app.post('/api/toggle', async (req, res) => {
 const upload = multer({ dest: path.join(MEDIA_DIR, '_tmp_uploads') });
 
 // API: Tạo dự án Sports từ file SRT
-app.post('/api/create-sports', upload.single('srt'), async (req, res) => {
+app.post('/api/create-sports', upload.fields([{ name: 'srt', maxCount: 1 }, { name: 'srtTranslated', maxCount: 1 }]), async (req, res) => {
     const { projectId } = req.body;
-    if (!req.file || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu file SRT hoặc projectId' });
+    const srtFile = req.files?.srt?.[0];
+    const srtTranslatedFile = req.files?.srtTranslated?.[0];
+    if (!srtFile || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu file SRT hoặc projectId' });
     try {
         const targetDir = path.join(MEDIA_DIR, projectId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
         const srtPath = path.join(targetDir, 'input.srt');
-        fs.renameSync(req.file.path, srtPath);
-        const child = spawn('node', ['sports_srt.js', srtPath, projectId], { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+        fs.renameSync(srtFile.path, srtPath);
+        let srtTranslatedPath = '';
+        if (srtTranslatedFile) {
+            srtTranslatedPath = path.join(targetDir, 'input_translated.srt');
+            fs.renameSync(srtTranslatedFile.path, srtTranslatedPath);
+        }
+        const args = ['sports_srt.js', srtPath, projectId];
+        if (srtTranslatedPath) args.push(srtTranslatedPath);
+        const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
         child.stdout.on('data', d => process.stdout.write(`[sports_srt] ${d}`));
         child.stderr.on('data', d => process.stderr.write(`[sports_srt] ${d}`));
         child.unref();

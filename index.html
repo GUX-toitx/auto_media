@@ -1507,20 +1507,33 @@
                 <input v-model="sportsModal.projectId" type="text" placeholder="vd: sports_2024_euro" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-orange-500">
             </div>
             <div>
-                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">File SRT</label>
-                <div class="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors"
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">File SRT gốc</label>
+                <div class="border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-colors"
                     :class="sportsModal.file ? 'border-orange-400 bg-orange-500/10' : 'border-gray-700 hover:border-orange-500'"
-                    @dragover.prevent="sportsModal.dragging = true"
-                    @dragleave.prevent="sportsModal.dragging = false"
-                    @drop.prevent="e => { sportsModal.file = e.dataTransfer.files[0]; sportsModal.dragging = false; }"
+                    @dragover.prevent
+                    @drop.prevent="e => { sportsModal.file = e.dataTransfer.files[0]; }"
                     @click="$refs.srtInput.click()">
                     <div v-if="sportsModal.file" class="text-[11px] text-orange-400 font-bold">📄 {{ sportsModal.file.name }}</div>
                     <div v-else>
-                        <div class="text-3xl mb-2">📂</div>
                         <p class="text-sm text-gray-400">Kéo thả hoặc <span class="text-orange-400 font-bold">nhấn để chọn</span></p>
-                        <p class="text-[10px] text-gray-600 mt-1">.srt</p>
+                        <p class="text-[10px] text-gray-600 mt-1">.srt (ngôn ngữ gốc)</p>
                     </div>
                     <input ref="srtInput" type="file" accept=".srt" class="hidden" @change="e => sportsModal.file = e.target.files[0]">
+                </div>
+            </div>
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">File SRT đã dịch</label>
+                <div class="border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-colors"
+                    :class="sportsModal.fileTranslated ? 'border-green-400 bg-green-500/10' : 'border-gray-700 hover:border-green-500'"
+                    @dragover.prevent
+                    @drop.prevent="e => { sportsModal.fileTranslated = e.dataTransfer.files[0]; }"
+                    @click="$refs.srtTranslatedInput.click()">
+                    <div v-if="sportsModal.fileTranslated" class="text-[11px] text-green-400 font-bold">📄 {{ sportsModal.fileTranslated.name }}</div>
+                    <div v-else>
+                        <p class="text-sm text-gray-400">Kéo thả hoặc <span class="text-green-400 font-bold">nhấn để chọn</span></p>
+                        <p class="text-[10px] text-gray-600 mt-1">.srt (bản dịch)</p>
+                    </div>
+                    <input ref="srtTranslatedInput" type="file" accept=".srt" class="hidden" @change="e => sportsModal.fileTranslated = e.target.files[0]">
                 </div>
             </div>
             <div class="flex gap-3 justify-end pt-1">
@@ -1588,22 +1601,24 @@ createApp({
             }
         });
 
-        const sportsModal = ref({ open: false, projectId: '', file: null, dragging: false, loading: false });
+        const sportsModal = ref({ open: false, projectId: '', file: null, fileTranslated: null, loading: false });
 
         async function submitSports() {
-            const { file } = sportsModal.value;
+            const { file, fileTranslated } = sportsModal.value;
             if (!file) return;
             const projectId = sportsModal.value.projectId.trim() || ('sports_' + Date.now());
             sportsModal.value.loading = true;
             try {
                 const form = new FormData();
                 form.append('srt', file);
+                if (fileTranslated) form.append('srtTranslated', fileTranslated);
                 form.append('projectId', projectId);
                 const res = await fetch('/api/create-sports', { method: 'POST', body: form });
                 const r = await res.json();
                 if (r.success) {
                     sportsModal.value.open = false;
                     sportsModal.value.file = null;
+                    sportsModal.value.fileTranslated = null;
                     sportsModal.value.projectId = '';
                     showToast('✅ Đã khởi động Sports SRT, đang crawl ảnh...');
                     await loadPosts();
