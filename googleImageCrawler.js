@@ -1,34 +1,28 @@
 import { fetchIPv4 as fetch } from './fetchIPv4.js';
 import dns from 'dns';
 dns.setDefaultResultOrder('ipv4first');
-// File: googleImageCrawler.js (Bản 3.0 - Săn Video OVP của Bing)
 import fs from 'fs';
 import path from 'path';
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import * as cheerio from 'cheerio';
-import proxyChain from 'proxy-chain';
-import { getOldestProxy } from './proxyManager.js';
 import { claimNextStockPath } from './stockNaming.js';
 
 puppeteer.use(StealthPlugin());
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
-async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
-    if (url.includes('onelink.me') || url.includes('app-store') || url.includes('play.google')) {
-        return false;
-    }
+async function downloadMedia(url, targetDir, ext, keyword = '') {
+    if (url.includes('onelink.me') || url.includes('app-store') || url.includes('play.google')) return false;
+    // Bỏ qua stock photo site chặn hotlink - sẽ tải ảnh rác
+    const stockDomains = ['alamy.com', 'gettyimages.com', 'shutterstock.com', 'istockphoto.com', 'dreamstime.com', 'depositphotos.com', '123rf.com', 'stock.adobe.com', 'pond5.com', 'bigstockphoto.com'];
+    if (stockDomains.some(d => url.includes(d))) return false;
 
     const savePath = claimNextStockPath(targetDir, ext);
     let success = false;
 
     try {
         const fetchOptions = { headers: { 'User-Agent': 'Mozilla/5.0' } };
-
-        if (proxy && proxy.dispatcher) {
-            fetchOptions.dispatcher = proxy.dispatcher;
-        }
 
         // Ép Timeout 15s để chống treo Bot
         const controller = new AbortController();
@@ -86,23 +80,9 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
     // ĐỊNH TUYẾN TÌM KIẾM
     const searchUrl = type === 'video' 
         ? `https://www.bing.com/videos/search?q=${encodeURIComponent(keyword)}&safesearch=off`
-        : `https://www.bing.com/images/search??q=${encodeURIComponent(keyword)}&safesearch=off&form=HDRSC3`;
+        : `https://www.bing.com/images/search?q=${encodeURIComponent(keyword)}&safesearch=off`;
 
-    const proxy = await getOldestProxy();
-    let anonymizedProxyUrl = null;
     const browserArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1920,1080'];
-
-    if (proxy) {
-        const proxyServerClean = proxy.server.replace('http://', '').replace('https://', '');
-        if (proxy.username && proxy.password) {
-            try {
-                anonymizedProxyUrl = await proxyChain.anonymizeProxy(`http://${proxy.username}:${proxy.password}@${proxyServerClean}`);
-                browserArgs.push(`--proxy-server=${anonymizedProxyUrl}`);
-            } catch (e) { return 0; }
-        } else {
-            browserArgs.push(`--proxy-server=http://${proxyServerClean}`);
-        }
-    }
 
     const browser = await puppeteer.launch({ headless: "new", args: browserArgs });
     
@@ -133,13 +113,15 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
                     } catch (e) {}
                 }
             });
+            console.log(`      [${keyword}] iusc count: ${mediaUrls.length}`);
             if (mediaUrls.length === 0) {
+                // Lưu screenshot để debug
+                await page.screenshot({ path: path.join(targetDir, `debug_bing_${Date.now()}.jpg`) });
                 $('img.mimg').each((i, el) => {
                     const src = $(el).attr('src') || $(el).attr('data-src');
-                    if (src) mediaUrls.push(src);
+                    if (src && src.startsWith('http')) mediaUrls.push(src);
                 });
-            }
-        }
+            }        }
 
         // Lọc trùng lặp
         mediaUrls = [...new Set(mediaUrls)];
@@ -155,7 +137,7 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
         for (const url of mediaUrls) {
             if (downloaded >= neededCount) break;
             // Hàm downloadMedia sẽ tự động thêm đuôi .mp4 vào cuối file khi lưu
-            if (await downloadMedia(url, targetDir, ext, proxy, keyword)) {
+            if (await downloadMedia(url, targetDir, ext, keyword)) {
                 downloaded++;
                 console.log(`\x1b[33m      [${keyword}][Web ${type.toUpperCase()} Bot] 📥 ${type.toUpperCase()} bốc từ: ${url}\x1b[0m`);
                 console.log(`      [${keyword}][Web ${type.toUpperCase()} Bot] ---> Đã lấy thành công ${downloaded}/${neededCount}`);
@@ -165,7 +147,6 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
         console.error(`      [${keyword}][Web Lỗi Tổng] ${error.message}`);
     } finally {
         await browser.close().catch(() => {});
-        if (anonymizedProxyUrl) await proxyChain.closeAnonymizedProxy(anonymizedProxyUrl, true).catch(() => {});
     }
     return downloaded;
 }

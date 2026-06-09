@@ -22,7 +22,7 @@
                 <button @click="page = 'posts'" :class="['flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all', page === 'posts' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white']">📂 Dự án</button>
                 <button @click="openProfilePage" :class="['flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all', page === 'profiles' ? 'bg-green-600 text-white shadow-lg shadow-green-500/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white']">🧑💻 Profiles</button>
             </div>
-            <button @click="newProjectModal.open = true" class="w-full py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-emerald-600 hover:bg-emerald-500 text-white">➕ Tạo mới dự án</button>
+            <button @click="sportsModal.open = true" class="w-full py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-orange-600 hover:bg-orange-500 text-white">⚽ Sports SRT</button>
         </div>
         <div class="flex-1 overflow-y-auto p-4 space-y-1">
             <div v-for="post in posts" :key="post.id" class="flex items-stretch gap-1">
@@ -139,20 +139,7 @@
                             </span>
                             <input @keydown.enter="addSectionKeyword($event, 'hook', 'factual')" placeholder="+ factual" class="bg-transparent border border-dashed border-blue-800 rounded px-2 py-0.5 text-[10px] text-blue-400 outline-none w-28 focus:border-blue-500">
                         </div>
-                        <div class="flex flex-wrap gap-1 items-center">
-                            <span class="text-[9px] font-black text-purple-400 uppercase tracking-widest w-20 shrink-0">Cinematic</span>
-                            <span v-for="kw in (activePost.sections?.hook?.keywords || []).filter(k => k.type === 'cinematic')" :key="kw.id" class="keyword-tag text-[10px] border-purple-800 text-purple-300">
-                                {{ kw.content }}<b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteSectionKeyword(kw, 'hook')">×</b>
-                            </span>
-                            <input @keydown.enter="addSectionKeyword($event, 'hook', 'cinematic')" placeholder="+ cinematic" class="bg-transparent border border-dashed border-purple-800 rounded px-2 py-0.5 text-[10px] text-purple-400 outline-none w-28 focus:border-purple-500">
-                        </div>
-                        <div class="flex flex-wrap gap-1 items-center">
-                            <span class="text-[9px] font-black text-green-400 uppercase tracking-widest w-20 shrink-0">🇻🇳 VN</span>
-                            <span v-for="kw in (activePost.sections?.hook?.keywords || []).filter(k => k.type === 'vn')" :key="kw.id" class="keyword-tag text-[10px] border-green-800 text-green-300">
-                                {{ kw.content }}<b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteSectionKeyword(kw, 'hook')">×</b>
-                            </span>
-                            <input @keydown.enter="crawlVnSection($event, 'hook')" placeholder="+ keyword VN" class="bg-transparent border border-dashed border-green-800 rounded px-2 py-0.5 text-[10px] text-green-400 outline-none w-32 focus:border-green-500">
-                        </div>
+
                     </div>
                     <!-- Selected hook videos -->
                     <div v-if="(activePost.sections?.hook?.videos||[]).some(a=>a.selected)">
@@ -316,20 +303,7 @@
                             </span>
                             <input @keydown.enter="addSectionKeyword($event, 'summary', 'factual')" placeholder="+ factual" class="bg-transparent border border-dashed border-blue-800 rounded px-2 py-0.5 text-[10px] text-blue-400 outline-none w-28 focus:border-blue-500">
                         </div>
-                        <div class="flex flex-wrap gap-1 items-center">
-                            <span class="text-[9px] font-black text-purple-400 uppercase tracking-widest w-20 shrink-0">Cinematic</span>
-                            <span v-for="kw in (activePost.sections?.summary?.keywords || []).filter(k => k.type === 'cinematic')" :key="kw.id" class="keyword-tag text-[10px] border-purple-800 text-purple-300">
-                                {{ kw.content }}<b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteSectionKeyword(kw, 'summary')">×</b>
-                            </span>
-                            <input @keydown.enter="addSectionKeyword($event, 'summary', 'cinematic')" placeholder="+ cinematic" class="bg-transparent border border-dashed border-purple-800 rounded px-2 py-0.5 text-[10px] text-purple-400 outline-none w-28 focus:border-purple-500">
-                        </div>
-                        <div class="flex flex-wrap gap-1 items-center">
-                            <span class="text-[9px] font-black text-green-400 uppercase tracking-widest w-20 shrink-0">🇻🇳 VN</span>
-                            <span v-for="kw in (activePost.sections?.summary?.keywords || []).filter(k => k.type === 'vn')" :key="kw.id" class="keyword-tag text-[10px] border-green-800 text-green-300">
-                                {{ kw.content }}<b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteSectionKeyword(kw, 'summary')">×</b>
-                            </span>
-                            <input @keydown.enter="crawlVnSection($event, 'summary')" placeholder="+ keyword VN" class="bg-transparent border border-dashed border-green-800 rounded px-2 py-0.5 text-[10px] text-green-400 outline-none w-32 focus:border-green-500">
-                        </div>
+
                     </div>
                     <!-- Selected summary videos -->
                     <div v-if="(activePost.sections?.summary?.videos||[]).some(a=>a.selected)">
@@ -519,22 +493,7 @@
                                         </span>
                                         <input @keydown.enter="addKeyword($event, para, 'factual')" placeholder="+ factual" class="bg-transparent border border-dashed border-blue-800 rounded px-2 py-0.5 text-[10px] text-blue-400 outline-none w-28 focus:border-blue-500">
                                     </div>
-                                    <div class="flex flex-wrap gap-1 items-center">
-                                        <span class="text-[9px] font-black text-purple-400 uppercase tracking-widest w-20 shrink-0">Cinematic</span>
-                                        <span v-for="kw in (para.keywords || []).filter(k => k.type === 'cinematic')" :key="kw.id" class="keyword-tag text-[10px] border-purple-800 text-purple-300">
-                                            {{ kw.content }}
-                                            <b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteKeyword(kw, para)">×</b>
-                                        </span>
-                                        <input @keydown.enter="addKeyword($event, para, 'cinematic')" placeholder="+ cinematic" class="bg-transparent border border-dashed border-purple-800 rounded px-2 py-0.5 text-[10px] text-purple-400 outline-none w-28 focus:border-purple-500">
-                                    </div>
-                                    <div class="flex flex-wrap gap-1 items-center">
-                                        <span class="text-[9px] font-black text-green-400 uppercase tracking-widest w-20 shrink-0">🆻🇳 VN</span>
-                                        <span v-for="kw in (para.keywords || []).filter(k => k.type === 'vn')" :key="kw.id" class="keyword-tag text-[10px] border-green-800 text-green-300">
-                                            {{ kw.content }}
-                                            <b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteKeyword(kw, para)">×</b>
-                                        </span>
-                                        <input @keydown.enter="crawlVn($event, para, i)" placeholder="+ keyword VN" class="bg-transparent border border-dashed border-green-800 rounded px-2 py-0.5 text-[10px] text-green-400 outline-none w-32 focus:border-green-500" title="Nhập keyword tiếng Việt, Enter để crawl báo VN">
-                                    </div>
+
                                 </div>
                             </div>
                             <!-- Assets selected cho luận điểm (sentenceId = null, selected) -->
@@ -850,20 +809,7 @@
                             </span>
                             <input @keydown.enter="addSectionKeyword($event, 'conclusion', 'factual')" placeholder="+ factual" class="bg-transparent border border-dashed border-blue-800 rounded px-2 py-0.5 text-[10px] text-blue-400 outline-none w-28 focus:border-blue-500">
                         </div>
-                        <div class="flex flex-wrap gap-1 items-center">
-                            <span class="text-[9px] font-black text-purple-400 uppercase tracking-widest w-20 shrink-0">Cinematic</span>
-                            <span v-for="kw in (activePost.sections?.conclusion?.keywords || []).filter(k => k.type === 'cinematic')" :key="kw.id" class="keyword-tag text-[10px] border-purple-800 text-purple-300">
-                                {{ kw.content }}<b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteSectionKeyword(kw, 'conclusion')">×</b>
-                            </span>
-                            <input @keydown.enter="addSectionKeyword($event, 'conclusion', 'cinematic')" placeholder="+ cinematic" class="bg-transparent border border-dashed border-purple-800 rounded px-2 py-0.5 text-[10px] text-purple-400 outline-none w-28 focus:border-purple-500">
-                        </div>
-                        <div class="flex flex-wrap gap-1 items-center">
-                            <span class="text-[9px] font-black text-green-400 uppercase tracking-widest w-20 shrink-0">🇻🇳 VN</span>
-                            <span v-for="kw in (activePost.sections?.conclusion?.keywords || []).filter(k => k.type === 'vn')" :key="kw.id" class="keyword-tag text-[10px] border-green-800 text-green-300">
-                                {{ kw.content }}<b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteSectionKeyword(kw, 'conclusion')">×</b>
-                            </span>
-                            <input @keydown.enter="crawlVnSection($event, 'conclusion')" placeholder="+ keyword VN" class="bg-transparent border border-dashed border-green-800 rounded px-2 py-0.5 text-[10px] text-green-400 outline-none w-32 focus:border-green-500">
-                        </div>
+
                     </div>
                     <!-- Selected conclusion videos -->
                     <div v-if="(activePost.sections?.conclusion?.videos||[]).some(a=>a.selected)">
@@ -1634,6 +1580,44 @@
         </div>
     </div>
 
+    <!-- SPORTS SRT MODAL -->
+    <div v-if="sportsModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="sportsModal.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[480px] space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-lg font-black text-white">⚽ Tạo dự án Sports từ SRT</h3>
+                <button @click="sportsModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Project ID</label>
+                <input v-model="sportsModal.projectId" type="text" placeholder="vd: sports_2024_euro" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-orange-500">
+            </div>
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">File SRT</label>
+                <div class="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors"
+                    :class="sportsModal.file ? 'border-orange-400 bg-orange-500/10' : 'border-gray-700 hover:border-orange-500'"
+                    @dragover.prevent="sportsModal.dragging = true"
+                    @dragleave.prevent="sportsModal.dragging = false"
+                    @drop.prevent="e => { sportsModal.file = e.dataTransfer.files[0]; sportsModal.dragging = false; }"
+                    @click="$refs.srtInput.click()">
+                    <div v-if="sportsModal.file" class="text-[11px] text-orange-400 font-bold">📄 {{ sportsModal.file.name }}</div>
+                    <div v-else>
+                        <div class="text-3xl mb-2">📂</div>
+                        <p class="text-sm text-gray-400">Kéo thả hoặc <span class="text-orange-400 font-bold">nhấn để chọn</span></p>
+                        <p class="text-[10px] text-gray-600 mt-1">.srt</p>
+                    </div>
+                    <input ref="srtInput" type="file" accept=".srt" class="hidden" @change="e => sportsModal.file = e.target.files[0]">
+                </div>
+            </div>
+            <div class="flex gap-3 justify-end pt-1">
+                <button @click="sportsModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
+                <button @click="submitSports" :disabled="!sportsModal.file || sportsModal.loading"
+                    class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-orange-600 hover:bg-orange-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                    {{ sportsModal.loading ? '⏳ Đang xử lý...' : '🚀 Bắt đầu' }}
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- TOAST -->
     <div v-if="toast" class="fixed top-6 right-6 z-50 bg-blue-600 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-lg">{{ toast }}</div>
 </div>
@@ -1688,6 +1672,30 @@ createApp({
                 this.customSource = '';
             }
         });
+
+        const sportsModal = ref({ open: false, projectId: '', file: null, dragging: false, loading: false });
+
+        async function submitSports() {
+            const { file } = sportsModal.value;
+            if (!file) return;
+            const projectId = sportsModal.value.projectId.trim() || ('sports_' + Date.now());
+            sportsModal.value.loading = true;
+            try {
+                const form = new FormData();
+                form.append('srt', file);
+                form.append('projectId', projectId);
+                const res = await fetch('/api/create-sports', { method: 'POST', body: form });
+                const r = await res.json();
+                if (r.success) {
+                    sportsModal.value.open = false;
+                    sportsModal.value.file = null;
+                    sportsModal.value.projectId = '';
+                    showToast('✅ Đã khởi động Sports SRT, đang crawl ảnh...');
+                    await loadPosts();
+                } else { alert('❌ ' + (r.error || 'Lỗi')); }
+            } catch (e) { alert('❌ ' + e.message); }
+            sportsModal.value.loading = false;
+        }
 
         async function submitNewProject() {
             const { content, selectedSources, targetLang } = newProjectModal.value;
@@ -3092,6 +3100,8 @@ createApp({
             activePostId,
             activePost,
             activeProjectId,
+            sportsModal,
+            submitSports,
             voiceModal,
             editModal,
             uploadModal,
