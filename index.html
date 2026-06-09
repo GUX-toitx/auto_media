@@ -76,7 +76,7 @@
 
             <div class="space-y-4 mt-[180px]">
                 <!-- Mở bài -->
-                <div v-if="activePost.hook_details?.length" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
+                <div v-if="false" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
                     <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Mở bài</p>
                     <div class="space-y-1">
                         <div v-for="d in activePost.hook_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
@@ -105,7 +105,6 @@
                                             <div class="flex gap-0.5">
                                                 <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ vi+1 }}</span>
                                                 <button @click="openEdit(v,'video')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                <button @click="openAssignDetailModal(v,'video')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
                                             </div>
                                         </div>
                                     </div>
@@ -122,7 +121,6 @@
                                             <div class="flex gap-0.5">
                                                 <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ ii+1 }}</span>
                                                 <button @click="openEdit(img,'image')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                <button @click="openAssignDetailModal(img,'image')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
                                             </div>
                                         </div>
                                     </div>
@@ -158,7 +156,6 @@
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v,'hook','video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(v,'video',null,'hook')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -179,7 +176,6 @@
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img,'hook','image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(img,'image',null,'hook')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -206,7 +202,6 @@
                                 <div class="flex gap-1">
                                     <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v, 'hook', 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -232,7 +227,6 @@
                                 <div class="flex gap-1">
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img, 'hook', 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -240,7 +234,7 @@
                 </div>
 
                 <!-- Tóm tắt -->
-                <div v-if="activePost.summary_details?.length" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
+                <div v-if="false" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
                     <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Tóm tắt</p>
                     <div class="space-y-1">
                         <div v-for="d in activePost.summary_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
@@ -269,7 +263,6 @@
                                             <div class="flex gap-0.5">
                                                 <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ vi+1 }}</span>
                                                 <button @click="openEdit(v,'video')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                <button @click="openAssignDetailModal(v,'video')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
                                             </div>
                                         </div>
                                     </div>
@@ -286,7 +279,6 @@
                                             <div class="flex gap-0.5">
                                                 <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ ii+1 }}</span>
                                                 <button @click="openEdit(img,'image')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                <button @click="openAssignDetailModal(img,'image')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
                                             </div>
                                         </div>
                                     </div>
@@ -321,7 +313,6 @@
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v,'summary','video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(v,'video',null,'summary')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -342,7 +333,6 @@
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img,'summary','image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(img,'image',null,'summary')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -369,7 +359,6 @@
                                 <div class="flex gap-1">
                                     <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v, 'summary', 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -396,7 +385,6 @@
                                 <div class="flex gap-1">
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img, 'summary', 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -451,7 +439,6 @@
                                                             <div class="flex gap-0.5">
                                                                 <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ vi+1 }}</span>
                                                                 <button @click="openEdit(v,'video')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                                <button @click="openAssignDetailModal(v,'video')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -468,7 +455,6 @@
                                                             <div class="flex gap-0.5">
                                                                 <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ ii+1 }}</span>
                                                                 <button @click="openEdit(img,'image')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                                <button @click="openAssignDetailModal(img,'image')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -512,7 +498,6 @@
                                             <button class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</button>
                                             <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-green-600 uppercase">✓</button>
                                             <button @click="openEdit(v, 'video', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                            <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                         </div>
                                     </div>
                                 </div>
@@ -532,7 +517,6 @@
                                             <button class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</button>
                                             <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-green-600 uppercase">✓</button>
                                             <button @click="openEdit(img, 'image', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                            <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                         </div>
                                     </div>
                                 </div>
@@ -583,7 +567,6 @@
                                                                         <div class="flex gap-0.5">
                                                                             <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ vi+1 }}</span>
                                                                             <button @click="openEdit(v,'video')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                                            <button @click="openAssignDetailModal(v,'video')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
                                                                         </div>
                                                                     </div>
                                                                 </div>
@@ -600,7 +583,6 @@
                                                                         <div class="flex gap-0.5">
                                                                             <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ ii+1 }}</span>
                                                                             <button @click="openEdit(img,'image')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                                            <button @click="openAssignDetailModal(img,'image')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
                                                                         </div>
                                                                     </div>
                                                                 </div>
@@ -627,7 +609,6 @@
                                                     <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                                     <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
                                                         :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
-                                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                                     <button @click="openEdit(v, 'video', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
                                                 </div>
                                             </div>
@@ -648,7 +629,6 @@
                                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                                     <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
                                                         :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
-                                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                                     <button @click="openEdit(img, 'image', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
                                                 </div>
                                             </div>
@@ -690,10 +670,10 @@
                                     <span v-if="v.selected" class="text-[9px] font-black py-1 px-2 rounded bg-blue-600 text-white min-w-[24px] text-center">#{{ v.order }}</span>
                                     <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-1 rounded uppercase transition-colors"
                                         :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-1 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                     <button @click="openEdit(v, 'video', para)" :disabled="!v.selected"
                                         class="text-[9px] font-black py-1 px-2 rounded transition-colors"
                                         :class="v.selected ? 'bg-yellow-500 hover:bg-yellow-400 text-black' : 'bg-gray-800 text-gray-700 cursor-not-allowed'">Edit</button>
+                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-1 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -734,10 +714,10 @@
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white min-w-[20px] text-center">#{{ img.order }}</span>
                                     <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
                                         :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                     <button @click="openEdit(img, 'image', para)" :disabled="!img.selected"
                                         class="text-[9px] font-black py-0.5 px-1.5 rounded transition-colors"
                                         :class="img.selected ? 'bg-yellow-500 hover:bg-yellow-400 text-black' : 'bg-gray-800 text-gray-700 cursor-not-allowed'">Edit</button>
+                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -746,7 +726,7 @@
             </div><!-- end v-for paragraphs -->
 
                 <!-- Kết bài -->
-                <div v-if="activePost.conclusion_details?.length" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
+                <div v-if="false" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
                     <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Kết bài</p>
                     <div class="space-y-1">
                         <div v-for="d in activePost.conclusion_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
@@ -775,7 +755,6 @@
                                             <div class="flex gap-0.5">
                                                 <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ vi+1 }}</span>
                                                 <button @click="openEdit(v,'video')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                <button @click="openAssignDetailModal(v,'video')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
                                             </div>
                                         </div>
                                     </div>
@@ -792,7 +771,6 @@
                                             <div class="flex gap-0.5">
                                                 <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ ii+1 }}</span>
                                                 <button @click="openEdit(img,'image')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                <button @click="openAssignDetailModal(img,'image')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
                                             </div>
                                         </div>
                                     </div>
@@ -827,7 +805,6 @@
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v,'conclusion','video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(v,'video',null,'conclusion')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -848,7 +825,6 @@
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img,'conclusion','image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(img,'image',null,'conclusion')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -875,7 +851,6 @@
                                 <div class="flex gap-1">
                                     <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v, 'conclusion', 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -902,7 +877,6 @@
                                 <div class="flex gap-1">
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img, 'conclusion', 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                 </div>
                             </div>
                         </div>
@@ -1471,65 +1445,6 @@
             </div>
             
             <div class="space-y-2 max-h-[500px] overflow-y-auto pr-1">
-                <!-- Hook Section -->
-                <div class="border border-gray-700 rounded-lg overflow-hidden">
-                    <button @click="selectTargetSection('hook')" 
-                            @dblclick="assignToSection('hook')"
-                            class="w-full text-left px-3 py-2 bg-gray-800 hover:bg-gray-700 text-[11px] font-bold text-gray-300 transition-colors flex items-center justify-between">
-                        <span>🎬 Mở bài (Hook)</span>
-                        <span class="text-gray-500">{{ assignDetailModal.selectedTarget === 'hook' ? '▼' : '▶' }}</span>
-                    </button>
-                    <div v-if="assignDetailModal.selectedTarget === 'hook'" class="bg-gray-900 border-t border-gray-700 p-2 space-y-1">
-                        <div v-if="!assignDetailModal.details.length" class="text-[10px] text-gray-600 italic px-2 py-2">Chưa có Hook Details</div>
-                        <button v-for="(d, i) in assignDetailModal.details" :key="d.id" 
-                                @click="expandDetail(d)"
-                                @dblclick="assignAssetToDetail(d.id)" 
-                                class="w-full text-left px-3 py-2 rounded bg-gray-800 hover:bg-blue-600 text-[10px] text-gray-300 transition-colors">
-                            📝 Detail #{{ i + 1 }}: {{ (d.content_vi || d.content || '').slice(0, 70) }}...
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- Summary Section -->
-                <div class="border border-gray-700 rounded-lg overflow-hidden">
-                    <button @click="selectTargetSection('summary')" 
-                            @dblclick="assignToSection('summary')"
-                            class="w-full text-left px-3 py-2 bg-gray-800 hover:bg-gray-700 text-[11px] font-bold text-gray-300 transition-colors flex items-center justify-between">
-                        <span>📝 Tóm tắt (Summary)</span>
-                        <span class="text-gray-500">{{ assignDetailModal.selectedTarget === 'summary' ? '▼' : '▶' }}</span>
-                    </button>
-                    <div v-if="assignDetailModal.selectedTarget === 'summary'" class="bg-gray-900 border-t border-gray-700 p-2 space-y-1">
-                        <div v-if="!assignDetailModal.details.length" class="text-[10px] text-gray-600 italic px-2 py-2">Chưa có Summary Details</div>
-                        <button v-for="(d, i) in assignDetailModal.details" :key="d.id" 
-                                @click="expandDetail(d)"
-                                @dblclick="assignAssetToDetail(d.id)" 
-                                class="w-full text-left px-3 py-2 rounded bg-gray-800 hover:bg-blue-600 text-[10px] text-gray-300 transition-colors">
-                            📝 Detail #{{ i + 1 }}: {{ (d.content_vi || d.content || '').slice(0, 70) }}...
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- Conclusion Section -->
-                <div class="border border-gray-700 rounded-lg overflow-hidden">
-                    <button @click="selectTargetSection('conclusion')" 
-                            @dblclick="assignToSection('conclusion')"
-                            class="w-full text-left px-3 py-2 bg-gray-800 hover:bg-gray-700 text-[11px] font-bold text-gray-300 transition-colors flex items-center justify-between">
-                        <span>🎯 Kết bài (Conclusion)</span>
-                        <span class="text-gray-500">{{ assignDetailModal.selectedTarget === 'conclusion' ? '▼' : '▶' }}</span>
-                    </button>
-                    <div v-if="assignDetailModal.selectedTarget === 'conclusion'" class="bg-gray-900 border-t border-gray-700 p-2 space-y-1">
-                        <div v-if="!assignDetailModal.details.length" class="text-[10px] text-gray-600 italic px-2 py-2">Chưa có Conclusion Details</div>
-                        <button v-for="(d, i) in assignDetailModal.details" :key="d.id" 
-                                @click="expandDetail(d)"
-                                @dblclick="assignAssetToDetail(d.id)" 
-                                class="w-full text-left px-3 py-2 rounded bg-gray-800 hover:bg-blue-600 text-[10px] text-gray-300 transition-colors">
-                            📝 Detail #{{ i + 1 }}: {{ (d.content_vi || d.content || '').slice(0, 70) }}...
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="border-t border-gray-700 my-2"></div>
-                
                 <!-- Paragraph Sections -->
                 <div v-for="(para, i) in (activePost?.paragraphs || [])" :key="para.id" class="border border-gray-700 rounded-lg overflow-hidden">
                     <button @click="selectTargetParagraph(para.id)" 
@@ -2982,18 +2897,7 @@ createApp({
         }
 
         function selectTargetParagraph(paraId) {
-            // Toggle expand/collapse
-            if (assignDetailModal.value.selectedTarget === paraId) {
-                assignDetailModal.value.selectedTarget = null;
-                assignDetailModal.value.detailType = null;
-                assignDetailModal.value.details = [];
-                return;
-            }
-            
-            const para = activePost.value.paragraphs.find(p => p.id === paraId);
-            assignDetailModal.value.selectedTarget = paraId;
-            assignDetailModal.value.detailType = 'paragraph_detail';
-            assignDetailModal.value.details = para?.details || [];
+            assignToParagraph(paraId);
         }
 
         async function assignAssetToDetail(detailId) {
