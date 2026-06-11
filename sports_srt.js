@@ -57,7 +57,9 @@ Task:
 3. Pronounce player names, coaches, tournaments correctly in both languages.
 4. Split content into short sentences suitable for voice-over (10-25 words each).
 5. Cover: team form, key players, tactics, injury updates, prediction.
-6. NEVER cite sources, never add footnotes, never mention where data comes from.
+6. Target length: 6-8 minutes of voice-over content (approximately 900-1200 words in target language, 50-80 sentences).
+7. NEVER cite sources, never add footnotes, never mention where data comes from, never add URLs, never add links in parentheses like ([source.com](url)).
+8. Output ONLY clean sentences with no citations, no references, no URLs whatsoever.
 7. Return JSON where each sentence has both "vi" (Vietnamese) and "target" (${langName}) versions.`;
     const res = await httpsPost(
         'https://api.openai.com/v1/responses',
@@ -90,6 +92,9 @@ Task:
         ?.content?.find(c => c.type === 'output_text')?.text;
     if (!outputText) throw new Error('GPT-5 khong tra ve output: ' + JSON.stringify(data).slice(0, 200));
     const parsed = JSON.parse(outputText);
+    // Strip citations nếu GPT vẫn thêm vào
+    const stripCitations = s => s.replace(/\s*\([^)]*\(https?:[^)]+\)[^)]*\)/g, '').replace(/\s*\(https?:\/\/[^)]+\)/g, '').trim();
+    parsed.sentences = (parsed.sentences || []).map(s => ({ vi: stripCitations(s.vi), target: stripCitations(s.target) }));
     console.log('[GPT-5] === OUTPUT ===');
     console.log('Title VI:', parsed.title_vi);
     console.log('Title:', parsed.title);
