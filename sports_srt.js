@@ -9,7 +9,7 @@ import { fetchFromGoogleImageBot } from './googleImageCrawler.js';
 const OPENAI_KEY = process.env.OPENAI_KEY;
 const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
 const DB_PATH = path.join(process.env.DB_DIR || path.join(MEDIA_DIR, 'db'), 'media_system.sqlite');
-const IMAGES_PER_KEYWORD = 6;
+const IMAGES_PER_KEYWORD = 8;
 
 const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 
@@ -51,7 +51,7 @@ async function getKeywordsFromGPT(sentence) {
             messages: [
                 {
                     role: 'system',
-                    content: 'You are a football image search expert. Given a Vietnamese sports commentary sentence, return exactly 4 specific English Bing image search queries that will return real football photos. Each query must contain a specific player name, team name, or match name. Never use generic terms. Return ONLY a raw JSON array, no explanation. Example: ["Kevin De Bruyne Belgium training", "Romelu Lukaku goal", "Belgium national team 2024", "Jeremy Doku dribbling"]'
+                    content: 'You are a football image search expert. Given a Vietnamese sports commentary sentence, return exactly 6 specific English Bing image search queries that will return real football photos. Each query must contain a specific player name, team name, or match name. Never use generic terms. Return ONLY a raw JSON array, no explanation. Example: ["Kevin De Bruyne Belgium training", "Romelu Lukaku goal", "Belgium national team 2024", "Jeremy Doku dribbling"]'
                 },
                 { role: 'user', content: sentence }
             ],
@@ -65,12 +65,12 @@ async function getKeywordsFromGPT(sentence) {
     content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     try {
         const parsed = JSON.parse(content);
-        if (Array.isArray(parsed)) return parsed.slice(0, 4);
+        if (Array.isArray(parsed)) return parsed.slice(0, 6);
         const val = Object.values(parsed)[0];
-        return Array.isArray(val) ? val.slice(0, 4) : [sentence.slice(0, 60)];
+        return Array.isArray(val) ? val.slice(0, 6) : [sentence.slice(0, 60)];
     } catch {
         const match = content.match(/\[.*?\]/s);
-        if (match) try { return JSON.parse(match[0]).slice(0, 4); } catch(_) {}
+        if (match) try { return JSON.parse(match[0]).slice(0, 6); } catch(_) {}
         return [sentence.slice(0, 60)];
     }
 }
@@ -80,9 +80,10 @@ async function main() {
     const srtPath = args[0];
     const projectId = args[1];
     const srtTranslatedPath = args[2] || null;
+    const targetLang = args[3] || 'vi';
 
     if (!srtPath || !projectId) {
-        console.error('Usage: node sports_srt.js <file.srt> <projectId> [file_translated.srt]');
+        console.error('Usage: node sports_srt.js <file.srt> <projectId> [file_translated.srt] [targetLang]');
         process.exit(1);
     }
 
@@ -91,7 +92,7 @@ async function main() {
     console.log(`[sports_srt] Đọc được ${sentences.length} câu từ ${srtPath}`);
 
     const db = await getDb();
-    await db.run('INSERT OR IGNORE INTO Post (project_id, status) VALUES (?, ?)', [projectId, 'crawling']);
+    await db.run('INSERT OR IGNORE INTO Post (project_id, status, voice_content_type, target_lang) VALUES (?, ?, ?, ?)', [projectId, 'crawling', targetLang === 'vi' ? 'content_vi' : 'content', targetLang]);
     const post = await db.get('SELECT id FROM Post WHERE project_id = ?', [projectId]);
     const postId = post.id;
 

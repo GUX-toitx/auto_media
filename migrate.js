@@ -173,6 +173,7 @@ export async function initDB() {
         FOREIGN KEY(post_id) REFERENCES Post(id)
     )`).catch(() => {});
     // Rename migrations
+    await db.run('ALTER TABLE Post ADD COLUMN target_lang TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post RENAME COLUMN title TO project_id').catch(() => {});
     await db.run('ALTER TABLE Post RENAME COLUMN tieu_de TO title').catch(() => {});
     return db;

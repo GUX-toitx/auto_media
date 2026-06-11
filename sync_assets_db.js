@@ -20,7 +20,7 @@ const DB_PATH = path.join(process.env.DB_DIR, 'media_system.sqlite');
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
 const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY;
 const VIDEOS_PER_SOURCE = 4;
-const IMAGES_PER_SOURCE = 4;
+const IMAGES_PER_SOURCE = 8;
 
 const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));

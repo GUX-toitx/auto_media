@@ -94,7 +94,7 @@
                             <!-- Assets for this detail -->
                             <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
                                 <div v-if="d.videos?.length" class="space-y-0.5">
-                                    <p class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
+                                    <p v-if="false" class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
                                     <div class="grid grid-cols-4 gap-1">
                                         <div v-for="(v, vi) in d.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
                                              draggable="true"
@@ -140,11 +140,11 @@
 
                     </div>
                     <!-- Selected hook videos -->
-                    <div v-if="(activePost.sections?.hook?.videos||[]).some(a=>a.selected)">
+                    <div v-if="false">
                         <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="activePost.sections['hook']._selVideoOpen = activePost.sections['hook']._selVideoOpen === false ? true : false">
-                            {{ activePost.sections['hook']._selVideoOpen === false ? '▶' : '▼' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos đã chọn ({{ (activePost.sections?.hook?.videos||[]).filter(a=>a.selected).length }})
+
                         </div>
-                        <div v-if="activePost.sections['hook']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
+                        <div v-if="false" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.hook?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" 
                                  class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
                                  draggable="true"
@@ -181,16 +181,16 @@
                         </div>
                     </div>
                     <!-- Videos -->
-                    <div>
+                    <div v-if="false">
                         <div class="flex items-center text-[10px] font-black text-gray-500 select-none py-1">
                             <span @click="activePost.sections['hook']._videoOpen = !activePost.sections['hook']._videoOpen" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
                                 {{ activePost.sections?.['hook']?._videoOpen ? '▼' : '▶' }}
                                 <span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
-                                Videos ({{ (activePost.sections?.hook?.videos || []).filter(v=>!v.selected).length }})
+                                <!-- videos hidden -->
                             </span>
-                            <button @click="deleteSectionAll('hook','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
+                            <button v-if="false" @click="deleteSectionAll('hook','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
                             <button v-if="(activePost.sections?.hook?.videos || []).filter(v=>!v.selected && v._toDelete).length" @click="deleteSelectedSectionAssets('hook','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (activePost.sections?.hook?.videos || []).filter(v=>!v.selected && v._toDelete).length }})</button>
-                            <button @click="uploadSectionAsset('hook','video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
+                            <button v-if="false" @click="uploadSectionAsset('hook','video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
                         </div>
                         <div v-if="activePost.sections?.['hook']?._videoOpen && (activePost.sections?.hook?.videos || []).filter(v=>!v.selected).length" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.hook?.videos || []).filter(v=>!v.selected)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
@@ -252,7 +252,7 @@
                             <!-- Assets for this detail -->
                             <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
                                 <div v-if="d.videos?.length" class="space-y-0.5">
-                                    <p class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
+                                    <p v-if="false" class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
                                     <div class="grid grid-cols-4 gap-1">
                                         <div v-for="(v, vi) in d.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
                                              draggable="true"
@@ -298,11 +298,11 @@
 
                     </div>
                     <!-- Selected summary videos -->
-                    <div v-if="(activePost.sections?.summary?.videos||[]).some(a=>a.selected)">
+                    <div v-if="false">
                         <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="activePost.sections['summary']._selVideoOpen = activePost.sections['summary']._selVideoOpen === false ? true : false">
-                            {{ activePost.sections['summary']._selVideoOpen === false ? '▶' : '▼' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos đã chọn ({{ (activePost.sections?.summary?.videos||[]).filter(a=>a.selected).length }})
+
                         </div>
-                        <div v-if="activePost.sections['summary']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
+                        <div v-if="false" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.summary?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" 
                                  class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
                                  draggable="true"
@@ -338,16 +338,16 @@
                         </div>
                     </div>
                     <!-- Videos -->
-                    <div>
+                    <div v-if="false">
                         <div class="flex items-center text-[10px] font-black text-gray-500 select-none py-1">
                             <span @click="activePost.sections['summary']._videoOpen = !activePost.sections['summary']._videoOpen" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
                                 {{ activePost.sections?.['summary']?._videoOpen ? '▼' : '▶' }}
                                 <span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
-                                Videos ({{ (activePost.sections?.summary?.videos || []).filter(v=>!v.selected).length }})
+                                <!-- videos hidden -->
                             </span>
-                            <button @click="deleteSectionAll('summary','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
+                            <button v-if="false" @click="deleteSectionAll('summary','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
                             <button v-if="(activePost.sections?.summary?.videos || []).filter(v=>!v.selected && v._toDelete).length" @click="deleteSelectedSectionAssets('summary','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (activePost.sections?.summary?.videos || []).filter(v=>!v.selected && v._toDelete).length }})</button>
-                            <button @click="uploadSectionAsset('summary','video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
+                            <button v-if="false" @click="uploadSectionAsset('summary','video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
                         </div>
                         <div v-if="activePost.sections?.['summary']?._videoOpen && (activePost.sections?.summary?.videos || []).filter(v=>!v.selected).length" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.summary?.videos || []).filter(v=>!v.selected)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
@@ -428,7 +428,7 @@
                                             <!-- Assets for this detail -->
                                             <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
                                                 <div v-if="d.videos?.length" class="space-y-0.5">
-                                                    <p class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
+                                                    <p v-if="false" class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
                                                     <div class="grid grid-cols-4 gap-1">
                                                         <div v-for="(v, vi) in d.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
                                                              draggable="true"
@@ -483,11 +483,11 @@
                                 </div>
                             </div>
                             <!-- Assets selected cho luận điểm (sentenceId = null, selected) -->
-                            <div v-if="(para.videos || []).filter(v => v.selected && v.sentenceId === null).length" class="mt-1">
-                                <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="para._paraVideoOpen = !para._paraVideoOpen">
+                            <div v-if="false" class="mt-1">
+                                <div v-if="false" class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="para._paraVideoOpen = !para._paraVideoOpen">
                                     {{ para._paraVideoOpen ? '▼' : '▶' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos luận điểm ({{ (para.videos || []).filter(v => v.selected && v.sentenceId === null).length }})
                                 </div>
-                                <div v-if="para._paraVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
+                                <div v-if="false" class="grid grid-cols-4 gap-1 mt-1">
                                     <div v-for="v in (para.videos || []).filter(v => v.selected && v.sentenceId === null).sort((a,b) => a.order - b.order)" :key="v.relativePath" 
                                          class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
                                          draggable="true"
@@ -556,7 +556,7 @@
                                                         <!-- Assets for this detail -->
                                                         <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
                                                             <div v-if="d.videos?.length" class="space-y-0.5">
-                                                                <p class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
+                                                                <p v-if="false" class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
                                                                 <div class="grid grid-cols-4 gap-1">
                                                                     <div v-for="(v, vi) in d.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
                                                                          draggable="true"
@@ -595,11 +595,11 @@
                                         </div>
                                     </div>
                                     <!-- Video selected của câu này -->
-                                    <div v-if="(para.videos || []).filter(v => v.sentenceId == s.id).length">
+                                    <div v-if="false">
                                         <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="s._videoOpen = !s._videoOpen">
-                                            {{ s._videoOpen ? '▼' : '▶' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos ({{ (para.videos || []).filter(v => v.sentenceId == s.id).length }})
+
                                         </div>
-                                        <div v-if="s._videoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
+                                        <div v-if="false" class="grid grid-cols-4 gap-1 mt-1">
                                             <div v-for="v in (para.videos || []).filter(v => v.sentenceId == s.id).sort((a,b) => a.order - b.order)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
                                                 :class="v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-700'">
                                                 <button @click="deleteAsset(v, para)" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-10 flex items-center justify-center">×</button>
@@ -640,22 +640,22 @@
                     </div>
 
                     <!-- Row 5: Videos -->
-                    <div>
+                    <div v-if="false">
                         <div class="flex items-center text-[10px] font-black text-gray-500 select-none py-1">
-                            <span @click="toggleSection(para, 'videoOpen')" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
+                            <span v-if="false" @click="toggleSection(para, 'videoOpen')" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
                                 {{ para.videoOpen ? '▼' : '▶' }}
                                 <span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
-                                Videos ({{ (para.videos || []).filter(v => v.sentenceId === null && !v.selected).length }})
+                                <!-- videos hidden -->
                             </span>
-                            <button @click="deleteAll(para, i+1, 'video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
+                            <button v-if="false" @click="deleteAll(para, i+1, 'video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
                             <button v-if="(para.videos || []).filter(v => v.sentenceId === null && !v.selected && v._toDelete).length" @click="deleteSelectedParaAssets(para, 'video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (para.videos || []).filter(v => v.sentenceId === null && !v.selected && v._toDelete).length }})</button>
                             <div class="ml-auto flex gap-1.5">
                                 <button @click="refetchMedia(para)" class="text-[9px] px-2.5 py-1 rounded-md bg-orange-600/80 hover:bg-orange-500 text-white font-black tracking-wide transition-all active:scale-95">🔄 Lấy lại</button>
-                                <button @click="aiGenerate(para, 'video')" class="text-[9px] px-2.5 py-1 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white font-black tracking-wide transition-all active:scale-95">✨ AI Generate</button>
-                                <button @click="uploadAsset(para, i+1, 'video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95">📤 Upload</button>
+                                <button v-if="false" @click="aiGenerate(para, 'video')" class="text-[9px] px-2.5 py-1 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white font-black tracking-wide transition-all active:scale-95">✨ AI Generate</button>
+                                <button v-if="false" @click="uploadAsset(para, i+1, 'video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95">📤 Upload</button>
                             </div>
                         </div>
-                        <div v-if="para.videoOpen" class="grid grid-cols-4 gap-2 mt-1">
+                        <div v-if="false" class="grid grid-cols-4 gap-2 mt-1">
                             <div v-if="!(para.videos || []).filter(v => v.sentenceId === null && !v.selected).length" class="text-[10px] text-gray-700 italic">Trống</div>
                             <div v-for="v in (para.videos || []).filter(v => v.sentenceId === null && !v.selected)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
                                 :class="[v._toDelete ? 'ring-2 ring-red-500 border-gray-800' : 'border-gray-800']">
@@ -744,7 +744,7 @@
                             <!-- Assets for this detail -->
                             <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
                                 <div v-if="d.videos?.length" class="space-y-0.5">
-                                    <p class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
+                                    <p v-if="false" class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
                                     <div class="grid grid-cols-4 gap-1">
                                         <div v-for="(v, vi) in d.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
                                              draggable="true"
@@ -790,11 +790,11 @@
 
                     </div>
                     <!-- Selected conclusion videos -->
-                    <div v-if="(activePost.sections?.conclusion?.videos||[]).some(a=>a.selected)">
+                    <div v-if="false">
                         <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="activePost.sections['conclusion']._selVideoOpen = activePost.sections['conclusion']._selVideoOpen === false ? true : false">
-                            {{ activePost.sections['conclusion']._selVideoOpen === false ? '▶' : '▼' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos đã chọn ({{ (activePost.sections?.conclusion?.videos||[]).filter(a=>a.selected).length }})
+
                         </div>
-                        <div v-if="activePost.sections['conclusion']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
+                        <div v-if="false" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.conclusion?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" 
                                  class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
                                  draggable="true"
@@ -830,16 +830,16 @@
                         </div>
                     </div>
                     <!-- Videos -->
-                    <div>
+                    <div v-if="false">
                         <div class="flex items-center text-[10px] font-black text-gray-500 select-none py-1">
                             <span @click="activePost.sections['conclusion']._videoOpen = !activePost.sections['conclusion']._videoOpen" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
                                 {{ activePost.sections?.['conclusion']?._videoOpen ? '▼' : '▶' }}
                                 <span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
-                                Videos ({{ (activePost.sections?.conclusion?.videos || []).filter(v=>!v.selected).length }})
+                                <!-- videos hidden -->
                             </span>
-                            <button @click="deleteSectionAll('conclusion','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
+                            <button v-if="false" @click="deleteSectionAll('conclusion','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
                             <button v-if="(activePost.sections?.conclusion?.videos || []).filter(v=>!v.selected && v._toDelete).length" @click="deleteSelectedSectionAssets('conclusion','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (activePost.sections?.conclusion?.videos || []).filter(v=>!v.selected && v._toDelete).length }})</button>
-                            <button @click="uploadSectionAsset('conclusion','video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
+                            <button v-if="false" @click="uploadSectionAsset('conclusion','video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
                         </div>
                         <div v-if="activePost.sections?.['conclusion']?._videoOpen && (activePost.sections?.conclusion?.videos || []).filter(v=>!v.selected).length" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.conclusion?.videos || []).filter(v=>!v.selected)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
@@ -1503,6 +1503,19 @@
                 <button @click="sportsModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
             </div>
             <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Ngôn ngữ đích</label>
+                <div class="flex flex-wrap gap-1.5 mb-2">
+                    <button v-for="l in [{code:'vi',name:'🇻🇳 Việt'},{code:'en',name:'🇬🇧 EN'},{code:'ja',name:'🇯🇵 JA'},{code:'ko',name:'🇰🇷 KO'},{code:'zh',name:'🇨🇳 ZH'},{code:'fr',name:'🇫🇷 FR'},{code:'es',name:'🇪🇸 ES'}]" :key="l.code"
+                        @click="sportsModal.targetLang = l.code"
+                        class="px-2.5 py-1 rounded-lg text-[10px] font-black transition-colors"
+                        :class="sportsModal.targetLang === l.code ? 'bg-orange-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">
+                        {{ l.name }}
+                    </button>
+                </div>
+                <input v-model="sportsModal.targetLang" type="text" placeholder="hoặc nhập thủ công: th, id, ar..."
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-orange-500">
+            </div>
+            <div>
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Project ID</label>
                 <input v-model="sportsModal.projectId" type="text" placeholder="vd: sports_2024_euro" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-orange-500">
             </div>
@@ -1601,10 +1614,10 @@ createApp({
             }
         });
 
-        const sportsModal = ref({ open: false, projectId: '', file: null, fileTranslated: null, loading: false });
+        const sportsModal = ref({ open: false, projectId: '', file: null, fileTranslated: null, loading: false, targetLang: 'vi' });
 
         async function submitSports() {
-            const { file, fileTranslated } = sportsModal.value;
+            const { file, fileTranslated, targetLang } = sportsModal.value;
             if (!file) return;
             const projectId = sportsModal.value.projectId.trim() || ('sports_' + Date.now());
             sportsModal.value.loading = true;
@@ -1613,6 +1626,7 @@ createApp({
                 form.append('srt', file);
                 if (fileTranslated) form.append('srtTranslated', fileTranslated);
                 form.append('projectId', projectId);
+                form.append('targetLang', targetLang);
                 const res = await fetch('/api/create-sports', { method: 'POST', body: form });
                 const r = await res.json();
                 if (r.success) {
@@ -2963,9 +2977,13 @@ createApp({
         sse.onmessage = (e) => {
             const { postTitle, status } = JSON.parse(e.data);
             const post = posts.value.find(p => p.title === postTitle || p.title.startsWith(postTitle + '_'));
+            if (status && status.startsWith('❌')) {
+                showToast(status, 10000);
+                if (post) post.status = null;
+                return;
+            }
             if (post) {
                 post.status = status;
-                // Nếu status trống (tức là đã cào xong) thì reload lại một lần cuối cho chắc cốp
                 if (!status && activePostId.value === post.id) selectPost(post);
             } else if (status === 'crawling') {
                 loadPosts();

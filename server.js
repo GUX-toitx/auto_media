@@ -12,7 +12,6 @@ import { open } from 'sqlite';
 import multer from 'multer';
 
 import { getLanguages, getReferenceSpeakers, getDictionary, getMe, sendToQueue, getSentenceStatus, updateSentence, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio, getAllAudioUrls } from './handle_voice/audio_service.js';
-import { processAll } from './video_service.js';
 import { generateFlowImage } from './browser.js';
 import archiver from 'archiver';
 import { downloadWithYtDlp } from './ytDlpDownloader.js'; // Nhúng con Bot vừa viết
@@ -367,8 +366,8 @@ app.post('/api/download-voice', async (req, res) => {
     try {
         const { videoId, postId, contentType: reqContentType } = req.body;
         const db = await getDb();
-        const post = await db.get('SELECT project_id, voice_content_type FROM Post WHERE id = ?', [postId]);
-        const lang = post.project_id.match(/_([a-z]{2})$/)?.[1] || (reqContentType === 'content_vi' ? 'vi' : 'en');
+        const post = await db.get('SELECT project_id, voice_content_type, target_lang FROM Post WHERE id = ?', [postId]);
+        const lang = post.target_lang || post.project_id.match(/_([a-z]{2})$/)?.[1] || (reqContentType === 'content_vi' ? 'vi' : 'en');
         const contentType = reqContentType || post.voice_content_type || 'content';
 
         const zipName = `${videoId}_${lang}.zip`;
@@ -497,12 +496,7 @@ app.post('/api/check-download-voice', async (req, res) => {
 });
 
 app.post('/api/generate-media-video', async (req, res) => {
-    try {
-        const { videoId, lang } = req.body;
-        const projectDir = path.join(MEDIA_DIR, videoId);
-        const results = await processAll(projectDir, lang);
-        res.json({ success: true, results });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    res.status(404).json({ error: 'Not available' });
 });
 
 app.get('/api/me', async (req, res) => {
@@ -1000,7 +994,7 @@ const upload = multer({ dest: path.join(MEDIA_DIR, '_tmp_uploads') });
 
 // API: Tạo dự án Sports từ file SRT
 app.post('/api/create-sports', upload.fields([{ name: 'srt', maxCount: 1 }, { name: 'srtTranslated', maxCount: 1 }]), async (req, res) => {
-    const { projectId } = req.body;
+    const { projectId, targetLang } = req.body;
     const srtFile = req.files?.srt?.[0];
     const srtTranslatedFile = req.files?.srtTranslated?.[0];
     if (!srtFile || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu file SRT hoặc projectId' });
@@ -1016,6 +1010,7 @@ app.post('/api/create-sports', upload.fields([{ name: 'srt', maxCount: 1 }, { na
         }
         const args = ['sports_srt.js', srtPath, projectId];
         if (srtTranslatedPath) args.push(srtTranslatedPath);
+        if (targetLang) args.push(targetLang);
         const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
         child.stdout.on('data', d => process.stdout.write(`[sports_srt] ${d}`));
         child.stderr.on('data', d => process.stderr.write(`[sports_srt] ${d}`));
