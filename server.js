@@ -993,6 +993,22 @@ app.post('/api/toggle', async (req, res) => {
 const upload = multer({ dest: path.join(MEDIA_DIR, '_tmp_uploads') });
 
 // API: Tạo dự án Sports từ file SRT
+app.post('/api/create-sports-prompt', express.json(), async (req, res) => {
+    const { projectId, prompt, targetLang } = req.body;
+    if (!prompt?.trim() || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu prompt hoặc projectId' });
+    try {
+        const targetDir = path.join(MEDIA_DIR, projectId);
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        const args = ['sports_srt.js', '--prompt', projectId, prompt.trim()];
+        if (targetLang) args.push(targetLang);
+        const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+        child.stdout.on('data', d => process.stdout.write(`[sports_prompt] ${d}`));
+        child.stderr.on('data', d => process.stderr.write(`[sports_prompt] ${d}`));
+        child.unref();
+        res.json({ success: true, projectId });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/create-sports', upload.fields([{ name: 'srt', maxCount: 1 }, { name: 'srtTranslated', maxCount: 1 }]), async (req, res) => {
     const { projectId, targetLang } = req.body;
     const srtFile = req.files?.srt?.[0];

@@ -1499,8 +1499,13 @@
     <div v-if="sportsModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="sportsModal.open = false">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[480px] space-y-4">
             <div class="flex justify-between items-center">
-                <h3 class="text-lg font-black text-white">⚽ Tạo dự án Sports từ SRT</h3>
+                <h3 class="text-lg font-black text-white">⚽ Tạo dự án Sports</h3>
                 <button @click="sportsModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+            <!-- Tab mode -->
+            <div class="flex gap-1 bg-gray-800 rounded-lg p-1">
+                <button @click="sportsModal.mode = 'srt'" class="flex-1 py-1.5 rounded text-[11px] font-black transition-colors" :class="sportsModal.mode === 'srt' ? 'bg-orange-600 text-white' : 'text-gray-400 hover:text-white'">📄 Upload SRT</button>
+                <button @click="sportsModal.mode = 'prompt'" class="flex-1 py-1.5 rounded text-[11px] font-black transition-colors" :class="sportsModal.mode === 'prompt' ? 'bg-orange-600 text-white' : 'text-gray-400 hover:text-white'">✍️ Nhập đoạn văn</button>
             </div>
             <div>
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Ngôn ngữ đích</label>
@@ -1519,6 +1524,7 @@
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Project ID</label>
                 <input v-model="sportsModal.projectId" type="text" placeholder="vd: sports_2024_euro" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-orange-500">
             </div>
+            <template v-if="sportsModal.mode === 'srt'">
             <div>
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">File SRT gốc</label>
                 <div class="border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-colors"
@@ -1549,9 +1555,16 @@
                     <input ref="srtTranslatedInput" type="file" accept=".srt" class="hidden" @change="e => sportsModal.fileTranslated = e.target.files[0]">
                 </div>
             </div>
+            </template>
+            <div v-if="sportsModal.mode === 'prompt'">
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Yêu cầu phân tích</label>
+                <textarea v-model="sportsModal.prompt" rows="6"
+                    placeholder="Phân tích trận Bỉ vs Nhật Bản WC 2026. Đọc đúng tên cầu thủ, dữ liệu mới nhất..."
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-orange-500 resize-none leading-relaxed"></textarea>
+            </div>
             <div class="flex gap-3 justify-end pt-1">
                 <button @click="sportsModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
-                <button @click="submitSports" :disabled="!sportsModal.file || sportsModal.loading"
+                <button @click="submitSports" :disabled="(sportsModal.mode === 'srt' ? !sportsModal.file : !sportsModal.prompt) || sportsModal.loading"
                     class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-orange-600 hover:bg-orange-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
                     {{ sportsModal.loading ? '⏳ Đang xử lý...' : '🚀 Bắt đầu' }}
                 </button>
@@ -1614,25 +1627,33 @@ createApp({
             }
         });
 
-        const sportsModal = ref({ open: false, projectId: '', file: null, fileTranslated: null, loading: false, targetLang: 'vi' });
+        const sportsModal = ref({ open: false, mode: 'srt', projectId: '', file: null, fileTranslated: null, prompt: '', loading: false, targetLang: 'vi' });
 
         async function submitSports() {
-            const { file, fileTranslated, targetLang } = sportsModal.value;
-            if (!file) return;
+            const { file, fileTranslated, targetLang, mode, prompt } = sportsModal.value;
             const projectId = sportsModal.value.projectId.trim() || ('sports_' + Date.now());
             sportsModal.value.loading = true;
             try {
-                const form = new FormData();
-                form.append('srt', file);
-                if (fileTranslated) form.append('srtTranslated', fileTranslated);
-                form.append('projectId', projectId);
-                form.append('targetLang', targetLang);
-                const res = await fetch('/api/create-sports', { method: 'POST', body: form });
+                let res;
+                if (mode === 'prompt') {
+                    res = await fetch('/api/create-sports-prompt', { method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ projectId, prompt, targetLang }) });
+                } else {
+                    if (!file) { sportsModal.value.loading = false; return; }
+                    const form = new FormData();
+                    form.append('srt', file);
+                    if (fileTranslated) form.append('srtTranslated', fileTranslated);
+                    form.append('projectId', projectId);
+                    form.append('targetLang', targetLang);
+                    res = await fetch('/api/create-sports', { method: 'POST', body: form });
+                }
                 const r = await res.json();
                 if (r.success) {
                     sportsModal.value.open = false;
                     sportsModal.value.file = null;
                     sportsModal.value.fileTranslated = null;
+                    sportsModal.value.prompt = '';
                     sportsModal.value.projectId = '';
                     showToast('✅ Đã khởi động Sports SRT, đang crawl ảnh...');
                     await loadPosts();

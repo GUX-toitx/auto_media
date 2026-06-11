@@ -27,6 +27,77 @@ function httpsPost(url, headers, body) {
     });
 }
 
+async function generateSentencesFromPrompt(prompt, targetLang) {
+    const langName = { vi: 'tieng Viet', en: 'English', ja: 'Japanese', ko: 'Korean', zh: 'Chinese', fr: 'French', es: 'Spanish', th: 'Thai', id: 'Bahasa Indonesia' }[targetLang] || targetLang;
+    const schema = {
+        type: 'object',
+        properties: {
+            title: { type: 'string' },
+            title_vi: { type: 'string' },
+            sentences: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        vi: { type: 'string' },
+                        target: { type: 'string' }
+                    },
+                    required: ['vi', 'target'],
+                    additionalProperties: false
+                }
+            }
+        },
+        required: ['title', 'title_vi', 'sentences'],
+        additionalProperties: false
+    };
+    const systemPrompt = `You are a professional sports commentator and analyst with access to the latest football data up to 2026.
+Task:
+1. Write a detailed sports analysis article simultaneously in Vietnamese AND ${langName}.
+2. Use the most up-to-date data: current squad, recent form, head-to-head, key players, tactical setup.
+3. Pronounce player names, coaches, tournaments correctly in both languages.
+4. Split content into short sentences suitable for voice-over (10-25 words each).
+5. Cover: team form, key players, tactics, injury updates, prediction.
+6. NEVER cite sources, never add footnotes, never mention where data comes from.
+7. Return JSON where each sentence has both "vi" (Vietnamese) and "target" (${langName}) versions.`;
+    const res = await httpsPost(
+        'https://api.openai.com/v1/responses',
+        { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+        {
+            model: 'gpt-5',
+            reasoning: { effort: 'high' },
+            tools: [{ type: 'web_search_preview' }],
+            max_output_tokens: 32000,
+            text: {
+                format: {
+                    type: 'json_schema',
+                    name: 'sports_analysis',
+                    schema,
+                    strict: true
+                }
+            },
+            input: systemPrompt + '\n\nRequest: ' + prompt
+        }
+    );
+    if (res.status !== 200) throw new Error(`GPT loi ${res.status}: ${res.body.slice(0, 200)}`);
+    const data = JSON.parse(res.body);
+    const usage = data.usage;
+    console.log(`[GPT-5] tokens - input: ${usage?.input_tokens}, output: ${usage?.output_tokens}, reasoning: ${usage?.output_tokens_details?.reasoning_tokens}`);
+    if (data.status === 'incomplete') {
+        const reason = data.incomplete_details?.reason || 'unknown';
+        throw new Error(`GPT-5 incomplete: ${reason}. Output tokens: ${usage?.output_tokens}/${32000}`);
+    }
+    const outputText = data.output?.find(o => o.type === 'message')
+        ?.content?.find(c => c.type === 'output_text')?.text;
+    if (!outputText) throw new Error('GPT-5 khong tra ve output: ' + JSON.stringify(data).slice(0, 200));
+    const parsed = JSON.parse(outputText);
+    console.log('[GPT-5] === OUTPUT ===');
+    console.log('Title VI:', parsed.title_vi);
+    console.log('Title:', parsed.title);
+    (parsed.sentences || []).forEach((s, i) => console.log(`  [${i+1}] VI: ${s.vi} | TARGET: ${s.target}`));
+    console.log('[GPT-5] === END OUTPUT ===');
+    return { title: parsed.title || '', title_vi: parsed.title_vi || '', sentences: parsed.sentences || [] };
+}
+
 function parseSrt(filePath) {
     const content = fs.readFileSync(filePath, 'utf-8').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const blocks = content.trim().split(/\n\n+/);
@@ -77,45 +148,68 @@ async function getKeywordsFromGPT(sentence) {
 
 async function main() {
     const args = process.argv.slice(2);
-    const srtPath = args[0];
-    const projectId = args[1];
-    const srtTranslatedPath = args[2] || null;
-    const targetLang = args[3] || 'vi';
+    const isPromptMode = args[0] === '--prompt';
+    const projectId = isPromptMode ? args[1] : args[1];
+    const targetLang = isPromptMode ? (args[3] || 'vi') : (args[3] || 'vi');
 
-    if (!srtPath || !projectId) {
+    if (!projectId) {
         console.error('Usage: node sports_srt.js <file.srt> <projectId> [file_translated.srt] [targetLang]');
+        console.error('       node sports_srt.js --prompt <projectId> <promptText> [targetLang]');
         process.exit(1);
     }
 
-    const sentences = parseSrt(srtPath);
-    const translatedSentences = srtTranslatedPath ? parseSrt(srtTranslatedPath) : null;
-    console.log(`[sports_srt] Đọc được ${sentences.length} câu từ ${srtPath}`);
+    let rawSentences; // [{ index, text }]
+    let postTitle = '';
+    let postTitleVi = '';
+
+    if (isPromptMode) {
+        const promptText = args[2];
+        console.log(`[sports_srt] Prompt mode: generating sentences from GPT...`);
+        const result = await generateSentencesFromPrompt(promptText, targetLang);
+        postTitle = result.title;
+        postTitleVi = result.title_vi || result.title;
+        rawSentences = result.sentences.map((s, i) => ({ index: i + 1, text: s.target, textVi: s.vi }));
+        console.log(`[sports_srt] GPT generated ${rawSentences.length} sentences. Title: ${postTitle}`);
+    } else {
+        const srtPath = args[0];
+        const srtTranslatedPath = args[2] || null;
+        if (!srtPath) { console.error('Missing srt path'); process.exit(1); }
+        const srtSentences = parseSrt(srtPath);
+        const translatedSentences = srtTranslatedPath ? parseSrt(srtTranslatedPath) : null;
+        console.log(`[sports_srt] Đọc được ${srtSentences.length} câu từ ${srtPath}`);
+        rawSentences = srtSentences.map(({ index, text }) => ({
+            index,
+            text: translatedSentences?.find(s => s.index === index)?.text || text,
+            textVi: text
+        }));
+    }
 
     const db = await getDb();
-    await db.run('INSERT OR IGNORE INTO Post (project_id, status, voice_content_type, target_lang) VALUES (?, ?, ?, ?)', [projectId, 'crawling', targetLang === 'vi' ? 'content_vi' : 'content', targetLang]);
+    await db.run('INSERT OR IGNORE INTO Post (project_id, title, status, voice_content_type, target_lang) VALUES (?, ?, ?, ?, ?)',
+        [projectId, postTitleVi || postTitle || projectId, 'crawling', targetLang === 'vi' ? 'content_vi' : 'content', targetLang]);
     const post = await db.get('SELECT id FROM Post WHERE project_id = ?', [projectId]);
     const postId = post.id;
 
     // Bước 1: Lưu toàn bộ paragraph vào DB trước
     const paragraphIds = [];
-    for (const { index, timecode, text } of sentences) {
-        const translatedText = translatedSentences?.find(s => s.index === index)?.text || text;
+    for (const { index, text, textVi } of rawSentences) {
+        const contentVi = textVi || text;
         const paraRes = await db.run(
             'INSERT INTO Paragraph (post_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
-            [postId, translatedText, text, index]
+            [postId, text, contentVi, index]
         );
         const paragraphId = paraRes.lastID;
         await db.run(
             'INSERT INTO ParagraphDetail (paragraph_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
-            [paragraphId, translatedText, text, 1]
+            [paragraphId, text, contentVi, 1]
         );
         paragraphIds.push({ index, text, paragraphId });
     }
-    console.log(`[sports_srt] ✅ Đã lưu ${sentences.length} câu vào DB`);
+    console.log(`[sports_srt] ✅ Đã lưu ${rawSentences.length} câu vào DB`);
 
     // Bước 2: Crawl ảnh cho từng câu
     for (const { index, text, paragraphId } of paragraphIds) {
-        console.log(`\n[${index}/${sentences.length}] "${text.slice(0, 60)}..."`);
+        console.log(`\n[${index}/${rawSentences.length}] "${text.slice(0, 60)}..."`);
 
         let keywords;
         try {
@@ -162,3 +256,4 @@ async function main() {
 }
 
 main().catch(e => { console.error('[sports_srt] LỖI:', e.message); process.exit(1); });
+
