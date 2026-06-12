@@ -23,6 +23,7 @@
                 <button @click="openProfilePage" :class="['flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all', page === 'profiles' ? 'bg-green-600 text-white shadow-lg shadow-green-500/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white']">🧑💻 Profiles</button>
             </div>
             <button @click="newProjectModal.open = true" class="w-full py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-emerald-600 hover:bg-emerald-500 text-white">➕ Tạo mới dự án</button>
+            <button @click="nazeModal.open = true" class="w-full py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-cyan-600 hover:bg-cyan-500 text-white">❓ Tại sao?</button>
         </div>
         <div class="flex-1 overflow-y-auto p-4 space-y-1">
             <div v-for="post in posts" :key="post.id" class="flex items-stretch gap-1">
@@ -1465,6 +1466,47 @@
         </div>
     </div>
 
+    <!-- NAZE MODAL -->
+    <div v-if="nazeModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="nazeModal.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[520px] space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-lg font-black text-white">❓ Tại sao?</h3>
+                <button @click="nazeModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Ngôn ngữ đích</label>
+                <div class="flex flex-wrap gap-1.5 mb-2">
+                    <button v-for="l in [{code:'vi',name:'🇻🇳 Việt'},{code:'en',name:'🇬🇧 EN'},{code:'ja',name:'🇯🇵 JA'},{code:'ko',name:'🇰🇷 KO'},{code:'zh',name:'🇨🇳 ZH'},{code:'fr',name:'🇫🇷 FR'},{code:'es',name:'🇪🇸 ES'}]" :key="l.code"
+                        @click="nazeModal.targetLang = l.code"
+                        class="px-2.5 py-1 rounded-lg text-[10px] font-black transition-colors"
+                        :class="nazeModal.targetLang === l.code ? 'bg-cyan-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">
+                        {{ l.name }}
+                    </button>
+                </div>
+                <input v-model="nazeModal.targetLang" type="text" placeholder="hoặc nhập thủ công: th, id, ar..."
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-cyan-500">
+            </div>
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Chủ đề</label>
+                <textarea v-model="nazeModal.topic" rows="4"
+                    placeholder="Ví dụ: Tại sao nước biển lại mặn? Tại sao bầu trời màu xanh? Tại sao con người ngủ?"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-cyan-500 resize-none leading-relaxed"></textarea>
+            </div>
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Project ID (tùy chọn)</label>
+                <input v-model="nazeModal.projectId" type="text" placeholder="vd: naze_ocean_salt"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-cyan-500">
+            </div>
+            <div class="flex gap-3 justify-end pt-1">
+                <button @click="nazeModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
+                <button @click="submitNaze" :disabled="!nazeModal.topic?.trim() || nazeModal.loading"
+                    class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-cyan-600 hover:bg-cyan-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                    {{ nazeModal.loading ? '⧗ Đang xử lý...' : '🚀 Tạo nội dung' }}
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- NEW PROJECT MODAL -->
     <div v-if="newProjectModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="newProjectModal.open = false">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[560px] space-y-4">
@@ -1657,6 +1699,29 @@ createApp({
         const page = ref('posts');
         const previewMode = ref(true);
         const profileModal = ref({ list: [], bulkText: '', cmds: [], addOpen: false, fileName: '' });
+
+        const nazeModal = ref({ open: false, topic: '', projectId: '', targetLang: 'vi', loading: false });
+
+        async function submitNaze() {
+            const { topic, targetLang } = nazeModal.value;
+            if (!topic.trim()) return;
+            const projectId = nazeModal.value.projectId.trim() || ('naze_' + Date.now());
+            nazeModal.value.loading = true;
+            try {
+                const res = await fetch('/api/create-naze', { method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ topic, projectId, targetLang }) });
+                const r = await res.json();
+                if (r.success) {
+                    nazeModal.value.open = false;
+                    nazeModal.value.topic = '';
+                    nazeModal.value.projectId = '';
+                    showToast('✅ Đang sinh nội dung, vui lòng chờ...');
+                    await loadPosts();
+                } else { alert('❌ ' + (r.error || 'Lỗi')); }
+            } catch (e) { alert('❌ ' + e.message); }
+            nazeModal.value.loading = false;
+        }
 
         const newProjectModal = ref({
             open: false,
@@ -3202,6 +3267,8 @@ createApp({
             closePreview,
             togglePreviewSelect,
             newProjectModal,
+            nazeModal,
+            submitNaze,
             submitNewProject,
         };
     }

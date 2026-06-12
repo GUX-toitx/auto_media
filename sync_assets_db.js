@@ -128,7 +128,7 @@ async function runConcurrently(tasks, limit) {
     return Promise.allSettled(results);
 }
 
-export async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = VIDEOS_PER_SOURCE) {
+export export async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = VIDEOS_PER_SOURCE) {
     if (!keyword) return 0;
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 

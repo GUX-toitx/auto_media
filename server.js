@@ -792,6 +792,22 @@ app.post('/api/crawl-vn', async (req, res) => {
 });
 
 // API: Tạo mới dự án từ nội dung
+app.post('/api/create-naze', express.json(), async (req, res) => {
+    const { topic, projectId, targetLang } = req.body;
+    if (!topic?.trim() || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu topic hoặc projectId' });
+    try {
+        const targetDir = path.join(MEDIA_DIR, projectId);
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        const args = ['naze_content.js', topic.trim(), projectId];
+        if (targetLang) args.push(targetLang);
+        const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+        child.stdout.on('data', d => process.stdout.write(`[naze] ${d}`));
+        child.stderr.on('data', d => process.stderr.write(`[naze] ${d}`));
+        child.unref();
+        res.json({ success: true, projectId });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/create-project', async (req, res) => {
     const { content, sources, targetLang } = req.body;
     if (!content?.trim()) return res.status(400).json({ error: 'Thiếu nội dung' });
