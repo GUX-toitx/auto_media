@@ -330,33 +330,37 @@ app.post('/api/generate-media', (req, res) => {
     }
 
     console.log(`\n[HỆ THỐNG] Bắt đầu lấy Media cho: Dự án ${videoId} | Nhóm ${groupId}`);
-    console.log(`[HỆ THỐNG] Từ khóa: ${keywords.join(', ')}`);
+    const kwTexts = (Array.isArray(keywords) ? keywords : [keywords]).map(k => typeof k === 'object' ? k.content : k).filter(Boolean);
+    console.log(`[HỆ THỐNG] Từ khóa: ${kwTexts.join(', ')}`);
 
-    const pythonProcess = spawn('node', [
-        'craw_sub.js',
-        '--mode', 'single',
-        '--videoId', videoId,
-        '--paragraphId', String(groupId),
-        '--keywords', keywords.join(',')
-    ]);
+    (async () => {
+        const { fetchFromGoogleImageBot } = await import('./googleImageCrawler.js').catch(() => ({}));
+        if (!fetchFromGoogleImageBot) return;
+        const db = await getDb();
+        for (const kw of kwTexts) {
+            const ex = await db.get('SELECT id FROM Keyword WHERE paragraph_id = ? AND content = ?', [groupId, kw]);
+            if (!ex) await db.run('INSERT INTO Keyword (paragraph_id, content) VALUES (?, ?)', [groupId, kw]);
+        }
+        const iFolder = path.join(MEDIA_DIR, videoId, 'assets', '_raw_images', String(groupId));
+        if (!fs.existsSync(iFolder)) fs.mkdirSync(iFolder, { recursive: true });
+        for (const kw of kwTexts) {
+            console.log(`[generate-media] Crawl image: ${kw}`);
+            const got = await fetchFromGoogleImageBot(kw, 'image', iFolder, 8).catch(e => { console.error('[generate-media]', e.message); return 0; });
+            console.log(`[generate-media] ${kw}: ${got} images`);
+            // Sync ngay sau mỗi keyword
+            const exts = ['.jpg','.jpeg','.png','.webp'];
+            for (const file of fs.readdirSync(iFolder)) {
+                if (!exts.includes(path.extname(file).toLowerCase())) continue;
+                const rel = path.relative(MEDIA_DIR, path.join(iFolder, file));
+                const ex = await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
+                if (!ex) await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [groupId, 'image', rel]);
+            }
+        }
+        await db.close();
+        console.log(`[HỆ THỐNG] ✅ Xong paragraph ${groupId}`);
+    })().catch(e => console.error('[generate-media paragraph]', e.message));
 
-    pythonProcess.stdout.on('data', (data) => {
-        console.log(`[CRAWLER LOG]: ${data}`);
-    });
-
-    pythonProcess.stderr.on('data', (data) => {
-        console.error(`[CRAWLER ERROR]: ${data}`);
-    });
-
-    pythonProcess.on('close', (code) => {
-        console.log(`[HỆ THỐNG] Script Crawl đã hoàn thành với mã thoát: ${code}`);
-    });
-
-    // Trả về phản hồi ngay lập tức cho Web để người dùng không phải chờ lâu
-    res.json({ 
-        success: true, 
-        message: "Hệ thống đang tải Media ngầm, vui lòng kiểm tra sau vài phút." 
-    });
+    res.json({ success: true, message: "Hệ thống đang tải Media ngầm, vui lòng kiểm tra sau vài phút." });
 });
 
 
@@ -786,6 +790,22 @@ app.post('/api/crawl-vn', async (req, res) => {
 });
 
 // API: Tạo mới dự án từ nội dung
+app.post('/api/sports-retry', async (req, res) => {
+    const { postId } = req.body;
+    if (!postId) return res.status(400).json({ error: 'Thieu postId' });
+    try {
+        const db = await getDb();
+        const post = await db.get('SELECT project_id FROM Post WHERE id = ?', [postId]);
+        await db.close();
+        if (!post) return res.status(404).json({ error: 'Post not found' });
+        const child = spawn('node', ['sports_retry.js', String(postId), post.project_id], { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+        child.stdout.on('data', d => process.stdout.write('[sports_retry] ' + d));
+        child.stderr.on('data', d => process.stderr.write('[sports_retry] ' + d));
+        child.unref();
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/create-project', async (req, res) => {
     const { content, sources, targetLang } = req.body;
     if (!content?.trim()) return res.status(400).json({ error: 'Thiếu nội dung' });
@@ -1239,7 +1259,6 @@ app.post('/api/open-folder', async (req, res) => {
 // API: AI Generate Image/Video (Google Flow)
 app.post('/api/ai-generate', async (req, res) => {
     const { videoId, paragraphId, gid, keywords, type, content, count, lang, prompt, ratio, videoMode, veo } = req.body;
-    if (!keywords?.length) return res.status(400).json({ error: 'Không có keyword' });
 
     const subDir = type === 'video' ? '_raw_videos_ai_gen' : '_raw_images_ai_gen';
     const targetDir = path.join(MEDIA_DIR, videoId, 'assets', subDir, gid);
@@ -1248,9 +1267,9 @@ app.post('/api/ai-generate', async (req, res) => {
     res.json({ success: true, message: `Đang tạo ${type} AI...` });
 
     (async () => {
+        console.log(`[AI Generate] START type=${type} count=${count} ratio=${ratio} prompt="${(prompt||'').slice(0,80)}"`);
         const db = await getDb();
 
-        // Lấy ảnh selected của paragraph nếu là Ingredients mode
         let selectedImages = [];
         if (videoMode === 'Ingredients') {
             const assets = await db.all(
@@ -1258,20 +1277,25 @@ app.post('/api/ai-generate', async (req, res) => {
                 [paragraphId, 'image']
             );
             selectedImages = assets.map(a => path.join(MEDIA_DIR, a.file_path));
+            console.log(`[AI Generate] Ingredients mode: ${selectedImages.length} selected images`);
         }
 
-        const saved = await generateFlowImage(keywords.join(', '), targetDir, content || '', type, count || 2, lang || 'en', prompt || '', ratio || '16:9', videoMode || 'Frames', veo || 'Lite', selectedImages);
+        const kwStr = (keywords || []).join(', ');
+        console.log(`[AI Generate] Calling generateFlowImage keywords="${kwStr.slice(0,60)}" prompt="${(prompt||'').slice(0,80)}"`);
+        const saved = await generateFlowImage(kwStr, targetDir, content || '', type, count || 2, lang || 'en', prompt || '', ratio || '16:9', videoMode || 'Frames', veo || 'Lite', selectedImages);
+        console.log(`[AI Generate] generateFlowImage returned ${saved.length} files: ${saved.join(', ')}`);
         for (const fileName of saved) {
             const relativePath = path.join(videoId, 'assets', subDir, gid, fileName);
             const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
             if (!exists) {
                 const assetType = fileName.includes('_thumbnail.') ? 'image' : type;
                 await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, selected, "order", file_path) VALUES (?, NULL, ?, 0, 0, ?)', [paragraphId, assetType, relativePath]);
+                console.log(`[AI Generate] Saved asset: ${relativePath}`);
             }
         }
         await db.close();
-        console.log(`[AI Generate] Done ${type} for paragraph ${paragraphId}`);
-    })().catch(e => console.error('[AI Generate] Error:', e.message));
+        console.log(`[AI Generate] DONE ${type} paragraph=${paragraphId} saved=${saved.length}`);
+    })().catch(e => console.error('[AI Generate] Error:', e.message, e.stack?.split('\n')[1]));
 });
 
 // API: Mở trình duyệt đăng nhập cho profile

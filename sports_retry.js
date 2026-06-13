@@ -97,14 +97,16 @@ async function main() {
         const imgDir = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', String(index));
         fs.mkdirSync(imgDir, { recursive: true });
 
-        for (const kw of keywords) {
-            try {
-                const got = await fetchFromGoogleImageBot(kw, 'image', imgDir, IMAGES_PER_KEYWORD);
-                console.log(`    -> "${kw}": ${got} ảnh`);
-            } catch (e) {
-                console.error(`    -> Lỗi: ${e.message}`);
-            }
-        }
+        const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(0), ms))]);
+        await Promise.all(keywords.map(kw => {
+            console.log(`    -> Crawl: "${kw}"`);
+            return withTimeout(
+                fetchFromGoogleImageBot(kw, 'image', imgDir, IMAGES_PER_KEYWORD)
+                    .then(got => console.log(`    -> ${got} ảnh (${kw})`))
+                    .catch(e => console.error(`    -> Lỗi: ${e.message}`)),
+                60000
+            );
+        }));
 
         const imageExts = new Set(['.jpg', '.jpeg', '.png', '.webp']);
         if (fs.existsSync(imgDir)) {

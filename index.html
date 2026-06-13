@@ -66,6 +66,7 @@
                     <button @click="openDownloadVoiceModal" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice & Media Selected</button>
                     <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-600 hover:bg-orange-500 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
                         <span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}
+                    <button @click="sportsRetry" class="bg-yellow-600 hover:bg-yellow-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔁 Retry Missing</button>
                     </button>
                     <div v-if="posts.find(p => p.id === activePostId)?.status === 'crawling'" class="flex items-center gap-2 text-blue-400 ml-2">
                         <span class="animate-spin text-2xl">⏳</span>
@@ -1161,9 +1162,11 @@
                 <button @click="aiModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
             </div>
             <div>
-                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Prompt</label>
-                <textarea v-model="aiModal.prompt" rows="3"
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Prompt tự do</label>
+                <textarea v-model="aiModal.prompt" rows="5"
+                    placeholder="Ví dụ: CR7 và Messi và Neymar đứng cạnh nhau, sân vận động, ánh đèn sân khấu, nhìn thẳng vào camera, phong cách cinematic..."
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-[11px] text-gray-200 leading-relaxed outline-none focus:border-purple-500 resize-none"></textarea>
+                <p class="text-[9px] text-gray-600 mt-1">Keyword chỉ dùng để tìm ảnh stock, prompt dùng để tạo ảnh AI</p>
             </div>
             <div>
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Số lượng</label>
@@ -2056,6 +2059,13 @@ createApp({
 
         const crawling = ref(false);
 
+        async function sportsRetry() {
+            if (!activePostId.value) return showToast('⚠️ Chưa chọn post');
+            showToast('🔁 Retry các câu thiếu keyword...', 5000);
+            await fetch('/api/sports-retry', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ postId: activePostId.value }) });
+        }
+
         async function triggerCrawlAll() {
             if (!activePostId.value) return;
             crawling.value = true;
@@ -2752,15 +2762,11 @@ createApp({
         }
 
         async function aiGenerate(para, type) {
-            const kwType = type === 'video' ? 'cinematic' : 'factual';
-            const kws = (para.keywords || []).filter(k => k.type === kwType || (!k.type && kwType === 'factual')).map(k => k.content);
-            if (!kws.length) return showToast(`⚠️ Chưa có ${kwType} keyword!`);
             const paras = activePost.value.paragraphs;
             const gid = String(paras.findIndex(p => p.id === para.id) + 1);
             const lang = activePost.value?.project_id?.match(/_([a-z]{2})$/)?.[1] || 'en';
-            const res = await fetch(`/api/get-prompt?type=${type}&lang=${lang}`);
-            const { prompt } = await res.json();
-            aiModal.value = { open: true, type, para, gid, count: type === 'video' ? 1 : 2, content: para.content || '', keywords: kws, lang, prompt: prompt + ' ' + (para.content || ''), ratio: '16:9', videoMode: 'Frames', veo: 'Lite' };
+            const kws = (para.keywords || []).map(k => k.content);
+            aiModal.value = { open: true, type, para, gid, count: type === 'video' ? 1 : 2, content: para.content || '', keywords: kws, lang, prompt: '', ratio: '16:9', videoMode: 'Frames', veo: 'Lite' };
         }
 
         async function submitAiGenerate() {
@@ -3140,6 +3146,7 @@ createApp({
             downloadVoice,
             pollingTimer,
             startPollingVoice,
+            sportsRetry,
             crawling,
             triggerCrawlAll,
             refetchMedia,

@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { chromium } from 'playwright';
 import path from 'path';
 import fs from 'fs';
@@ -39,6 +40,70 @@ function getRandomProxy() {
     if (!lines.length) return null;
     const [host, port, user, pass] = lines[Math.floor(Math.random() * lines.length)].split(':');
     return { server: `http://${host}:${port}`, username: user, password: pass };
+}
+
+async function handleOnboarding(page, saveDirPath) {
+    // Chup screenshot de debug
+    await page.screenshot({ path: path.join(saveDirPath, '_debug_onboarding.png') }).catch(() => {});
+    const url = page.url();
+    console.log('[Flow] handleOnboarding URL:', url);
+
+    // Xu ly cac buoc onboarding lap lai toi da 5 lan
+    for (let step = 0; step < 5; step++) {
+        await page.waitForTimeout(2000);
+        const btns = await page.evaluate(() =>
+            [...document.querySelectorAll('button:not([disabled])')]
+            .map(b => b.textContent?.trim().replace(/\s+/g, ' '))
+            .filter(t => t && t.length < 60)
+        );
+        console.log(`[Flow] Onboarding step ${step} buttons:`, JSON.stringify(btns.slice(0, 10)));
+
+        // Ket thuc neu da co prompt box
+        const hasPromptBox = await page.locator('div[contenteditable=true][role=textbox]').count();
+        if (hasPromptBox) {
+            console.log('[Flow] Onboarding done - prompt box found');
+            return;
+        }
+
+        // Xu ly terms: scroll to bottom roi click agree/continue
+        const scrollableTerms = await page.evaluate(() => {
+            const els = [...document.querySelectorAll('[class*="terms"], [class*="consent"], [class*="agreement"], [class*="tos"], [class*="policy"]')];
+            if (els.length) { els[0].scrollTo(0, els[0].scrollHeight); return true; }
+            // Scroll window neu co overflow
+            window.scrollTo(0, document.body.scrollHeight);
+            return false;
+        });
+        if (scrollableTerms) {
+            console.log('[Flow] Scrolled terms container');
+            await page.waitForTimeout(1500);
+        }
+
+        // Click cac button pho bien trong onboarding
+        const clickPatterns = [
+            /^(Get started|Continue|Next|Accept|Agree|I agree|OK|Done|Start|Begin|Proceed|Confirm|Allow)$/i,
+            /accept.*terms/i,
+            /agree.*terms/i,
+            /continue.*flow/i,
+        ];
+        let clicked = false;
+        for (const pattern of clickPatterns) {
+            const btn = page.locator('button').filter({ hasText: pattern }).first();
+            if (await btn.count()) {
+                console.log('[Flow] Clicking onboarding button:', pattern.toString());
+                await btn.click({ force: true }).catch(() => {});
+                await page.waitForTimeout(2000);
+                clicked = true;
+                break;
+            }
+        }
+
+        // Neu khong co button nao match thi thoat
+        if (!clicked) {
+            console.log('[Flow] No onboarding button found, continuing...');
+            break;
+        }
+    }
+    await page.screenshot({ path: path.join(saveDirPath, '_debug_after_onboarding.png') }).catch(() => {});
 }
 
 export async function getBrowser(profileDir, proxy) {
@@ -96,6 +161,9 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
             console.log('[Flow] Xác thực xong, tiếp tục...');
         }
 
+        // Xử lý onboarding / terms of service nếu có
+        await handleOnboarding(page, saveDirPath);
+
         // Nếu có nút add_2 thì click tạo project mới
         const newBtn = page.locator('button:has(i.google-symbols)').filter({ hasText: /add_2/ }).first();
         if (await newBtn.count()) {
@@ -108,11 +176,16 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
                 await page.waitForTimeout(5000);
             }
         } else {
-            // Landing page: click Create with Flow
-            await page.locator('button').nth(0).click();
-            await page.waitForURL(url => !url.toString().endsWith('/flow') && !url.toString().endsWith('/flow/'), { timeout: 5000 }).catch(() => {});
+            // Landing page: click "Create with Google Flow"
+            const createFlowBtn = page.locator('button').filter({ hasText: /Create with Google Flow/i }).first();
+            if (await createFlowBtn.count()) {
+                await createFlowBtn.click();
+            } else {
+                await page.locator('button').nth(0).click();
+            }
+            await page.waitForURL(url => !url.toString().endsWith('/flow') && !url.toString().endsWith('/flow/'), { timeout: 8000 }).catch(() => {});
             await page.waitForTimeout(5000);
-            console.log('[Flow] Đã vào tool từ landing page');
+            console.log('[Flow] Sau click Create, URL:', page.url());
             // Chờ add_2 xuất hiện rồi click
             await page.waitForSelector('button i.google-symbols', { timeout: 5000 }).catch(() => {});
             await page.waitForTimeout(2000);
@@ -195,8 +268,29 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
 
         // Nhập prompt
         const promptBox = page.locator('div[contenteditable=true][role=textbox]');
-        await promptBox.click({ force: true });
-        await page.keyboard.type(fullPrompt, { delay: 20 });
+        try {
+            await promptBox.waitFor({ timeout: 30000 });
+            await promptBox.click({ force: true });
+            await page.keyboard.type(fullPrompt, { delay: 20 });
+        } catch (e) {
+            // Thử selector thay thế
+            console.log('[Flow] textbox timeout, trying alternative selectors...');
+            console.log('[Flow] Current URL:', page.url());
+            await page.screenshot({ path: path.join(saveDirPath, '_debug.png') }).catch(() => {});
+            // Log tất cả input/textarea/contenteditable có trên trang
+            const editables = await page.evaluate(() => 
+                [...document.querySelectorAll('[contenteditable], textarea, input:not([type=hidden])')]
+                .map(e => ({ tag: e.tagName, role: e.getAttribute('role'), placeholder: e.getAttribute('placeholder'), class: e.className.slice(0,60) }))
+            );
+            console.log('[Flow] Editable elements:', JSON.stringify(editables.slice(0,5)));
+            const alt = page.locator('textarea, [contenteditable=true], [placeholder*="prompt" i], [placeholder*="describe" i], [aria-label*="prompt" i]').first();
+            if (await alt.count()) {
+                await alt.click({ force: true });
+                await page.keyboard.type(fullPrompt, { delay: 20 });
+            } else {
+                throw e;
+            }
+        }
         await page.waitForTimeout(500);
 
         // Click nút submit (icon arrow_forward)
