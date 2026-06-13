@@ -12,6 +12,7 @@ import fs from 'fs';
 const OPENAI_KEY = process.env.OPENAI_KEY;
 const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
 const DB_PATH = path.join(process.env.DB_DIR || path.join(MEDIA_DIR, 'db'), 'media_system.sqlite');
+const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 const IMAGES_PER_KEYWORD = 8;
 
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY;

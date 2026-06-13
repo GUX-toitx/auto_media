@@ -1711,6 +1711,10 @@ createApp({
                 const res = await fetch('/api/create-naze', { method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ topic, projectId, targetLang }) });
+                if (!res.ok) {
+                    const text = await res.text();
+                    throw new Error(`HTTP ${res.status}: ${text.slice(0, 100)}`);
+                }
                 const r = await res.json();
                 if (r.success) {
                     nazeModal.value.open = false;
