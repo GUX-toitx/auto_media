@@ -22,7 +22,6 @@
                 <button @click="page = 'posts'" :class="['flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all', page === 'posts' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white']">📂 Dự án</button>
                 <button @click="openProfilePage" :class="['flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all', page === 'profiles' ? 'bg-green-600 text-white shadow-lg shadow-green-500/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white']">🧑💻 Profiles</button>
             </div>
-            <button @click="newProjectModal.open = true" class="w-full py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-emerald-600 hover:bg-emerald-500 text-white">➕ Tạo mới dự án</button>
             <button @click="nazeModal.open = true" class="w-full py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-cyan-600 hover:bg-cyan-500 text-white">❓ Tại sao?</button>
         </div>
         <div class="flex-1 overflow-y-auto p-4 space-y-1">
@@ -140,14 +139,14 @@
                             </span>
                             <input @keydown.enter="addSectionKeyword($event, 'hook', 'factual')" placeholder="+ factual" class="bg-transparent border border-dashed border-blue-800 rounded px-2 py-0.5 text-[10px] text-blue-400 outline-none w-28 focus:border-blue-500">
                         </div>
-                        <div class="flex flex-wrap gap-1 items-center">
+                        <div v-if="false" class="flex flex-wrap gap-1 items-center">
                             <span class="text-[9px] font-black text-purple-400 uppercase tracking-widest w-20 shrink-0">Cinematic</span>
                             <span v-for="kw in (activePost.sections?.hook?.keywords || []).filter(k => k.type === 'cinematic')" :key="kw.id" class="keyword-tag text-[10px] border-purple-800 text-purple-300">
                                 {{ kw.content }}<b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteSectionKeyword(kw, 'hook')">×</b>
                             </span>
                             <input @keydown.enter="addSectionKeyword($event, 'hook', 'cinematic')" placeholder="+ cinematic" class="bg-transparent border border-dashed border-purple-800 rounded px-2 py-0.5 text-[10px] text-purple-400 outline-none w-28 focus:border-purple-500">
                         </div>
-                        <div class="flex flex-wrap gap-1 items-center">
+                        <div v-if="false" class="flex flex-wrap gap-1 items-center">
                             <span class="text-[9px] font-black text-green-400 uppercase tracking-widest w-20 shrink-0">🇻🇳 VN</span>
                             <span v-for="kw in (activePost.sections?.hook?.keywords || []).filter(k => k.type === 'vn')" :key="kw.id" class="keyword-tag text-[10px] border-green-800 text-green-300">
                                 {{ kw.content }}<b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteSectionKeyword(kw, 'hook')">×</b>
@@ -317,14 +316,14 @@
                             </span>
                             <input @keydown.enter="addSectionKeyword($event, 'summary', 'factual')" placeholder="+ factual" class="bg-transparent border border-dashed border-blue-800 rounded px-2 py-0.5 text-[10px] text-blue-400 outline-none w-28 focus:border-blue-500">
                         </div>
-                        <div class="flex flex-wrap gap-1 items-center">
+                        <div v-if="false" class="flex flex-wrap gap-1 items-center">
                             <span class="text-[9px] font-black text-purple-400 uppercase tracking-widest w-20 shrink-0">Cinematic</span>
                             <span v-for="kw in (activePost.sections?.summary?.keywords || []).filter(k => k.type === 'cinematic')" :key="kw.id" class="keyword-tag text-[10px] border-purple-800 text-purple-300">
                                 {{ kw.content }}<b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteSectionKeyword(kw, 'summary')">×</b>
                             </span>
                             <input @keydown.enter="addSectionKeyword($event, 'summary', 'cinematic')" placeholder="+ cinematic" class="bg-transparent border border-dashed border-purple-800 rounded px-2 py-0.5 text-[10px] text-purple-400 outline-none w-28 focus:border-purple-500">
                         </div>
-                        <div class="flex flex-wrap gap-1 items-center">
+                        <div v-if="false" class="flex flex-wrap gap-1 items-center">
                             <span class="text-[9px] font-black text-green-400 uppercase tracking-widest w-20 shrink-0">🇻🇳 VN</span>
                             <span v-for="kw in (activePost.sections?.summary?.keywords || []).filter(k => k.type === 'vn')" :key="kw.id" class="keyword-tag text-[10px] border-green-800 text-green-300">
                                 {{ kw.content }}<b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteSectionKeyword(kw, 'summary')">×</b>
@@ -520,7 +519,7 @@
                                         </span>
                                         <input @keydown.enter="addKeyword($event, para, 'factual')" placeholder="+ factual" class="bg-transparent border border-dashed border-blue-800 rounded px-2 py-0.5 text-[10px] text-blue-400 outline-none w-28 focus:border-blue-500">
                                     </div>
-                                    <div class="flex flex-wrap gap-1 items-center">
+                                    <div v-if="false" class="flex flex-wrap gap-1 items-center">
                                         <span class="text-[9px] font-black text-purple-400 uppercase tracking-widest w-20 shrink-0">Cinematic</span>
                                         <span v-for="kw in (para.keywords || []).filter(k => k.type === 'cinematic')" :key="kw.id" class="keyword-tag text-[10px] border-purple-800 text-purple-300">
                                             {{ kw.content }}
@@ -528,7 +527,7 @@
                                         </span>
                                         <input @keydown.enter="addKeyword($event, para, 'cinematic')" placeholder="+ cinematic" class="bg-transparent border border-dashed border-purple-800 rounded px-2 py-0.5 text-[10px] text-purple-400 outline-none w-28 focus:border-purple-500">
                                     </div>
-                                    <div class="flex flex-wrap gap-1 items-center">
+                                    <div v-if="false" class="flex flex-wrap gap-1 items-center">
                                         <span class="text-[9px] font-black text-green-400 uppercase tracking-widest w-20 shrink-0">🆻🇳 VN</span>
                                         <span v-for="kw in (para.keywords || []).filter(k => k.type === 'vn')" :key="kw.id" class="keyword-tag text-[10px] border-green-800 text-green-300">
                                             {{ kw.content }}
@@ -851,14 +850,14 @@
                             </span>
                             <input @keydown.enter="addSectionKeyword($event, 'conclusion', 'factual')" placeholder="+ factual" class="bg-transparent border border-dashed border-blue-800 rounded px-2 py-0.5 text-[10px] text-blue-400 outline-none w-28 focus:border-blue-500">
                         </div>
-                        <div class="flex flex-wrap gap-1 items-center">
+                        <div v-if="false" class="flex flex-wrap gap-1 items-center">
                             <span class="text-[9px] font-black text-purple-400 uppercase tracking-widest w-20 shrink-0">Cinematic</span>
                             <span v-for="kw in (activePost.sections?.conclusion?.keywords || []).filter(k => k.type === 'cinematic')" :key="kw.id" class="keyword-tag text-[10px] border-purple-800 text-purple-300">
                                 {{ kw.content }}<b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteSectionKeyword(kw, 'conclusion')">×</b>
                             </span>
                             <input @keydown.enter="addSectionKeyword($event, 'conclusion', 'cinematic')" placeholder="+ cinematic" class="bg-transparent border border-dashed border-purple-800 rounded px-2 py-0.5 text-[10px] text-purple-400 outline-none w-28 focus:border-purple-500">
                         </div>
-                        <div class="flex flex-wrap gap-1 items-center">
+                        <div v-if="false" class="flex flex-wrap gap-1 items-center">
                             <span class="text-[9px] font-black text-green-400 uppercase tracking-widest w-20 shrink-0">🇻🇳 VN</span>
                             <span v-for="kw in (activePost.sections?.conclusion?.keywords || []).filter(k => k.type === 'vn')" :key="kw.id" class="keyword-tag text-[10px] border-green-800 text-green-300">
                                 {{ kw.content }}<b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteSectionKeyword(kw, 'conclusion')">×</b>
@@ -1468,11 +1467,18 @@
 
     <!-- NAZE MODAL -->
     <div v-if="nazeModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="nazeModal.open = false">
-        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[520px] space-y-4">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[540px] space-y-4">
             <div class="flex justify-between items-center">
-                <h3 class="text-lg font-black text-white">❓ Tại sao?</h3>
+                <h3 class="text-lg font-black text-white">❓ Tạo dự án</h3>
                 <button @click="nazeModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
             </div>
+            <!-- Tabs -->
+            <div class="flex gap-1 bg-gray-800 rounded-lg p-1">
+                <button @click="nazeModal.mode = 'text'" class="flex-1 py-1.5 rounded text-[10px] font-black transition-colors" :class="nazeModal.mode === 'text' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'">✍️ Nhập text</button>
+                <button @click="nazeModal.mode = 'srt'" class="flex-1 py-1.5 rounded text-[10px] font-black transition-colors" :class="nazeModal.mode === 'srt' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'">📄 File SRT</button>
+                <button @click="nazeModal.mode = 'youtube'" class="flex-1 py-1.5 rounded text-[10px] font-black transition-colors" :class="nazeModal.mode === 'youtube' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'">▶️ YouTube</button>
+            </div>
+            <!-- Ngôn ngữ đích -->
             <div>
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Ngôn ngữ đích</label>
                 <div class="flex flex-wrap gap-1.5 mb-2">
@@ -1486,12 +1492,46 @@
                 <input v-model="nazeModal.targetLang" type="text" placeholder="hoặc nhập thủ công: th, id, ar..."
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-cyan-500">
             </div>
-            <div>
-                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Chủ đề</label>
+            <!-- Tab: Text -->
+            <div v-if="nazeModal.mode === 'text'">
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Chủ đề / Nội dung</label>
                 <textarea v-model="nazeModal.topic" rows="4"
-                    placeholder="Ví dụ: Tại sao nước biển lại mặn? Tại sao bầu trời màu xanh? Tại sao con người ngủ?"
+                    placeholder="Ví dụ: Tại sao nước biển lại mặn? Tại sao bầu trời màu xanh?"
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-cyan-500 resize-none leading-relaxed"></textarea>
             </div>
+            <!-- Tab: SRT -->
+            <template v-if="nazeModal.mode === 'srt'">
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">File SRT gốc</label>
+                    <div class="border-2 border-dashed rounded-xl p-3 text-center cursor-pointer transition-colors"
+                        :class="nazeModal.srtFile ? 'border-cyan-400 bg-cyan-500/10' : 'border-gray-700 hover:border-cyan-500'"
+                        @dragover.prevent @drop.prevent="nazeModal.srtFile = $event.dataTransfer.files[0]"
+                        @click="$refs.nazeSrtInput.click()">
+                        <div v-if="nazeModal.srtFile" class="text-[11px] text-cyan-400 font-bold">📄 {{ nazeModal.srtFile.name }}</div>
+                        <div v-else class="text-[11px] text-gray-500">Kéo thả hoặc <span class="text-cyan-400 font-bold">chọn file SRT gốc</span></div>
+                        <input ref="nazeSrtInput" type="file" accept=".srt" class="hidden" @change="nazeModal.srtFile = $event.target.files[0]">
+                    </div>
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">File SRT đã dịch (ngôn ngữ đích)</label>
+                    <div class="border-2 border-dashed rounded-xl p-3 text-center cursor-pointer transition-colors"
+                        :class="nazeModal.srtTargetFile ? 'border-green-400 bg-green-500/10' : 'border-gray-700 hover:border-green-500'"
+                        @dragover.prevent @drop.prevent="nazeModal.srtTargetFile = $event.dataTransfer.files[0]"
+                        @click="$refs.nazeSrtTargetInput.click()">
+                        <div v-if="nazeModal.srtTargetFile" class="text-[11px] text-green-400 font-bold">📄 {{ nazeModal.srtTargetFile.name }}</div>
+                        <div v-else class="text-[11px] text-gray-500">Kéo thả hoặc <span class="text-green-400 font-bold">chọn file SRT đã dịch</span></div>
+                        <input ref="nazeSrtTargetInput" type="file" accept=".srt" class="hidden" @change="nazeModal.srtTargetFile = $event.target.files[0]">
+                    </div>
+                </div>
+            </template>
+            <!-- Tab: YouTube -->
+            <div v-if="nazeModal.mode === 'youtube'">
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Link YouTube</label>
+                <input v-model="nazeModal.youtubeUrl" type="text" placeholder="https://www.youtube.com/watch?v=..."
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-cyan-500">
+                <p class="text-[9px] text-gray-600 mt-1">Hệ thống sẽ tải subtitle từ YouTube và tạo nội dung</p>
+            </div>
+            <!-- Project ID -->
             <div>
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Project ID (tùy chọn)</label>
                 <input v-model="nazeModal.projectId" type="text" placeholder="vd: naze_ocean_salt"
@@ -1499,7 +1539,8 @@
             </div>
             <div class="flex gap-3 justify-end pt-1">
                 <button @click="nazeModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
-                <button @click="submitNaze" :disabled="!nazeModal.topic?.trim() || nazeModal.loading"
+                <button @click="submitNaze"
+                    :disabled="(nazeModal.mode==='text' ? !nazeModal.topic?.trim() : nazeModal.mode==='srt' ? !nazeModal.srtFile : !nazeModal.youtubeUrl?.trim()) || nazeModal.loading"
                     class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-cyan-600 hover:bg-cyan-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
                     {{ nazeModal.loading ? '⧗ Đang xử lý...' : '🚀 Tạo nội dung' }}
                 </button>
@@ -1700,27 +1741,43 @@ createApp({
         const previewMode = ref(true);
         const profileModal = ref({ list: [], bulkText: '', cmds: [], addOpen: false, fileName: '' });
 
-        const nazeModal = ref({ open: false, topic: '', projectId: '', targetLang: 'vi', loading: false });
+        const nazeModal = ref({ open: false, mode: 'text', topic: '', projectId: '', targetLang: 'vi', loading: false, srtFile: null, srtTargetFile: null, youtubeUrl: '' });
 
         async function submitNaze() {
-            const { topic, targetLang } = nazeModal.value;
-            if (!topic.trim()) return;
+            const { mode, topic, targetLang, youtubeUrl, srtFile, srtTargetFile } = nazeModal.value;
             const projectId = nazeModal.value.projectId.trim() || ('naze_' + Date.now());
             nazeModal.value.loading = true;
             try {
-                const res = await fetch('/api/create-naze', { method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ topic, projectId, targetLang }) });
-                if (!res.ok) {
-                    const text = await res.text();
-                    throw new Error(`HTTP ${res.status}: ${text.slice(0, 100)}`);
+                let res;
+                if (mode === 'text') {
+                    if (!topic.trim()) return;
+                    res = await fetch('/api/create-naze', { method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ topic, projectId, targetLang }) });
+                } else if (mode === 'srt') {
+                    if (!srtFile) return;
+                    const form = new FormData();
+                    form.append('srt', srtFile);
+                    if (srtTargetFile) form.append('srtTarget', srtTargetFile);
+                    form.append('projectId', projectId);
+                    form.append('targetLang', targetLang);
+                    res = await fetch('/api/create-naze-srt', { method: 'POST', body: form });
+                } else {
+                    if (!youtubeUrl.trim()) return;
+                    res = await fetch('/api/create-naze-youtube', { method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: youtubeUrl, projectId, targetLang }) });
                 }
+                if (!res.ok) { const t = await res.text(); throw new Error(`HTTP ${res.status}: ${t.slice(0,100)}`); }
                 const r = await res.json();
                 if (r.success) {
                     nazeModal.value.open = false;
                     nazeModal.value.topic = '';
                     nazeModal.value.projectId = '';
-                    showToast('✅ Đang sinh nội dung, vui lòng chờ...');
+                    nazeModal.value.srtFile = null;
+                    nazeModal.value.srtTargetFile = null;
+                    nazeModal.value.youtubeUrl = '';
+                    showToast('✅ Đang xử lý, vui lòng chờ...');
                     await loadPosts();
                 } else { alert('❌ ' + (r.error || 'Lỗi')); }
             } catch (e) { alert('❌ ' + e.message); }

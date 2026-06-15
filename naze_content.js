@@ -201,27 +201,189 @@ async function getKeywordsFromGPT(sentence) {
 
 async function main() {
     const args = process.argv.slice(2);
-    const topic = args[0];
-    const projectId = args[1];
-    const targetLang = args[2] || 'vi';
+    const mode = args[0]; // topic text, --srt, --youtube
 
-    if (!topic || !projectId) {
-        console.error('Usage: node naze_content.js <topic> <projectId> [targetLang]');
-        process.exit(1);
+    let projectId, targetLang, rawSentences = null, postTitleVi = '';
+
+    if (mode === '--srt') {
+        const srtPath = args[1];
+        projectId = args[2];
+        const srtTargetPath = args[3] && !args[3].match(/^[a-z]{2}$/) ? args[3] : null;
+        targetLang = (srtTargetPath ? args[4] : args[3]) || 'vi';
+        if (!srtPath || !projectId) { console.error('Usage: node naze_content.js --srt <srt> <projectId> [srtTarget] [lang]'); process.exit(1); }
+        const { readFileSync } = await import('fs');
+        const parseSrt = (p) => {
+            const blocks = readFileSync(p, 'utf8').replace(/\r\n/g, '\n').trim().split(/\n\n+/);
+            return blocks.map(b => { const lines = b.trim().split('\n'); return lines.length >= 3 ? lines.slice(2).join(' ').trim() : null; }).filter(Boolean);
+        };
+        const srcSentences = parseSrt(srtPath);
+        const tgtSentences = srtTargetPath ? parseSrt(srtTargetPath) : null;
+        rawSentences = srcSentences.map((vi, i) => ({ vi, target: tgtSentences?.[i] || vi }));
+        postTitleVi = projectId;
+        console.log(`[naze] SRT mode: ${rawSentences.length} sentences`);
+    } else if (mode === '--youtube') {
+        const url = args[1];
+        projectId = args[2];
+        targetLang = args[3] || 'vi';
+        if (!url || !projectId) { console.error('Usage: node naze_content.js --youtube <url> <projectId> [lang]'); process.exit(1); }
+        console.log(`[naze] YouTube mode: ${url} | targetLang: ${targetLang}`);
+        const { execSync } = await import('child_process');
+        const { mkdirSync, existsSync, readdirSync, readFileSync } = await import('fs');
+        const targetDir = path.join(MEDIA_DIR, projectId);
+        if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
+
+        // Tải transcript qua youtube-transcript-api (Python)
+        const getTranscript = (videoId, langs, noFallback = false) => {
+            const langArg = langs.join(',');
+            const fallbackCode = noFallback ? 'raise' : `tl = api.list('${videoId}')\n    t = list(tl)[0].fetch()\n    print(json.dumps({'lang': t.language_code, 'texts': [s.text for s in t.snippets]}))`;
+            try {
+                const out = execSync(`python3 -c "
+import sys, json
+from youtube_transcript_api import YouTubeTranscriptApi
+api = YouTubeTranscriptApi()
+langs = '${langArg}'.split(',')
+try:
+    t = api.fetch('${videoId}', languages=langs)
+    print(json.dumps({'lang': t.language_code, 'texts': [s.text for s in t.snippets]}))
+except Exception as e:
+    ${fallbackCode}
+"`, { encoding: 'utf8' });
+                return JSON.parse(out.trim());
+            } catch (e) { throw new Error('youtube-transcript-api loi: ' + e.message.slice(0, 100)); }
+        };
+
+        const videoId = url.match(/[?&]v=([^&]+)/)?.[1] || url.split('/').pop();
+        console.log(`[naze] Fetching transcript for videoId: ${videoId}`);
+
+        // Lấy transcript gốc
+        const prefLangs = targetLang === 'vi' ? ['vi', 'en', 'ja'] : [targetLang, 'vi', 'en', 'ja'];
+        const srcTranscript = getTranscript(videoId, prefLangs);
+        console.log(`[naze] Got ${srcTranscript.texts.length} entries in ${srcTranscript.lang}`);
+
+        // Cố lấy thêm vi nếu có
+        let viTranscript = null;
+        if (srcTranscript.lang !== 'vi') {
+            try { viTranscript = getTranscript(videoId, ['vi'], true); } catch (_) {}
+        }
+
+        // Ghép text thành câu liên tục (remove HTML tags, join)
+        const joinTexts = (texts) => texts.map(t => t.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()).filter(Boolean).join(' ');
+        const srcText = joinTexts(srcTranscript.texts);
+        const viText = viTranscript ? joinTexts(viTranscript.texts) : null;
+
+        // Placeholder cho parseSrt - không dùng nữa
+        const viFile = viText ? '__vi__' : null;
+        const targetFile = srcTranscript.lang === targetLang ? '__target__' : null;
+        const anyFile = '__any__';
+        const parseSrtText = (text) => text.split(/[.!?。！？]+/).map(s => s.trim()).filter(s => s.length > 5);
+
+        // Hàm làm mịn sub bằng GPT-4o (gộp câu bị cắt, loại ký tự thừa)
+        const smoothSub = async (sentences, lang) => {
+            const langName = { vi: 'Vietnamese', en: 'English', ja: 'Japanese', ko: 'Korean', zh: 'Chinese', fr: 'French', es: 'Spanish' }[lang] || lang;
+            console.log(`[naze] Smoothing ${sentences.length} sentences in ${langName}...`);
+            const text = sentences.join(' ');
+            const res = await httpsPost(
+                'https://api.openai.com/v1/chat/completions',
+                { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+                {
+                    model: 'gpt-4o',
+                    messages: [
+                        { role: 'system', content: `You are a subtitle editor. Given raw auto-generated subtitle text in ${langName}, clean it up:
+1. Fix broken sentences (subtitles are often cut mid-sentence - rejoin them).
+2. Remove filler words, stutters, repeated words.
+3. Split into complete, natural sentences suitable for voice-over (10-25 words each).
+4. KEEP all content and meaning, do NOT summarize or remove information.
+5. Return ONLY a JSON array of clean sentences: ["sentence 1", "sentence 2", ...]` },
+                        { role: 'user', content: text.slice(0, 12000) }
+                    ],
+                    temperature: 0.3,
+                    response_format: { type: 'json_object' }
+                }
+            );
+            if (res.status !== 200) { console.error(`[naze] GPT smooth error ${res.status}`); return sentences; }
+            const data = JSON.parse(res.body);
+            const parsed = JSON.parse(data.choices[0].message.content);
+            const result = Array.isArray(parsed) ? parsed : Object.values(parsed)[0];
+            console.log(`[naze] Smoothed: ${result.length} sentences`);
+            const clean = (Array.isArray(result) ? result : sentences).map(s => String(s).replace(/^\d+\.\s*/, '').trim()).filter(Boolean);
+            return clean;
+        };
+
+        // Hàm dịch mảng câu
+        const translateSentences = async (sentences, fromLang, toLang) => {
+            const toLangName = { vi: 'Vietnamese', en: 'English', ja: 'Japanese', ko: 'Korean', zh: 'Chinese', fr: 'French', es: 'Spanish' }[toLang] || toLang;
+            console.log(`[naze] Translating ${sentences.length} sentences to ${toLangName}...`);
+            const numbered = sentences.map((s, i) => `${i+1}. ${s}`).join('\n');
+            const res = await httpsPost(
+                'https://api.openai.com/v1/chat/completions',
+                { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+                {
+                    model: 'gpt-4o',
+                    messages: [
+                        { role: 'system', content: `Translate each numbered sentence to ${toLangName}. Keep numbering. Return JSON: {"sentences": ["translated 1", "translated 2", ...]}` },
+                        { role: 'user', content: numbered.slice(0, 12000) }
+                    ],
+                    temperature: 0.2,
+                    response_format: { type: 'json_object' }
+                }
+            );
+            if (res.status !== 200) { console.error(`[naze] GPT translate error`); return sentences; }
+            const data = JSON.parse(res.body);
+            const parsed = JSON.parse(data.choices[0].message.content);
+            return (parsed.sentences || sentences).map(s => String(s).replace(/^\d+\.\s*/, '').trim()).filter(Boolean);
+        };
+
+        let viSentences, targetSentences;
+
+        if (viText && srcTranscript.lang === targetLang) {
+            // Có cả vi và target
+            viSentences = await smoothSub(parseSrtText(viText), 'vi');
+            targetSentences = await smoothSub(parseSrtText(srcText), targetLang);
+        } else if (srcTranscript.lang === 'vi') {
+            // Gốc là vi
+            viSentences = await smoothSub(parseSrtText(srcText), 'vi');
+            targetSentences = targetLang === 'vi' ? viSentences : await translateSentences(viSentences, 'vi', targetLang);
+        } else {
+            // Gốc là ngôn ngữ khác
+            const detectedLang = srcTranscript.lang;
+            const rawSents = await smoothSub(parseSrtText(srcText), detectedLang);
+            if (targetLang === detectedLang) {
+                targetSentences = rawSents;
+            } else {
+                targetSentences = await translateSentences(rawSents, detectedLang, targetLang);
+            }
+            viSentences = viText
+                ? await smoothSub(parseSrtText(viText), 'vi')
+                : await translateSentences(rawSents, detectedLang, 'vi');
+        }
+
+        // Căn chỉnh độ dài
+        const maxLen = Math.max(viSentences.length, targetSentences.length);
+        rawSentences = Array.from({ length: maxLen }, (_, i) => ({
+            vi: viSentences[i] || viSentences[viSentences.length - 1] || '',
+            target: targetSentences[i] || targetSentences[targetSentences.length - 1] || ''
+        }));
+        postTitleVi = projectId;
+        console.log(`[naze] YouTube done: ${rawSentences.length} sentences`);
+    } else {
+        const topic = mode;
+        projectId = args[1];
+        targetLang = args[2] || 'vi';
+        if (!topic || !projectId) { console.error('Usage: node naze_content.js <topic> <projectId> [targetLang]'); process.exit(1); }
+        console.log(`[naze] Topic: ${topic} | Lang: ${targetLang}`);
     }
 
-    console.log(`[naze] Topic: ${topic} | Lang: ${targetLang}`);
-
-    const result = await generateContent(topic, targetLang);
+    const result = rawSentences ? null : await generateContent(mode, targetLang);
+    if (result) { rawSentences = result.sentences; postTitleVi = result.title_vi || result.title; }
 
     const db = await getDb();
     await db.run('INSERT OR IGNORE INTO Post (project_id, title, status, voice_content_type, target_lang) VALUES (?, ?, ?, ?, ?)',
-        [projectId, result.title_vi || result.title || projectId, 'crawling', targetLang === 'vi' ? 'content_vi' : 'content', targetLang]);
+        [projectId, postTitleVi || projectId, 'crawling', targetLang === 'vi' ? 'content_vi' : 'content', targetLang]);
     const post = await db.get('SELECT id FROM Post WHERE project_id = ?', [projectId]);
     const postId = post.id;
 
     const paragraphIds = [];
-    for (const [i, s] of result.sentences.entries()) {
+    for (const [i, s] of rawSentences.entries()) {
         const paraRes = await db.run(
             'INSERT INTO Paragraph (post_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
             [postId, s.target, s.vi, i + 1]
@@ -233,7 +395,7 @@ async function main() {
         );
         paragraphIds.push({ index: i + 1, text: s.vi, paragraphId });
     }
-    console.log(`[naze] ✅ Đã lưu ${result.sentences.length} câu vào DB`);
+    console.log(`[naze] ✅ Đã lưu ${rawSentences.length} câu vào DB`);
 
     // Crawl ảnh
     for (const { index, text, paragraphId } of paragraphIds) {
@@ -261,27 +423,29 @@ async function main() {
         }
 
         const imgDir = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', String(index));
+        const vidDir = path.join(MEDIA_DIR, projectId, 'assets', '_raw_videos', String(index));
         const { mkdirSync, existsSync } = await import('fs');
         if (!existsSync(imgDir)) mkdirSync(imgDir, { recursive: true });
+        if (!existsSync(vidDir)) mkdirSync(vidDir, { recursive: true });
 
-        for (const kw of keywords) {
-            try {
-                const got = await fetchImages(kw, imgDir, IMAGES_PER_KEYWORD);
-                console.log(`      [${kw}] ${got} images`);
-            } catch (e) { console.error(`      [${kw}] loi: ${e.message}`); }
-        }
+        await Promise.all(keywords.map(kw => Promise.allSettled([
+            fetchImages(kw, imgDir, IMAGES_PER_KEYWORD).then(n => console.log(`      [${kw}] ${n} images`)).catch(e => console.error(`      [${kw}] img loi: ${e.message}`)),
+            fetchFromStoryblocksBot(kw, 'video', vidDir, 4).then(n => console.log(`      [${kw}] ${n} videos`)).catch(() => {}),
+        ])));
 
         // Sync vào DB
         const { readdirSync } = await import('fs');
-        const exts = ['.jpg', '.jpeg', '.png', '.webp'];
-        if (existsSync(imgDir)) {
-            for (const file of readdirSync(imgDir)) {
+        const syncDir = async (dir, type, exts) => {
+            if (!existsSync(dir)) return;
+            for (const file of readdirSync(dir)) {
                 if (!exts.includes(path.extname(file).toLowerCase())) continue;
-                const rel = path.relative(MEDIA_DIR, path.join(imgDir, file));
+                const rel = path.relative(MEDIA_DIR, path.join(dir, file));
                 const ex = await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
-                if (!ex) await db.run('INSERT INTO Asset (paragraph_id, type, file_path) VALUES (?, ?, ?)', [paragraphId, 'image', rel]);
+                if (!ex) await db.run('INSERT INTO Asset (paragraph_id, type, file_path) VALUES (?, ?, ?)', [paragraphId, type, rel]);
             }
-        }
+        };
+        await syncDir(imgDir, 'image', ['.jpg', '.jpeg', '.png', '.webp']);
+        await syncDir(vidDir, 'video', ['.mp4', '.mov']);
     }
 
     await db.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]);

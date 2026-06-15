@@ -791,23 +791,6 @@ app.post('/api/crawl-vn', async (req, res) => {
     })().catch(e => console.error('[crawl-vn]', e.message));
 });
 
-// API: Tạo mới dự án từ nội dung
-app.post('/api/create-naze', express.json(), async (req, res) => {
-    const { topic, projectId, targetLang } = req.body;
-    if (!topic?.trim() || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu topic hoặc projectId' });
-    try {
-        const targetDir = path.join(MEDIA_DIR, projectId);
-        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-        const args = ['naze_content.js', topic.trim(), projectId];
-        if (targetLang) args.push(targetLang);
-        const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
-        child.stdout.on('data', d => process.stdout.write(`[naze] ${d}`));
-        child.stderr.on('data', d => process.stderr.write(`[naze] ${d}`));
-        child.unref();
-        res.json({ success: true, projectId });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 app.post('/api/create-project', async (req, res) => {
     const { content, sources, targetLang } = req.body;
     if (!content?.trim()) return res.status(400).json({ error: 'Thiếu nội dung' });
@@ -1013,6 +996,65 @@ app.post('/api/toggle', async (req, res) => {
 });
 
 const upload = multer({ dest: path.join(MEDIA_DIR, '_tmp_uploads') });
+// API: Tạo mới dự án từ nội dung
+app.post('/api/create-naze-srt', upload.fields([{ name: 'srt', maxCount: 1 }, { name: 'srtTarget', maxCount: 1 }]), async (req, res) => {
+    const { projectId, targetLang } = req.body;
+    const srtFile = req.files?.srt?.[0];
+    if (!srtFile || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu file SRT hoặc projectId' });
+    try {
+        const targetDir = path.join(MEDIA_DIR, projectId);
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        const srtPath = path.join(targetDir, 'input.srt');
+        fs.renameSync(srtFile.path, srtPath);
+        let srtTargetPath = '';
+        if (req.files?.srtTarget?.[0]) {
+            srtTargetPath = path.join(targetDir, 'input_target.srt');
+            fs.renameSync(req.files.srtTarget[0].path, srtTargetPath);
+        }
+        const args = ['naze_content.js', '--srt', srtPath, projectId];
+        if (srtTargetPath) args.push(srtTargetPath);
+        if (targetLang) args.push(targetLang);
+        const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+        child.stdout.on('data', d => process.stdout.write(`[naze] ${d}`));
+        child.stderr.on('data', d => process.stderr.write(`[naze] ${d}`));
+        child.unref();
+        res.json({ success: true, projectId });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/create-naze-youtube', express.json(), async (req, res) => {
+    const { url, projectId, targetLang } = req.body;
+    if (!url?.trim() || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu URL hoặc projectId' });
+    try {
+        const targetDir = path.join(MEDIA_DIR, projectId);
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        const args = ['naze_content.js', '--youtube', url.trim(), projectId];
+        if (targetLang) args.push(targetLang);
+        const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+        child.stdout.on('data', d => process.stdout.write(`[naze] ${d}`));
+        child.stderr.on('data', d => process.stderr.write(`[naze] ${d}`));
+        child.unref();
+        res.json({ success: true, projectId });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/create-naze', express.json(), async (req, res) => {
+    const { topic, projectId, targetLang } = req.body;
+    if (!topic?.trim() || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu topic hoặc projectId' });
+    try {
+        const targetDir = path.join(MEDIA_DIR, projectId);
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        const args = ['naze_content.js', topic.trim(), projectId];
+        if (targetLang) args.push(targetLang);
+        const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+        child.stdout.on('data', d => process.stdout.write(`[naze] ${d}`));
+        child.stderr.on('data', d => process.stderr.write(`[naze] ${d}`));
+        child.unref();
+        res.json({ success: true, projectId });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+
 
 app.post('/api/download-url', async (req, res) => {
     try {
