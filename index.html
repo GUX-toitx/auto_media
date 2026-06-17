@@ -67,6 +67,7 @@
                     <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-600 hover:bg-orange-500 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
                         <span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}
                     <button @click="sportsRetry" class="bg-yellow-600 hover:bg-yellow-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔁 Retry Missing</button>
+                    <button @click="exportCapcut" class="bg-pink-600 hover:bg-pink-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎬 CapCut</button>
                     </button>
                     <div v-if="posts.find(p => p.id === activePostId)?.status === 'crawling'" class="flex items-center gap-2 text-blue-400 ml-2">
                         <span class="animate-spin text-2xl">⏳</span>
@@ -2059,6 +2060,24 @@ createApp({
 
         const crawling = ref(false);
 
+        async function exportCapcut() {
+            if (!activePostId.value) return showToast('⚠️ Chưa chọn post');
+            showToast('⏳ Đang tạo CapCut project...', 60000);
+            try {
+                const res = await fetch('/api/export-capcut', { method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ postId: activePostId.value }) });
+                if (!res.ok) { const r = await res.json(); return showToast('❌ ' + r.error); }
+                const blob = await res.blob();
+                const disposition = res.headers.get('Content-Disposition') || '';
+                const fileName = disposition.match(/filename="(.+)"/)?.at(1) || 'install_capcut.bat';
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url; a.download = fileName; a.click();
+                URL.revokeObjectURL(url);
+                showToast('✅ Tải xong! Double-click file .bat để cài vào CapCut.', 8000);
+            } catch (e) { showToast('❌ ' + e.message); }
+        }
+
         async function sportsRetry() {
             if (!activePostId.value) return showToast('⚠️ Chưa chọn post');
             showToast('🔁 Retry các câu thiếu keyword...', 5000);
@@ -3146,6 +3165,7 @@ createApp({
             downloadVoice,
             pollingTimer,
             startPollingVoice,
+            exportCapcut,
             sportsRetry,
             crawling,
             triggerCrawlAll,

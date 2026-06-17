@@ -6,7 +6,7 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import multer from 'multer';
@@ -790,6 +790,102 @@ app.post('/api/crawl-vn', async (req, res) => {
 });
 
 // API: Tạo mới dự án từ nội dung
+app.post('/api/export-capcut', (req, res) => {
+    const postId = req.body && req.body.postId;
+    if (!postId) return res.status(400).json({ error: 'Thieu postId' });
+    const outDir = path.join(MEDIA_DIR, '_capcut_exports');
+    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+    let stdout = '', stderr = '', done = false;
+    const child = spawn(process.execPath, ['capcut_export.js', String(postId), outDir], {
+        cwd: __dirname, env: process.env
+    });
+    child.stdout.on('data', d => { stdout += d; });
+    child.stderr.on('data', d => { stderr += d; });
+    child.on('error', err => { if (!done) { done = true; res.status(500).json({ error: err.message }); } });
+    child.on('close', code => {
+        if (done) return; done = true;
+        if (code !== 0) return res.status(500).json({ error: 'exit ' + code + ': ' + stderr.slice(-200) });
+        const lines = stdout.trim().split('\n');
+        let result = null;
+        for (let i = lines.length - 1; i >= 0; i--) { try { result = JSON.parse(lines[i]); break; } catch(_) {} }
+        if (!result || !result.zipPath || !result.draftId) return res.status(500).json({ error: 'no result. stdout: ' + stdout.slice(-200) });
+        const zipName = path.basename(result.zipPath);
+        const zipUrl = (req.headers['x-forwarded-proto'] || 'http') + '://' + (req.headers.host || 'localhost:' + PORT) + '/api/capcut-zip/' + zipName;
+        const projectName = result.projectName || path.basename(zipName, '_capcut.zip');
+        const bat = buildBatScript(zipUrl, result.draftId, projectName);
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.setHeader('Content-Disposition', 'attachment; filename="install_' + path.basename(zipName, '.zip') + '.bat"');
+        res.send(Buffer.from(bat, 'utf8'));
+    });
+})
+app.get('/api/capcut-zip/:filename', (req, res) => {
+    const filePath = path.join(MEDIA_DIR, '_capcut_exports', req.params.filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + req.params.filename + '"');
+    fs.createReadStream(filePath).pipe(res);
+    setTimeout(() => { try { fs.unlinkSync(filePath); } catch(_) {} }, 10 * 60 * 1000);
+});
+
+function buildBatScript(zipUrl, draftId, projectName) {
+    const post = { project_id: projectName || draftId };
+    const CRLF = '\r\n';
+    // Viet noi dung bat vao mang, join voi CRLF
+    const bat = [];
+    bat.push('@echo off');
+    bat.push('chcp 65001 >nul');
+    bat.push('title CapCut Project Installer');
+    bat.push('setlocal enabledelayedexpansion');
+    bat.push('echo.');
+    bat.push('echo === CapCut Project Installer ===');
+    bat.push('echo.');
+    bat.push('set "TMP=%TEMP%\\capcut_tmp"');
+    bat.push('set "ZIP=%TMP%\\project.zip"');
+    bat.push('if not exist "%TMP%" md "%TMP%"');
+    bat.push('');
+    bat.push('echo [1/4] Downloading...');
+    bat.push('powershell -NoProfile -Command "Invoke-WebRequest -Uri \'' + zipUrl + '\' -OutFile \'%ZIP%\' -UseBasicParsing"');
+    bat.push('if not exist "%ZIP%" ( echo FAILED: Download & pause & exit /b 1 )');
+    bat.push('echo OK');
+    bat.push('');
+    bat.push('echo [2/4] Finding CapCut folder...');
+    bat.push('set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\Projects\\com.lveditor.draft"');
+    bat.push('if not exist "%DR%" set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\com.lveditor.draft"');
+    bat.push('if not exist "%DR%" md "%DR%"');
+    bat.push('echo OK: %DR%');
+    bat.push('');
+    bat.push('echo [3/4] Installing...');
+    bat.push('if exist "%DR%\\' + draftId + '" rd /s /q "%DR%\\' + draftId + '"');
+    bat.push('powershell -NoProfile -Command "Expand-Archive -LiteralPath \'%ZIP%\' -DestinationPath \'%DR%\' -Force"');
+    bat.push('if not exist "%DR%\\' + draftId + '\\draft_content.json" ( echo FAILED: Extract & pause & exit /b 1 )');
+    bat.push('echo OK: Installed ' + draftId);
+    bat.push('echo Updating CapCut index...');
+    bat.push('copy "%DR%\\' + draftId + '\\fix_meta.ps1" "%TEMP%\\fix_meta_run.ps1" >nul');
+    bat.push('powershell -NoProfile -ExecutionPolicy Bypass -File "%TEMP%\\fix_meta_run.ps1"');
+    bat.push('del "%TEMP%\\fix_meta_run.ps1" 2>nul');
+    bat.push('rd /s /q "%TMP%" 2>nul');
+    bat.push('');
+    bat.push('echo [4/4] Opening CapCut...');
+    bat.push('set "EXE="');
+    bat.push('if exist "%LOCALAPPDATA%\\CapCut\\Apps\\CapCut.exe" set "EXE=%LOCALAPPDATA%\\CapCut\\Apps\\CapCut.exe"');
+    bat.push('taskkill /f /im CapCut.exe >nul 2>&1');
+    bat.push('timeout /t 2 >nul');
+    bat.push('if not "!EXE!"=="" ( start "" "!EXE!" & echo OK: CapCut launched ) else ( echo WARN: Open CapCut manually & explorer "%DR%" )');
+    bat.push('');
+    bat.push('echo.');
+    bat.push('echo === Done! Project: ' + draftId + ' ===');
+    bat.push('echo.');
+    bat.push('echo NOTE: If media files appear RED in CapCut:');
+    bat.push('echo  1. Right-click any red file on timeline');
+    bat.push('echo  2. Select "Link Media"');
+    bat.push('echo  3. Navigate to: %DR%\\' + draftId + '\\assets');
+    bat.push('echo  4. CapCut will auto-relink all files automatically');
+    bat.push('echo.');
+    bat.push('pause');
+    bat.push('endlocal');
+    return bat.join(CRLF);
+}
+
 app.post('/api/sports-retry', async (req, res) => {
     const { postId } = req.body;
     if (!postId) return res.status(400).json({ error: 'Thieu postId' });
@@ -1408,4 +1504,5 @@ app.post('/api/crawl-status/notify', (req, res) => {
     res.json({ success: true });
 });
 
+app.use((err, req, res, next) => { process.stderr.write('[EXPRESS ERR] ' + (err?.stack||err) + '\n'); res.status(500).json({error: err.message}); });
 app.listen(PORT, () => console.log(`🚀 http://localhost:${PORT}`));
