@@ -2026,6 +2026,13 @@ createApp({
             setTimeout(() => { e.target._crawling = false; }, 2000);
         }
 
+        async function mergeParagraphs(para1, para2, idx) {
+            if (!confirm(`Merge #${idx + 1} + #${idx + 2}? Voice sẽ cần tạo lại.`)) return;
+            const r = await fetch('/api/merge-paragraphs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paraId1: para1.id, paraId2: para2.id }) });
+            if (!(await r.json()).ok) return alert('Merge failed');
+            await selectPost({ id: activePost.value.id });
+        }
+
         async function deleteKeyword(kw, para) {
             await fetch('/api/delete-keyword', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keywordId: kw.id }) });
             para.keywords = para.keywords.filter(k => k.id !== kw.id);
@@ -3099,6 +3106,7 @@ createApp({
             removeKeyword,
             addKeyword,
             deleteKeyword,
+            mergeParagraphs,
             crawlVn,
             crawlVnSection,
             addSectionKeyword,

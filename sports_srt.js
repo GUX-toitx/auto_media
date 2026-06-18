@@ -55,12 +55,12 @@ Task:
 1. Write a detailed sports analysis article simultaneously in Vietnamese AND ${langName}.
 2. Use the most up-to-date data: current squad, recent form, head-to-head, key players, tactical setup.
 3. Pronounce player names, coaches, tournaments correctly in both languages.
-4. Split content into short sentences suitable for voice-over (10-25 words each).
-5. Cover: team form, key players, tactics, injury updates, prediction.
-6. Target length: 6-8 minutes of voice-over content (approximately 900-1200 words in target language, 50-80 sentences).
-7. NEVER cite sources, never add footnotes, never mention where data comes from, never add URLs, never add links in parentheses like ([source.com](url)).
-8. Output ONLY clean sentences with no citations, no references, no URLs whatsoever.
-7. Return JSON where each sentence has both "vi" (Vietnamese) and "target" (${langName}) versions.`;
+4. Cover: team form, key players, tactics, injury updates, prediction.
+5. Target duration: 8-10 minutes of presentation content (approximately 2400-3500 words in the target language). Divide the analysis into paragraphs, each with 2-4 sentences (combine sentences according to context), the purpose being to avoid meaningless or incomprehensible sentences or paragraphs for the audience.
+6. NEVER cite sources, never add footnotes, never mention where data comes from, never add URLs, never add links in parentheses like ([source.com](url)).
+7. Output ONLY clean sentences with no citations, no references, no URLs whatsoever.
+8. Return JSON where each sentence has both "vi" (Vietnamese) and "target" (${langName}) versions.
+9. No need to confirm with me, just go ahead.`;
     const res = await httpsPost(
         'https://api.openai.com/v1/responses',
         { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },

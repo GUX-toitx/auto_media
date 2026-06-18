@@ -814,7 +814,8 @@ app.post('/api/export-capcut', (req, res) => {
         const projectName = result.projectName || path.basename(zipName, '_capcut.zip');
         const bat = buildBatScript(zipUrl, result.draftId, projectName);
         res.setHeader('Content-Type', 'application/octet-stream');
-        res.setHeader('Content-Disposition', 'attachment; filename="install_' + path.basename(zipName, '.zip') + '.bat"');
+        const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+        res.setHeader('Content-Disposition', 'attachment; filename="install_' + path.basename(zipName, '.zip') + '_' + ts + '.bat"');
         res.send(Buffer.from(bat, 'utf8'));
     });
 })
@@ -828,63 +829,97 @@ app.get('/api/capcut-zip/:filename', (req, res) => {
 });
 
 function buildBatScript(zipUrl, draftId, projectName) {
-    const post = { project_id: projectName || draftId };
     const CRLF = '\r\n';
-    // Viet noi dung bat vao mang, join voi CRLF
     const bat = [];
     bat.push('@echo off');
     bat.push('chcp 65001 >nul');
     bat.push('title CapCut Project Installer');
     bat.push('setlocal enabledelayedexpansion');
     bat.push('echo.');
-    bat.push('echo === CapCut Project Installer ===');
+    bat.push('echo === CapCut Project Installer: ' + projectName + ' ===');
     bat.push('echo.');
-    bat.push('set "TMP=%TEMP%\\capcut_tmp"');
-    bat.push('set "ZIP=%TMP%\\project.zip"');
-    bat.push('if not exist "%TMP%" md "%TMP%"');
+    bat.push('set "CTMP=%TEMP%\\capcut_tmp_%RANDOM%"');
+    bat.push('set "ZIP=%CTMP%\\project.zip"');
+    bat.push('md "%CTMP%"');
     bat.push('');
-    bat.push('echo [1/4] Downloading...');
+    bat.push('echo [1/3] Downloading...');
     bat.push('powershell -NoProfile -Command "Invoke-WebRequest -Uri \'' + zipUrl + '\' -OutFile \'%ZIP%\' -UseBasicParsing"');
     bat.push('if not exist "%ZIP%" ( echo FAILED: Download & pause & exit /b 1 )');
     bat.push('echo OK');
     bat.push('');
-    bat.push('echo [2/4] Finding CapCut folder...');
+    bat.push('echo [2/3] Installing...');
     bat.push('set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\Projects\\com.lveditor.draft"');
     bat.push('if not exist "%DR%" set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\com.lveditor.draft"');
     bat.push('if not exist "%DR%" md "%DR%"');
-    bat.push('echo OK: %DR%');
-    bat.push('');
-    bat.push('echo [3/4] Installing...');
     bat.push('if exist "%DR%\\' + draftId + '" rd /s /q "%DR%\\' + draftId + '"');
     bat.push('powershell -NoProfile -Command "Expand-Archive -LiteralPath \'%ZIP%\' -DestinationPath \'%DR%\' -Force"');
-    bat.push('if not exist "%DR%\\' + draftId + '\\draft_content.json" ( echo FAILED: Extract & pause & exit /b 1 )');
-    bat.push('echo OK: Installed ' + draftId);
-    bat.push('echo Updating CapCut index...');
-    bat.push('copy "%DR%\\' + draftId + '\\fix_meta.ps1" "%TEMP%\\fix_meta_run.ps1" >nul');
-    bat.push('powershell -NoProfile -ExecutionPolicy Bypass -File "%TEMP%\\fix_meta_run.ps1"');
-    bat.push('del "%TEMP%\\fix_meta_run.ps1" 2>nul');
-    bat.push('rd /s /q "%TMP%" 2>nul');
+    bat.push('set "DDIR=%DR%\\' + draftId + '"');
+    bat.push('if not exist "%DDIR%" ( echo FAILED: Extract & pause & exit /b 1 )');
+    bat.push('echo OK');
     bat.push('');
-    bat.push('echo [4/4] Opening CapCut...');
-    bat.push('set "EXE="');
-    bat.push('if exist "%LOCALAPPDATA%\\CapCut\\Apps\\CapCut.exe" set "EXE=%LOCALAPPDATA%\\CapCut\\Apps\\CapCut.exe"');
-    bat.push('taskkill /f /im CapCut.exe >nul 2>&1');
-    bat.push('timeout /t 2 >nul');
-    bat.push('if not "!EXE!"=="" ( start "" "!EXE!" & echo OK: CapCut launched ) else ( echo WARN: Open CapCut manually & explorer "%DR%" )');
-    bat.push('');
+    bat.push('echo [3/3] Updating CapCut index...');
+    const ps = [
+        '$f=\'%DDIR%\'',
+        '$r=Join-Path (Split-Path -Parent $f) \'root_meta_info.json\'',
+        '$id=\'' + draftId + '\'',
+        '$n=\'' + projectName + '\'',
+        '$t=[long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())*1000',
+        '$fp=\'' + 'C:/Users/trinh/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft/' + draftId + '\'',
+        '$rp=\'' + 'C:/Users/trinh/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft' + '\'',
+        'if(Test-Path $r){$j=Get-Content $r -Raw|ConvertFrom-Json}else{$j=[PSCustomObject]@{all_draft_store=@();draft_ids=0;root_path=$rp}}',
+        '$ne=[PSCustomObject]@{draft_fold_path=$fp;draft_id=$id;draft_name=$n;draft_root_path=$rp;draft_json_file=($fp+\'/draft_content.json\');tm_draft_create=$t;tm_draft_modified=$t;tm_draft_removed=0;tm_duration=300000000;draft_timeline_materials_size=2000000;streaming_edit_draft_ready=$true;cloud_draft_cover=$false;cloud_draft_sync=$false;draft_is_invisible=$false}',
+        '$j.all_draft_store=@($ne)+($j.all_draft_store|Where-Object{$_.draft_id -ne $id})',
+        'ConvertTo-Json $j -Depth 10 -Compress|Set-Content $r -Encoding UTF8',
+        'Write-Host \'OK\'',
+    ].join(';');
+    bat.push('powershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps + '"');
+    bat.push('rd /s /q "%CTMP%" 2>nul');
     bat.push('echo.');
-    bat.push('echo === Done! Project: ' + draftId + ' ===');
-    bat.push('echo.');
-    bat.push('echo NOTE: If media files appear RED in CapCut:');
-    bat.push('echo  1. Right-click any red file on timeline');
-    bat.push('echo  2. Select "Link Media"');
-    bat.push('echo  3. Navigate to: %DR%\\' + draftId + '\\assets');
-    bat.push('echo  4. CapCut will auto-relink all files automatically');
+    bat.push('echo === Done! Mo CapCut va chon du an: ' + projectName + ' ===');
     bat.push('echo.');
     bat.push('pause');
     bat.push('endlocal');
     return bat.join(CRLF);
 }
+
+app.post('/api/merge-paragraphs', async (req, res) => {
+    const { paraId1, paraId2 } = req.body;
+    try {
+        const db = await getDb();
+        // Đọc data trước
+        const details1 = await db.all('SELECT content, content_vi FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"', [paraId1]);
+        const details2 = await db.all('SELECT content, content_vi FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"', [paraId2]);
+        const p1 = await db.get('SELECT content, content_vi FROM Paragraph WHERE id = ?', [paraId1]);
+        const p2 = await db.get('SELECT content, content_vi FROM Paragraph WHERE id = ?', [paraId2]);
+        const p2Row = await db.get('SELECT "order", post_id FROM Paragraph WHERE id = ?', [paraId2]);
+        await db.close();
+
+        const allDetails = [...details1, ...details2];
+        const mergedContent = allDetails.map(d => d.content).filter(Boolean).join(' ');
+        const mergedContentVi = allDetails.map(d => d.content_vi).filter(Boolean).join(' ');
+
+        // Mở connection mới để write
+        const db2 = await getDb();
+        await db2.run('PRAGMA journal_mode=WAL');
+        const del1 = await db2.run('DELETE FROM ParagraphDetail WHERE paragraph_id = ?', [paraId1]);
+        const del2 = await db2.run('DELETE FROM ParagraphDetail WHERE paragraph_id = ?', [paraId2]);
+        await db2.run('INSERT INTO ParagraphDetail (paragraph_id, content, content_vi, "order") VALUES (?, ?, ?, 1)',
+            [paraId1, mergedContent || null, mergedContentVi || null]);
+        await db2.run('UPDATE Asset SET paragraph_id = ? WHERE paragraph_id = ?', [paraId1, paraId2]);
+        await db2.run('UPDATE Sentence SET paragraph_id = ? WHERE paragraph_id = ?', [paraId1, paraId2]);
+        await db2.run('UPDATE Keyword SET paragraph_id = ? WHERE paragraph_id = ?', [paraId1, paraId2]);
+        await db2.run('UPDATE Paragraph SET content = ?, content_vi = ?, content_audio = NULL, content_vi_audio = NULL WHERE id = ?', [
+            [p1.content, p2.content].filter(Boolean).join(' '),
+            [p1.content_vi, p2.content_vi].filter(Boolean).join(' '),
+            paraId1
+        ]);
+        if (p2Row) await db2.run('UPDATE Paragraph SET "order" = "order" - 1 WHERE post_id = ? AND "order" > ?', [p2Row.post_id, p2Row.order]);
+        await db2.run('DELETE FROM Paragraph WHERE id = ?', [paraId2]);
+        await db2.close();
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 
 app.post('/api/sports-retry', async (req, res) => {
     const { postId } = req.body;
