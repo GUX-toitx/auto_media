@@ -61,8 +61,8 @@
                         </div>
                     </label>
                     <!-- Group: Voice -->
-                    <div class="relative" @mouseenter="showGroup='voice'" @mouseleave="showGroup=''">
-                        <button class="bg-purple-600 hover:bg-purple-500 px-4 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all flex items-center gap-1">
+                    <div class="relative">
+                        <button @click="showGroup = showGroup==='voice' ? '' : 'voice'" class="bg-purple-600 hover:bg-purple-500 px-4 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all flex items-center gap-1">
                             🎙️ Voice <span class="text-[8px] opacity-70">▼</span>
                         </button>
                         <div v-show="showGroup==='voice'" class="absolute top-full left-0 mt-1 flex flex-col gap-1 z-50 min-w-[180px]">
@@ -73,8 +73,8 @@
                         </div>
                     </div>
                     <!-- Group: Media -->
-                    <div class="relative" @mouseenter="showGroup='media'" @mouseleave="showGroup=''">
-                        <button class="bg-orange-600 hover:bg-orange-500 px-4 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all flex items-center gap-1">
+                    <div class="relative">
+                        <button @click="showGroup = showGroup==='media' ? '' : 'media'" class="bg-orange-600 hover:bg-orange-500 px-4 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all flex items-center gap-1">
                             🖼️ Media <span class="text-[8px] opacity-70">▼</span>
                         </button>
                         <div v-show="showGroup==='media'" class="absolute top-full left-0 mt-1 flex flex-col gap-1 z-50 min-w-[160px]">
@@ -85,8 +85,8 @@
                         </div>
                     </div>
                     <!-- Group: CapCut -->
-                    <div class="relative" @mouseenter="showGroup='capcut'" @mouseleave="showGroup=''">
-                        <button class="bg-pink-600 hover:bg-pink-500 px-4 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all flex items-center gap-1">
+                    <div class="relative">
+                        <button @click="showGroup = showGroup==='capcut' ? '' : 'capcut'" class="bg-pink-600 hover:bg-pink-500 px-4 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all flex items-center gap-1">
                             🎬 CapCut <span class="text-[8px] opacity-70">▼</span>
                         </button>
                         <div v-show="showGroup==='capcut'" class="absolute top-full left-0 mt-1 flex flex-col gap-1 z-50 min-w-[160px]">

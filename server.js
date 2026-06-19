@@ -818,7 +818,8 @@ app.post('/api/export-capcut', (req, res) => {
 
         // Tạo zip bundle: giải nén draft zip rồi đóng gói lại kèm file bat
         res.setHeader('Content-Type', 'application/zip');
-        res.setHeader('Content-Disposition', `attachment; filename="${outZipName}"`);
+        const safeZipName = outZipName.replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+        res.setHeader('Content-Disposition', `attachment; filename="${safeZipName}"; filename*=UTF-8''${encodeURIComponent(outZipName)}`);
 
         const archive = (await import('archiver')).default('zip', { zlib: { level: 6 } });
         archive.on('error', e => res.status(500).json({ error: e.message }));
@@ -847,12 +848,14 @@ app.get('/api/capcut-zip/:filename', (req, res) => {
 
 function buildLocalBatScript(draftId, projectName) {
     const CRLF = '\r\n';
+    // Sanitize projectName: bỏ ký tự gây lỗi trong PS/bat
+    const safeName = projectName.replace(/'/g, '').replace(/"/g, '').trim();
     const bat = [];
     bat.push('@echo off');
     bat.push('chcp 65001 >nul');
-    bat.push('title CapCut Installer - ' + projectName);
+    bat.push('title CapCut Installer');
     bat.push('echo.');
-    bat.push('echo === Installing: ' + projectName + ' ===');
+    bat.push('echo === Installing project ===');
     bat.push('echo.');
     bat.push('set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\Projects\\com.lveditor.draft"');
     bat.push('if not exist "%DR%" set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\com.lveditor.draft"');
@@ -861,11 +864,12 @@ function buildLocalBatScript(draftId, projectName) {
     bat.push('if exist "%DR%\\' + draftId + '" rd /s /q "%DR%\\' + draftId + '"');
     bat.push('powershell -NoProfile -Command "Expand-Archive -LiteralPath \'%~dp0project.zip\' -DestinationPath \'%DR%\' -Force"');
     bat.push('echo [2/2] Updating index...');
+    bat.push('set "PROJ_NAME=' + safeName + '"');
     const ps = [
-        '$f=\'' + 'C:/Users/' + process.env.WIN_USER || 'trinh' + '/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft/' + draftId + '\'',
+        '$f=\'C:/Users/trinh/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft/' + draftId + '\'',
         '$r=Join-Path (Split-Path -Parent $f) \'root_meta_info.json\'',
         '$id=\'' + draftId + '\'',
-        '$n=\'' + projectName + '\'',
+        '$n=$env:PROJ_NAME',
         '$t=[long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())*1000',
         '$rp=Split-Path -Parent $f',
         'if(Test-Path $r){$j=Get-Content $r -Raw|ConvertFrom-Json}else{$j=[PSCustomObject]@{all_draft_store=@();draft_ids=0;root_path=$rp}}',
@@ -876,7 +880,7 @@ function buildLocalBatScript(draftId, projectName) {
     ].join(';');
     bat.push('powershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps + '"');
     bat.push('echo.');
-    bat.push('echo === Done! Mo CapCut va chon: ' + projectName + ' ===');
+    bat.push('echo === Done! Open CapCut to see your project ===');
     bat.push('echo.');
     bat.push('pause');
     return bat.join(CRLF);
