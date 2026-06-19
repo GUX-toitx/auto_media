@@ -95,7 +95,7 @@ app.get('/api/posts/:postId', async (req, res) => {
         }
 
         const paragraphs = await db.all(
-            'SELECT id, content, content_vi, title, title_vi, content_audio, content_vi_audio, title_audio, title_vi_audio FROM Paragraph WHERE post_id = ? ORDER BY id',
+            'SELECT id, content, content_vi, title, title_vi, content_audio, content_vi_audio, title_audio, title_vi_audio, "order" FROM Paragraph WHERE post_id = ? ORDER BY "order"',
             [post.id]
         );
 
@@ -802,21 +802,38 @@ app.post('/api/export-capcut', (req, res) => {
     child.stdout.on('data', d => { stdout += d; });
     child.stderr.on('data', d => { stderr += d; });
     child.on('error', err => { if (!done) { done = true; res.status(500).json({ error: err.message }); } });
-    child.on('close', code => {
+    child.on('close', async code => {
         if (done) return; done = true;
         if (code !== 0) return res.status(500).json({ error: 'exit ' + code + ': ' + stderr.slice(-200) });
         const lines = stdout.trim().split('\n');
         let result = null;
         for (let i = lines.length - 1; i >= 0; i--) { try { result = JSON.parse(lines[i]); break; } catch(_) {} }
         if (!result || !result.zipPath || !result.draftId) return res.status(500).json({ error: 'no result. stdout: ' + stdout.slice(-200) });
-        const zipName = path.basename(result.zipPath);
-        const zipUrl = (req.headers['x-forwarded-proto'] || 'http') + '://' + (req.headers.host || 'localhost:' + PORT) + '/api/capcut-zip/' + zipName;
-        const projectName = result.projectName || path.basename(zipName, '_capcut.zip');
-        const bat = buildBatScript(zipUrl, result.draftId, projectName);
-        res.setHeader('Content-Type', 'application/octet-stream');
+
+        const projectName = result.projectName || path.basename(result.zipPath, '_capcut.zip');
+        const draftId = result.draftId;
+        const bat = buildBatScript(null, draftId, projectName); // zipUrl=null vì zip nằm sẵn trong folder
         const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
-        res.setHeader('Content-Disposition', 'attachment; filename="install_' + path.basename(zipName, '.zip') + '_' + ts + '.bat"');
-        res.send(Buffer.from(bat, 'utf8'));
+        const outZipName = `${projectName}_${ts}_bundle.zip`;
+
+        // Tạo zip bundle: giải nén draft zip rồi đóng gói lại kèm file bat
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${outZipName}"`);
+
+        const archive = (await import('archiver')).default('zip', { zlib: { level: 6 } });
+        archive.on('error', e => res.status(500).json({ error: e.message }));
+        archive.pipe(res);
+
+        // Thêm toàn bộ nội dung draft zip vào bundle (dưới thư mục project/)
+        archive.file(result.zipPath, { name: `${projectName}/project.zip` });
+
+        // Tạo file bat đơn giản: chỉ cần giải nén và update index
+        const simpleBat = buildLocalBatScript(draftId, projectName);
+        archive.append(Buffer.from(simpleBat, 'utf8'), { name: `${projectName}/install.bat` });
+
+        await archive.finalize();
+        // Xóa zip gốc sau khi done
+        res.on('finish', () => { try { fs.unlinkSync(result.zipPath); } catch(_) {} });
     });
 })
 app.get('/api/capcut-zip/:filename', (req, res) => {
@@ -827,6 +844,43 @@ app.get('/api/capcut-zip/:filename', (req, res) => {
     fs.createReadStream(filePath).pipe(res);
     setTimeout(() => { try { fs.unlinkSync(filePath); } catch(_) {} }, 10 * 60 * 1000);
 });
+
+function buildLocalBatScript(draftId, projectName) {
+    const CRLF = '\r\n';
+    const bat = [];
+    bat.push('@echo off');
+    bat.push('chcp 65001 >nul');
+    bat.push('title CapCut Installer - ' + projectName);
+    bat.push('echo.');
+    bat.push('echo === Installing: ' + projectName + ' ===');
+    bat.push('echo.');
+    bat.push('set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\Projects\\com.lveditor.draft"');
+    bat.push('if not exist "%DR%" set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\com.lveditor.draft"');
+    bat.push('if not exist "%DR%" md "%DR%"');
+    bat.push('echo [1/2] Extracting...');
+    bat.push('if exist "%DR%\\' + draftId + '" rd /s /q "%DR%\\' + draftId + '"');
+    bat.push('powershell -NoProfile -Command "Expand-Archive -LiteralPath \'%~dp0project.zip\' -DestinationPath \'%DR%\' -Force"');
+    bat.push('echo [2/2] Updating index...');
+    const ps = [
+        '$f=\'' + 'C:/Users/' + process.env.WIN_USER || 'trinh' + '/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft/' + draftId + '\'',
+        '$r=Join-Path (Split-Path -Parent $f) \'root_meta_info.json\'',
+        '$id=\'' + draftId + '\'',
+        '$n=\'' + projectName + '\'',
+        '$t=[long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())*1000',
+        '$rp=Split-Path -Parent $f',
+        'if(Test-Path $r){$j=Get-Content $r -Raw|ConvertFrom-Json}else{$j=[PSCustomObject]@{all_draft_store=@();draft_ids=0;root_path=$rp}}',
+        '$ne=[PSCustomObject]@{draft_fold_path=($f-replace\'\\\\\',\'/\');draft_id=$id;draft_name=$n;draft_root_path=$rp;draft_json_file=(($f-replace\'\\\\\',\'/\')+\'/draft_content.json\');tm_draft_create=$t;tm_draft_modified=$t;tm_draft_removed=0;tm_duration=300000000;draft_timeline_materials_size=2000000;streaming_edit_draft_ready=$true;cloud_draft_cover=$false;cloud_draft_sync=$false;draft_is_invisible=$false}',
+        '$j.all_draft_store=@($ne)+($j.all_draft_store|Where-Object{$_.draft_id -ne $id})',
+        'ConvertTo-Json $j -Depth 10 -Compress|Set-Content $r -Encoding UTF8',
+        'Write-Host \'OK\'',
+    ].join(';');
+    bat.push('powershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps + '"');
+    bat.push('echo.');
+    bat.push('echo === Done! Mo CapCut va chon: ' + projectName + ' ===');
+    bat.push('echo.');
+    bat.push('pause');
+    return bat.join(CRLF);
+}
 
 function buildBatScript(zipUrl, draftId, projectName) {
     const CRLF = '\r\n';
@@ -882,6 +936,28 @@ function buildBatScript(zipUrl, draftId, projectName) {
     return bat.join(CRLF);
 }
 
+app.post('/api/insert-paragraph', async (req, res) => {
+    const { postId, afterOrder, content, content_vi } = req.body;
+    try {
+        const db = await getDb();
+        const insertOrder = (afterOrder == null ? 0 : afterOrder) + 1;
+        // Dịch tất cả paragraph có order >= insertOrder lên 1
+        await db.run('UPDATE Paragraph SET "order" = "order" + 1 WHERE post_id = ? AND "order" >= ?', [postId, insertOrder]);
+        // Insert paragraph mới
+        const r = await db.run(
+            'INSERT INTO Paragraph (post_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
+            [postId, content || '', content_vi || '', insertOrder]
+        );
+        // Insert 1 ParagraphDetail
+        await db.run(
+            'INSERT INTO ParagraphDetail (paragraph_id, content, content_vi, "order") VALUES (?, ?, ?, 1)',
+            [r.lastID, content || '', content_vi || '']
+        );
+        await db.close();
+        res.json({ ok: true, paragraphId: r.lastID });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/merge-paragraphs', async (req, res) => {
     const { paraId1, paraId2 } = req.body;
     try {
@@ -921,9 +997,80 @@ app.post('/api/merge-paragraphs', async (req, res) => {
 });
 
 
+const WINDOWS_AGENT = `http://192.168.50.248:5000`;
+
+app.post('/api/render-capcut', (req, res) => {
+    const { postId } = req.body;
+    if (!postId) return res.status(400).json({ error: 'Missing postId' });
+    const outDir = path.join(MEDIA_DIR, '_capcut_exports');
+    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+    let stdout = '', stderr = '', done = false;
+    const child = spawn(process.execPath, ['capcut_export.js', String(postId), outDir], {
+        cwd: __dirname, env: process.env
+    });
+    child.stdout.on('data', d => { stdout += d; });
+    child.stderr.on('data', d => { stderr += d; });
+    child.on('close', async code => {
+        if (done) return; done = true;
+        if (code !== 0) return res.status(500).json({ error: stderr.slice(-200) });
+        const lines = stdout.trim().split('\n');
+        let result = null;
+        for (let i = lines.length - 1; i >= 0; i--) { try { result = JSON.parse(lines[i]); break; } catch(_) {} }
+        if (!result?.zipPath) return res.status(500).json({ error: 'Export failed' });
+        // Cài vào CapCut folder trên Windows rồi render
+        const LINUX_IP = process.env.LINUX_IP || '192.168.50.43';
+        const zipUrl = (req.headers['x-forwarded-proto'] || 'http') + '://' + LINUX_IP + ':' + PORT + '/api/capcut-zip/' + path.basename(result.zipPath);
+        try {
+            const agentRes = await fetch(`${WINDOWS_AGENT}/render`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ draftId: result.draftId, projectName: result.projectName, postId, zipUrl })
+            });
+            const agentData = await agentRes.json();
+            res.json({ ok: true, message: 'Render started on Windows', ...agentData });
+        } catch (e) {
+            res.status(500).json({ error: `Windows agent unreachable: ${e.message}` });
+        }
+    });
+});
+
+// Nhận kết quả render từ Windows agent - đặt sau khi upload được khai báo
+const setupRenderRoutes = () => {
+app.post('/api/capcut-render-done', upload.single('video'), async (req, res) => {
+    try {
+        const { postId, projectName } = req.body;
+        if (!req.file) return res.status(400).json({ error: 'No file' });
+        const outDir = path.join(MEDIA_DIR, '_rendered');
+        if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+        const outPath = path.join(outDir, `${projectName}_${Date.now()}.mp4`);
+        fs.renameSync(req.file.path, outPath);
+        console.log(`[Render] Done: ${outPath}`);
+        res.json({ ok: true, path: outPath });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+};
+
+app.post('/api/debug-screenshot', (req, res) => {
+    // Nhận file bằng multer thông qua middleware riêng
+    const tempUpload = multer({ dest: '/tmp' }).single('img');
+    tempUpload(req, res, (err) => {
+        if (err || !req.file) return res.status(400).end();
+        const dest = `/tmp/debug_${Date.now()}.png`;
+        fs.renameSync(req.file.path, dest);
+        console.log('[Debug screenshot]', dest);
+        res.json({ ok: true, path: dest });
+    });
+});
+
+app.post('/api/capcut-render-status', (req, res) => {
+    const { postId, status, message } = req.body;
+    console.log(`[Render] Post ${postId}: ${status} - ${message}`);
+    res.json({ ok: true });
+});
+
+
 app.post('/api/sports-retry', async (req, res) => {
     const { postId } = req.body;
-    if (!postId) return res.status(400).json({ error: 'Thieu postId' });
     try {
         const db = await getDb();
         const post = await db.get('SELECT project_id FROM Post WHERE id = ?', [postId]);
@@ -1142,6 +1289,7 @@ app.post('/api/toggle', async (req, res) => {
 });
 
 const upload = multer({ dest: path.join(MEDIA_DIR, '_tmp_uploads') });
+setupRenderRoutes();
 
 // API: Tạo dự án Sports từ file SRT
 app.post('/api/create-sports-prompt', express.json(), async (req, res) => {
@@ -1502,6 +1650,10 @@ app.get('/api/get-prompt', (req, res) => {
     const fallbackFile = path.join(MEDIA_DIR, 'prompts', type || 'image', 'prompt_flow.txt');
     const raw = fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf8') : fs.existsSync(fallbackFile) ? fs.readFileSync(fallbackFile, 'utf8') : '';
     res.json({ prompt: raw.trim().replace(/\n/g, ' ') });
+});
+
+app.get('/capcut_agent.py', (req, res) => {
+    res.download(path.join(__dirname, 'capcut_agent.py'));
 });
 
 app.get('/', (req, res) => {

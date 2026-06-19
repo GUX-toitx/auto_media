@@ -56,7 +56,7 @@ Task:
 2. Use the most up-to-date data: current squad, recent form, head-to-head, key players, tactical setup.
 3. Pronounce player names, coaches, tournaments correctly in both languages.
 4. Cover: team form, key players, tactics, injury updates, prediction.
-5. Target duration: 8-10 minutes of presentation content (approximately 2400-3500 words in the target language). Divide the analysis into paragraphs, each with 2-4 sentences (combine sentences according to context), the purpose being to avoid meaningless or incomprehensible sentences or paragraphs for the audience.
+5. Target duration: 8-10 minutes of presentation content (approximately 2400-3500 words in the target language). Divide the analysis into paragraphs of 3-5 sentences each. Each "sentence" in the JSON output should be a FULL PARAGRAPH (multiple sentences combined), not a single short sentence. Group related ideas into one cohesive paragraph.
 6. NEVER cite sources, never add footnotes, never mention where data comes from, never add URLs, never add links in parentheses like ([source.com](url)).
 7. Output ONLY clean sentences with no citations, no references, no URLs whatsoever.
 8. Return JSON where each sentence has both "vi" (Vietnamese) and "target" (${langName}) versions.

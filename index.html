@@ -60,15 +60,40 @@
                             <div class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all" :class="previewMode ? 'left-5' : 'left-0.5'"></div>
                         </div>
                     </label>
-                    <button @click="createVoice" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
-                    <button @click="retryDownloadVoice" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔄 Refresh Voice</button>
-                    <button @click="openDownloadAudioModal" class="bg-yellow-600 hover:bg-yellow-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">⬇️ Chỉ Tải Voice</button>
-                    <button @click="openDownloadVoiceModal" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice & Media Selected</button>
-                    <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-600 hover:bg-orange-500 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
-                        <span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}
-                    <button @click="sportsRetry" class="bg-yellow-600 hover:bg-yellow-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔁 Retry Missing</button>
-                    <button @click="exportCapcut" class="bg-pink-600 hover:bg-pink-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎬 CapCut</button>
-                    </button>
+                    <!-- Group: Voice -->
+                    <div class="relative" @mouseenter="showGroup='voice'" @mouseleave="showGroup=''">
+                        <button class="bg-purple-600 hover:bg-purple-500 px-4 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all flex items-center gap-1">
+                            🎙️ Voice <span class="text-[8px] opacity-70">▼</span>
+                        </button>
+                        <div v-show="showGroup==='voice'" class="absolute top-full left-0 mt-1 flex flex-col gap-1 z-50 min-w-[180px]">
+                            <button @click="createVoice" class="bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left">🎙️ Tạo Voice</button>
+                            <button @click="retryDownloadVoice" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left">🔄 Refresh Voice</button>
+                            <button @click="openDownloadAudioModal" class="bg-yellow-600 hover:bg-yellow-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left">⬇️ Chỉ Tải Voice</button>
+                            <button @click="openDownloadVoiceModal" class="bg-green-600 hover:bg-green-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left">🔊 Tải Voice & Media</button>
+                        </div>
+                    </div>
+                    <!-- Group: Media -->
+                    <div class="relative" @mouseenter="showGroup='media'" @mouseleave="showGroup=''">
+                        <button class="bg-orange-600 hover:bg-orange-500 px-4 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all flex items-center gap-1">
+                            🖼️ Media <span class="text-[8px] opacity-70">▼</span>
+                        </button>
+                        <div v-show="showGroup==='media'" class="absolute top-full left-0 mt-1 flex flex-col gap-1 z-50 min-w-[160px]">
+                            <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-600 hover:bg-orange-500 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left">
+                                <span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}
+                            </button>
+                            <button @click="sportsRetry" class="bg-yellow-600 hover:bg-yellow-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left">🔁 Retry Missing</button>
+                        </div>
+                    </div>
+                    <!-- Group: CapCut -->
+                    <div class="relative" @mouseenter="showGroup='capcut'" @mouseleave="showGroup=''">
+                        <button class="bg-pink-600 hover:bg-pink-500 px-4 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all flex items-center gap-1">
+                            🎬 CapCut <span class="text-[8px] opacity-70">▼</span>
+                        </button>
+                        <div v-show="showGroup==='capcut'" class="absolute top-full left-0 mt-1 flex flex-col gap-1 z-50 min-w-[160px]">
+                            <button @click="exportCapcut" class="bg-pink-600 hover:bg-pink-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left">🎬 Export .bat</button>
+                            <button @click="renderCapcut" class="bg-red-700 hover:bg-red-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left">🖥️ Auto Render</button>
+                        </div>
+                    </div>
                     <div v-if="posts.find(p => p.id === activePostId)?.status === 'crawling'" class="flex items-center gap-2 text-blue-400 ml-2">
                         <span class="animate-spin text-2xl">⏳</span>
                         <span class="text-[13px] font-black uppercase tracking-widest">Crawling...</span>
@@ -192,7 +217,7 @@
                             </span>
                             <button v-if="false" @click="deleteSectionAll('hook','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
                             <button v-if="(activePost.sections?.hook?.videos || []).filter(v=>!v.selected && v._toDelete).length" @click="deleteSelectedSectionAssets('hook','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (activePost.sections?.hook?.videos || []).filter(v=>!v.selected && v._toDelete).length }})</button>
-                            <button v-if="false" @click="uploadSectionAsset('hook','video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
+                            <button v-if="true" @click="uploadSectionAsset('hook','video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
                         </div>
                         <div v-if="activePost.sections?.['hook']?._videoOpen && (activePost.sections?.hook?.videos || []).filter(v=>!v.selected).length" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.hook?.videos || []).filter(v=>!v.selected)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
@@ -349,7 +374,7 @@
                             </span>
                             <button v-if="false" @click="deleteSectionAll('summary','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
                             <button v-if="(activePost.sections?.summary?.videos || []).filter(v=>!v.selected && v._toDelete).length" @click="deleteSelectedSectionAssets('summary','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (activePost.sections?.summary?.videos || []).filter(v=>!v.selected && v._toDelete).length }})</button>
-                            <button v-if="false" @click="uploadSectionAsset('summary','video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
+                            <button v-if="true" @click="uploadSectionAsset('summary','video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
                         </div>
                         <div v-if="activePost.sections?.['summary']?._videoOpen && (activePost.sections?.summary?.videos || []).filter(v=>!v.selected).length" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.summary?.videos || []).filter(v=>!v.selected)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
@@ -391,6 +416,11 @@
                             </div>
                         </div>
                     </div>
+                </div>
+
+                <!-- Button thêm đầu -->
+                <div class="flex justify-center">
+                    <button @click="openInsertPara(null)" class="text-[10px] text-gray-600 hover:text-green-400 hover:bg-gray-800/50 px-4 py-1 rounded-full border border-dashed border-gray-700 hover:border-green-600 transition-all">+ Thêm đoạn đầu</button>
                 </div>
 
                 <div v-for="(para, i) in activePost.paragraphs" :key="para.id" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
@@ -485,11 +515,11 @@
                                 </div>
                             </div>
                             <!-- Assets selected cho luận điểm (sentenceId = null, selected) -->
-                            <div v-if="false" class="mt-1">
-                                <div v-if="false" class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="para._paraVideoOpen = !para._paraVideoOpen">
-                                    {{ para._paraVideoOpen ? '▼' : '▶' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos luận điểm ({{ (para.videos || []).filter(v => v.selected && v.sentenceId === null).length }})
+                            <div v-if="(para.videos || []).filter(v => v.selected && v.sentenceId === null).length" class="mt-1">
+                                <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="para._paraVideoOpen = !para._paraVideoOpen">
+                                    {{ para._paraVideoOpen ? '▼' : '▶' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos đã chọn ({{ (para.videos || []).filter(v => v.selected && v.sentenceId === null).length }})
                                 </div>
-                                <div v-if="false" class="grid grid-cols-4 gap-1 mt-1">
+                                <div v-if="para._paraVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
                                     <div v-for="v in (para.videos || []).filter(v => v.selected && v.sentenceId === null).sort((a,b) => a.order - b.order)" :key="v.relativePath" 
                                          class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
                                          draggable="true"
@@ -642,22 +672,21 @@
                     </div>
 
                     <!-- Row 5: Videos -->
-                    <div v-if="false">
+                    <div>
                         <div class="flex items-center text-[10px] font-black text-gray-500 select-none py-1">
-                            <span v-if="false" @click="toggleSection(para, 'videoOpen')" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
+                            <span @click="toggleSection(para, 'videoOpen')" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
                                 {{ para.videoOpen ? '▼' : '▶' }}
                                 <span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
-                                <!-- videos hidden -->
+                                Videos ({{ (para.videos || []).filter(v => v.sentenceId === null && !v.selected).length }})
                             </span>
-                            <button v-if="false" @click="deleteAll(para, i+1, 'video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
+                            <button @click="deleteAll(para, i+1, 'video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
                             <button v-if="(para.videos || []).filter(v => v.sentenceId === null && !v.selected && v._toDelete).length" @click="deleteSelectedParaAssets(para, 'video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (para.videos || []).filter(v => v.sentenceId === null && !v.selected && v._toDelete).length }})</button>
                             <div class="ml-auto flex gap-1.5">
                                 <button @click="refetchMedia(para)" class="text-[9px] px-2.5 py-1 rounded-md bg-orange-600/80 hover:bg-orange-500 text-white font-black tracking-wide transition-all active:scale-95">🔄 Lấy lại</button>
-                                <button v-if="false" @click="aiGenerate(para, 'video')" class="text-[9px] px-2.5 py-1 rounded-md bg-purple-600/80 hover:bg-purple-500 text-white font-black tracking-wide transition-all active:scale-95">✨ AI Generate</button>
-                                <button v-if="false" @click="uploadAsset(para, i+1, 'video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95">📤 Upload</button>
+                                <button @click="uploadAsset(para, i+1, 'video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95">📤 Upload</button>
                             </div>
                         </div>
-                        <div v-if="false" class="grid grid-cols-4 gap-2 mt-1">
+                        <div v-if="para.videoOpen" class="grid grid-cols-4 gap-2 mt-1">
                             <div v-if="!(para.videos || []).filter(v => v.sentenceId === null && !v.selected).length" class="text-[10px] text-gray-700 italic">Trống</div>
                             <div v-for="v in (para.videos || []).filter(v => v.sentenceId === null && !v.selected)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
                                 :class="[v._toDelete ? 'ring-2 ring-red-500 border-gray-800' : 'border-gray-800']">
@@ -725,6 +754,10 @@
                         </div>
 
                 </div><!-- end paragraph card -->
+                <!-- Button thêm sau mỗi paragraph -->
+                <div class="flex justify-center -mt-2">
+                    <button @click="openInsertPara(para.order)" class="text-[10px] text-gray-600 hover:text-green-400 hover:bg-gray-800/50 px-4 py-1 rounded-full border border-dashed border-gray-700 hover:border-green-600 transition-all">+ Thêm sau đoạn {{ i+1 }}</button>
+                </div>
             </div><!-- end v-for paragraphs -->
 
                 <!-- Kết bài -->
@@ -841,7 +874,7 @@
                             </span>
                             <button v-if="false" @click="deleteSectionAll('conclusion','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
                             <button v-if="(activePost.sections?.conclusion?.videos || []).filter(v=>!v.selected && v._toDelete).length" @click="deleteSelectedSectionAssets('conclusion','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (activePost.sections?.conclusion?.videos || []).filter(v=>!v.selected && v._toDelete).length }})</button>
-                            <button v-if="false" @click="uploadSectionAsset('conclusion','video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
+                            <button v-if="true" @click="uploadSectionAsset('conclusion','video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
                         </div>
                         <div v-if="activePost.sections?.['conclusion']?._videoOpen && (activePost.sections?.conclusion?.videos || []).filter(v=>!v.selected).length" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.conclusion?.videos || []).filter(v=>!v.selected)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
@@ -1326,6 +1359,28 @@
         </div>
     </div>
     <!-- DOWNLOAD AUDIO MODAL -->
+    <!-- Modal insert paragraph -->
+    <div v-if="insertParaModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50" @click.self="insertParaModal.open=false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-[520px] space-y-3">
+            <div class="flex justify-between items-center">
+                <h3 class="text-sm font-black text-white">➕ Thêm đoạn mới</h3>
+                <button @click="insertParaModal.open=false" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+            <div>
+                <label class="text-[10px] font-black text-gray-500 uppercase">Nội dung tiếng Việt</label>
+                <textarea v-model="insertParaModal.content_vi" rows="3" placeholder="Nhập nội dung tiếng Việt..." class="w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-blue-500 resize-none"></textarea>
+            </div>
+            <div>
+                <label class="text-[10px] font-black text-gray-500 uppercase">Nội dung tiếng Anh (tùy chọn)</label>
+                <textarea v-model="insertParaModal.content" rows="3" placeholder="Nhập nội dung tiếng Anh..." class="w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-blue-500 resize-none"></textarea>
+            </div>
+            <div class="flex gap-2 justify-end">
+                <button @click="insertParaModal.open=false" class="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-[11px] font-black">Hủy</button>
+                <button @click="submitInsertPara" :disabled="!insertParaModal.content_vi" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-40 text-[11px] font-black">✅ Thêm</button>
+            </div>
+        </div>
+    </div>
+
     <div v-if="downloadAudioModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50" @click.self="downloadAudioModal.open = false">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[480px] space-y-4">
             <div class="flex justify-between items-center">
@@ -1598,6 +1653,8 @@ createApp({
         const previewModal = ref({ open: false, type: '', asset: null, para: null });
         const page = ref('posts');
         const previewMode = ref(true);
+        const showGroup = ref('');
+        const insertParaModal = ref({ open: false, afterOrder: null, content: '', content_vi: '' });
         const profileModal = ref({ list: [], bulkText: '', cmds: [], addOpen: false, fileName: '' });
 
         const newProjectModal = ref({
@@ -2026,6 +2083,20 @@ createApp({
             setTimeout(() => { e.target._crawling = false; }, 2000);
         }
 
+        function openInsertPara(afterOrder) {
+            insertParaModal.value = { open: true, afterOrder, content: '', content_vi: '' };
+        }
+
+        async function submitInsertPara() {
+            const { afterOrder, content, content_vi } = insertParaModal.value;
+            const r = await fetch('/api/insert-paragraph', { method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ postId: activePostId.value, afterOrder, content, content_vi }) });
+            if (!(await r.json()).ok) return alert('Thêm thất bại');
+            insertParaModal.value.open = false;
+            await selectPost({ id: activePostId.value });
+        }
+
         async function mergeParagraphs(para1, para2, idx) {
             if (!confirm(`Merge #${idx + 1} + #${idx + 2}? Voice sẽ cần tạo lại.`)) return;
             const r = await fetch('/api/merge-paragraphs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paraId1: para1.id, paraId2: para2.id }) });
@@ -2066,6 +2137,19 @@ createApp({
         }
 
         const crawling = ref(false);
+
+        async function renderCapcut() {
+            if (!activePostId.value) return showToast('⚠️ Chưa chọn post');
+            showToast('⏳ Đang gửi lệnh render...', 5000);
+            try {
+                const res = await fetch('/api/render-capcut', { method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ postId: activePostId.value }) });
+                const r = await res.json();
+                if (!res.ok) return showToast('❌ ' + r.error);
+                showToast('✅ Đã gửi! CapCut Agent đang render trên Windows...', 8000);
+            } catch(e) { showToast('❌ ' + e.message); }
+        }
 
         async function exportCapcut() {
             if (!activePostId.value) return showToast('⚠️ Chưa chọn post');
@@ -3174,6 +3258,7 @@ createApp({
             pollingTimer,
             startPollingVoice,
             exportCapcut,
+            renderCapcut,
             sportsRetry,
             crawling,
             triggerCrawlAll,
@@ -3200,6 +3285,8 @@ createApp({
             onSelectFiles,
             submitUpload,
             previewMode,
+            showGroup,
+            insertParaModal, openInsertPara, submitInsertPara,
             previewModal,
             openPreview,
             closePreview,
