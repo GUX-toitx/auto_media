@@ -40,9 +40,13 @@ async function generateSentencesFromPrompt(prompt, targetLang) {
                     type: 'object',
                     properties: {
                         vi: { type: 'string' },
-                        target: { type: 'string' }
+                        target: { type: 'string' },
+                        image_suggestions: {
+                            type: 'array',
+                            items: { type: 'string' }
+                        }
                     },
-                    required: ['vi', 'target'],
+                    required: ['vi', 'target', 'image_suggestions'],
                     additionalProperties: false
                 }
             }
@@ -57,7 +61,8 @@ Task:
 3. Pronounce player names, coaches, tournaments correctly in both languages.
 4. Cover: team form, key players, tactics, injury updates, prediction.
 5. Target duration: 8-10 minutes of presentation content (approximately 2400-3500 words in the target language). Divide the analysis into paragraphs of 3-5 sentences each. Each "sentence" in the JSON output should be a FULL PARAGRAPH (multiple sentences combined), not a single short sentence. Group related ideas into one cohesive paragraph.
-6. NEVER cite sources, never add footnotes, never mention where data comes from, never add URLs, never add links in parentheses like ([source.com](url)).
+6. For each paragraph, provide the flow in Vietnamese and sequentially list the important keywords (following the subtitle flow) to search for images that match the subtitle.
+7. NEVER cite sources, never add footnotes, never mention where data comes from, never add URLs, never add links in parentheses like ([source.com](url)).
 7. Output ONLY clean sentences with no citations, no references, no URLs whatsoever.
 8. Return JSON where each sentence has both "vi" (Vietnamese) and "target" (${langName}) versions.
 9. No need to confirm with me, just go ahead.`;
@@ -94,7 +99,7 @@ Task:
     const parsed = JSON.parse(outputText);
     // Strip citations nếu GPT vẫn thêm vào
     const stripCitations = s => s.replace(/\s*\([^)]*\(https?:[^)]+\)[^)]*\)/g, '').replace(/\s*\(https?:\/\/[^)]+\)/g, '').trim();
-    parsed.sentences = (parsed.sentences || []).map(s => ({ vi: stripCitations(s.vi), target: stripCitations(s.target) }));
+    parsed.sentences = (parsed.sentences || []).map(s => ({ vi: stripCitations(s.vi), target: stripCitations(s.target), image_suggestions: s.image_suggestions || [] }));
     console.log('[GPT-5] === OUTPUT ===');
     console.log('Title VI:', parsed.title_vi);
     console.log('Title:', parsed.title);
@@ -119,35 +124,40 @@ function parseSrt(filePath) {
 }
 
 async function getKeywordsFromGPT(sentence) {
-    const res = await httpsPost(
-        'https://api.openai.com/v1/chat/completions',
-        { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-        {
-            model: 'gpt-4o-mini',
-            messages: [
-                {
-                    role: 'system',
-                    content: 'You are a football image search expert. Given a Vietnamese sports commentary sentence, return exactly 6 specific English Bing image search queries that will return real football photos. Each query must contain a specific player name, team name, or match name. Never use generic terms. Return ONLY a raw JSON array, no explanation. Example: ["Kevin De Bruyne Belgium training", "Romelu Lukaku goal", "Belgium national team 2024", "Jeremy Doku dribbling"]'
-                },
-                { role: 'user', content: sentence }
-            ],
-            temperature: 0.3
-        }
-    );
+    const res = await Promise.race([
+        httpsPost(
+            'https://api.openai.com/v1/chat/completions',
+            { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+            {
+                model: 'gpt-4o-mini',
+                messages: [
+                    {
+                        role: 'system',
+                        content: 'You are a sports image search expert. Given a sports commentary paragraph, return 4-8 specific English Bing image search queries to find relevant photos. Prefer specific player names, team names, or match names when present. If the paragraph is about history, economy, or culture (no specific players), use relevant contextual terms (e.g. "Japan football 1980s", "Toyota factory 1980"). Always return at least 4 queries. Return ONLY a raw JSON array, no explanation.'
+                    },
+                    { role: 'user', content: sentence }
+                ],
+                temperature: 0.3
+            }
+        ),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000))
+    ]);
     if (res.status !== 200) throw new Error(`GPT lỗi: ${res.status}`);
     const data = JSON.parse(res.body);
     let content = data.choices?.[0]?.message?.content || '[]';
+    console.log(`    [DEBUG] GPT raw response (status=${res.status}): ${content.slice(0, 200)}`);
+    if (data.error) console.log(`    [DEBUG] GPT error: ${JSON.stringify(data.error)}`);
     // Strip markdown code block nếu có
     content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     try {
         const parsed = JSON.parse(content);
-        if (Array.isArray(parsed)) return parsed.slice(0, 6);
+        if (Array.isArray(parsed)) return parsed.filter(Boolean).slice(0, 6);
         const val = Object.values(parsed)[0];
-        return Array.isArray(val) ? val.slice(0, 6) : [sentence.slice(0, 60)];
+        return Array.isArray(val) ? val.filter(Boolean).slice(0, 6) : [];
     } catch {
         const match = content.match(/\[.*?\]/s);
-        if (match) try { return JSON.parse(match[0]).slice(0, 6); } catch(_) {}
-        return [sentence.slice(0, 60)];
+        if (match) try { return JSON.parse(match[0]).filter(Boolean).slice(0, 6); } catch(_) {}
+        return [];
     }
 }
 
@@ -173,7 +183,7 @@ async function main() {
         const result = await generateSentencesFromPrompt(promptText, targetLang);
         postTitle = result.title;
         postTitleVi = result.title_vi || result.title;
-        rawSentences = result.sentences.map((s, i) => ({ index: i + 1, text: s.target, textVi: s.vi }));
+        rawSentences = result.sentences.map((s, i) => ({ index: i + 1, text: s.target, textVi: s.vi, imageSuggestions: s.image_suggestions || [] }));
         console.log(`[sports_srt] GPT generated ${rawSentences.length} sentences. Title: ${postTitle}`);
     } else {
         const srtPath = args[0];
@@ -197,7 +207,7 @@ async function main() {
 
     // Bước 1: Lưu toàn bộ paragraph vào DB trước
     const paragraphIds = [];
-    for (const { index, text, textVi } of rawSentences) {
+    for (const { index, text, textVi, imageSuggestions } of rawSentences) {
         const contentVi = textVi || text;
         const paraRes = await db.run(
             'INSERT INTO Paragraph (post_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
@@ -208,22 +218,67 @@ async function main() {
             'INSERT INTO ParagraphDetail (paragraph_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
             [paragraphId, text, contentVi, 1]
         );
-        paragraphIds.push({ index, text, paragraphId });
+        // Lưu image_suggestions vào Keyword
+        for (const sug of (imageSuggestions || [])) {
+            if (sug) await db.run('INSERT INTO Keyword (paragraph_id, content, type) VALUES (?, ?, ?)', [paragraphId, sug, 'image_suggestion']);
+        }
+        paragraphIds.push({ index, text, textVi: contentVi, paragraphId });
     }
     console.log(`[sports_srt] ✅ Đã lưu ${rawSentences.length} câu vào DB`);
 
     // Bước 2: Crawl ảnh cho từng câu
     for (const { index, text, paragraphId } of paragraphIds) {
+        // Luôn đọc content_vi từ DB để đảm bảo dùng tiếng Việt
+        const paraRow = await db.get('SELECT content_vi FROM Paragraph WHERE id=?', [paragraphId]);
+        const textVi = paraRow?.content_vi || text;
         console.log(`\n[${index}/${rawSentences.length}] "${text.slice(0, 60)}..."`);
 
-        let keywords;
-        try {
-            keywords = await getKeywordsFromGPT(text);
-            console.log(`    Keywords: ${keywords.join(' | ')}`);
-        } catch (e) {
-            console.error(`    GPT lỗi: ${e.message}`);
-            continue;
+        // Sinh image_suggestion chỉ khi chưa có (SRT mode không có GPT-5 suggestions)
+        const existingSugs = await db.get("SELECT COUNT(*) as c FROM Keyword WHERE paragraph_id=? AND type='image_suggestion'", [paragraphId]);
+        if (existingSugs.c === 0) {
+            try {
+                const sugRes = await httpsPost(
+                    'https://api.openai.com/v1/chat/completions',
+                    { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+                    {
+                        model: 'gpt-4o-mini',
+                        messages: [
+                            { role: 'system', content: 'You are a sports image suggestion expert. Read the given sports text and return a JSON array of Vietnamese search terms describing images that would illustrate the paragraph. Example: ["logo đội tuyển Nhật Bản", "Moriyasu huấn luyện viên", "World Cup 2026"]. Return ONLY a JSON array, no explanation.' },
+                            { role: 'user', content: textVi || text }
+                        ],
+                        temperature: 0.3
+                    }
+                );
+                if (sugRes.status === 200) {
+                    const sugData = JSON.parse(sugRes.body);
+                    const raw = sugData.choices?.[0]?.message?.content || '[]';
+                    let sugs = [];
+                    try { sugs = JSON.parse(raw); } catch(_) {
+                        const m = raw.match(/\[.*\]/s);
+                        if (m) try { sugs = JSON.parse(m[0]); } catch(_) {}
+                    }
+                    for (const sug of sugs) {
+                        if (sug) await db.run('INSERT INTO Keyword (paragraph_id, content, type) VALUES (?, ?, ?)', [paragraphId, sug, 'image_suggestion']);
+                    }
+                    console.log(`    Gợi ý ảnh (${sugs.length}): ${sugs.slice(0,3).join(' | ')}`);
+                }
+            } catch(e) { console.error(`    Gợi ý ảnh lỗi: ${e.message}`); }
         }
+
+        let keywords = [];
+        // Thử tối đa 3 lần nếu GPT trả về [] hoặc timeout
+        for (let attempt = 0; attempt < 3 && keywords.length === 0; attempt++) {
+            try {
+                if (attempt > 0) await new Promise(r => setTimeout(r, 2000 * attempt));
+                const inputText = textVi || text;
+                console.log(`    [DEBUG] Gửi GPT (attempt ${attempt+1}): "${inputText.slice(0, 80)}"`);
+                keywords = await getKeywordsFromGPT(inputText);
+                console.log(`    [DEBUG] GPT raw trả về ${keywords.length} keywords`);
+            } catch (e) {
+                console.error(`    GPT lỗi (attempt ${attempt+1}): ${e.message}`);
+            }
+        }
+        console.log(`    Keywords (${keywords.length}): ${keywords.join(' | ')}`);
 
         for (const kw of keywords) {
             await db.run('INSERT INTO Keyword (paragraph_id, content, type) VALUES (?, ?, ?)', [paragraphId, kw, 'factual']);

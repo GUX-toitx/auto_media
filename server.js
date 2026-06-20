@@ -1295,6 +1295,21 @@ app.post('/api/toggle', async (req, res) => {
 const upload = multer({ dest: path.join(MEDIA_DIR, '_tmp_uploads') });
 setupRenderRoutes();
 
+const runningProjects = new Map(); // projectId -> child process
+
+function spawnSportsJob(args, logPrefix, projectId, res) {
+    if (runningProjects.has(projectId)) {
+        return res.status(409).json({ error: `Project "${projectId}" đang chạy, vui lòng chờ` });
+    }
+    const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+    runningProjects.set(projectId, child);
+    child.stdout.on('data', d => process.stdout.write(`[${logPrefix}] ${d}`));
+    child.stderr.on('data', d => process.stderr.write(`[${logPrefix}] ${d}`));
+    child.on('close', () => runningProjects.delete(projectId));
+    child.unref();
+    res.json({ success: true, projectId });
+}
+
 // API: Tạo dự án Sports từ file SRT
 app.post('/api/create-sports-prompt', express.json(), async (req, res) => {
     const { projectId, prompt, targetLang } = req.body;
@@ -1304,11 +1319,7 @@ app.post('/api/create-sports-prompt', express.json(), async (req, res) => {
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
         const args = ['sports_srt.js', '--prompt', projectId, prompt.trim()];
         if (targetLang) args.push(targetLang);
-        const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
-        child.stdout.on('data', d => process.stdout.write(`[sports_prompt] ${d}`));
-        child.stderr.on('data', d => process.stderr.write(`[sports_prompt] ${d}`));
-        child.unref();
-        res.json({ success: true, projectId });
+        spawnSportsJob(args, 'sports_prompt', projectId, res);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1330,11 +1341,7 @@ app.post('/api/create-sports', upload.fields([{ name: 'srt', maxCount: 1 }, { na
         const args = ['sports_srt.js', srtPath, projectId];
         if (srtTranslatedPath) args.push(srtTranslatedPath);
         if (targetLang) args.push(targetLang);
-        const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
-        child.stdout.on('data', d => process.stdout.write(`[sports_srt] ${d}`));
-        child.stderr.on('data', d => process.stderr.write(`[sports_srt] ${d}`));
-        child.unref();
-        res.json({ success: true, projectId });
+        spawnSportsJob(args, 'sports_srt', projectId, res);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

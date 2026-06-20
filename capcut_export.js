@@ -96,7 +96,7 @@ const KB_PRESETS = [
     { s0: 1.08, s1: 1.0,  x0: 0.03,  x1: -0.03 },
 ];
 
-function buildKenBurnsKeyframes(duration, presetIndex) {
+function buildKenBurnsKeyframes(duration, presetIndex, s0, s1) {
     const p = KB_PRESETS[presetIndex % KB_PRESETS.length];
     const makeKF = (property, values) => ({
         id: uuid(),
@@ -111,14 +111,14 @@ function buildKenBurnsKeyframes(duration, presetIndex) {
         }))
     });
     return [
-        makeKF('KFTypeScaleX',    [{ time: 0, v: p.s0 }, { time: duration, v: p.s1 }]),
-        makeKF('KFTypeScaleY',    [{ time: 0, v: p.s0 }, { time: duration, v: p.s1 }]),
+        makeKF('KFTypeScaleX',    [{ time: 0, v: s0 }, { time: duration, v: s1 }]),
+        makeKF('KFTypeScaleY',    [{ time: 0, v: s0 }, { time: duration, v: s1 }]),
         makeKF('KFTypePositionX', [{ time: 0, v: p.x0 }, { time: duration, v: p.x1 }]),
     ];
 }
 
 // Build video segment dựa trên template thật
-function buildVideoSegment(matId, startTime, duration, presetIndex) {
+function buildVideoSegment(matId, startTime, duration, presetIndex, matWidth, matHeight) {
     const base = JSON.parse(JSON.stringify(templateContent.tracks[0].segments[0]));
     const segId = uuid();
     const speedId = uuid();
@@ -127,6 +127,20 @@ function buildVideoSegment(matId, startTime, duration, presetIndex) {
     const soundChannelId = uuid();
     const colorId = uuid();
     const vocalId = uuid();
+
+    // Tính scale để ảnh fill canvas 1920x1080
+    const CANVAS_W = 1920, CANVAS_H = 1080;
+    const w = matWidth || CANVAS_W;
+    const h = matHeight || CANVAS_H;
+    const fillScale = Math.max(CANVAS_W / w, CANVAS_H / h);
+
+    // Ken Burns preset áp dụng trên tổng scale
+    const p = KB_PRESETS[presetIndex % KB_PRESETS.length];
+    const s0 = fillScale * p.s0;
+    const s1 = fillScale * p.s1;
+
+    const kbPresets = buildKenBurnsKeyframes(duration, presetIndex, s0, s1);
+
     return {
         segment: {
             ...base,
@@ -138,8 +152,17 @@ function buildVideoSegment(matId, startTime, duration, presetIndex) {
             extra_material_refs: [speedId, placeholderId, canvasId, soundChannelId, colorId, vocalId],
             render_index: 0,
             track_render_index: 0,
-            common_keyframes: buildKenBurnsKeyframes(duration, presetIndex),
+            common_keyframes: kbPresets,
             keyframe_refs: [],
+            // Set clip.scale = fillScale để ảnh fill full màn hình ngay từ đầu
+            clip: {
+                scale: { x: s0, y: s0 },
+                rotation: 0.0,
+                transform: { x: p.x0, y: 0.0 },
+                flip: { vertical: false, horizontal: false },
+                alpha: 1.0
+            },
+            uniform_scale: { on: true, value: s0 },
         },
         extraMaterials: { speedId, placeholderId, canvasId, soundChannelId, colorId, vocalId }
     };
@@ -207,6 +230,7 @@ export async function exportCapcut(postId, outputDir) {
     content.materials.material_colors = [];
     content.materials.sound_channel_mappings = [];
     content.tracks = [];
+    content.canvas_config = { ratio: '16:9', width: 1920, height: 1080, background: null };
 
     let fileIndex = 0;
     let videoIndex = 0;
@@ -290,11 +314,12 @@ export async function exportCapcut(postId, outputDir) {
                 const destPath = path.join(assetsDir, assetFileName);
                 fs.copyFileSync(srcPath, destPath);
                 const isVideo = ['.mp4', '.mov', '.avi'].includes(ext);
+                const mediaInfo = isVideo ? getMediaInfo(destPath) : { width: 1920, height: 1080 };
                 const actualDur = isVideo ? Math.min(asset.duration ? asset.duration * 1_000_000 : assetDur, assetDur) : assetDur;
                 const matId = uuid();
                 const mat = buildVideoMaterial(matId, destPath, actualDur, assetFileName, isVideo, draftId);
                 content.materials.videos.push(mat);
-                const { segment, extraMaterials } = buildVideoSegment(matId, totalDuration, actualDur, videoIndex++);
+                const { segment, extraMaterials } = buildVideoSegment(matId, totalDuration, actualDur, videoIndex++, mediaInfo.width, mediaInfo.height);
                 videoSegments.push(segment);
                 // Extra materials
                 const speedMat = { ...JSON.parse(JSON.stringify(templateContent.materials.speeds[0])), id: extraMaterials.speedId };
@@ -454,8 +479,28 @@ export async function exportCapcut(postId, outputDir) {
 
     fs.rmSync(draftDir, { recursive: true, force: true });
     console.log(`[CapCut] Zip: ${zipPath} (${(fs.statSync(zipPath).size/1024/1024).toFixed(1)}MB)`);
-    process.stdout.write(JSON.stringify({ zipPath, draftId, projectName: post.project_id }) + '\n');
-    return { zipPath, draftDir, draftId, projectName: post.project_id };
+
+    // Tạo .bat cùng thư mục với zip
+    const zipFileName = path.basename(zipPath);
+    const batPath = zipPath.replace(/\.zip$/, '.bat');
+    fs.writeFileSync(batPath, generateBat(zipFileName, post.project_id));
+    console.log(`[CapCut] Bat: ${batPath}`);
+
+    process.stdout.write(JSON.stringify({ zipPath, batPath, draftId, projectName: post.project_id }) + '\n');
+    return { zipPath, batPath, draftDir, draftId, projectName: post.project_id };
+}
+
+const INSTALL_SCRIPT = 'C:\\Users\\trinh\\workspace\\install_capcut.py';
+
+export function generateBat(zipFileName, projectName) {
+    return [
+        '@echo off',
+        `echo Installing: ${projectName}`,
+        `set ZIP=%~dp0${zipFileName}`,
+        `python "${INSTALL_SCRIPT}" "%ZIP%"`,
+        'if %ERRORLEVEL% NEQ 0 ( echo FAILED & pause & exit /b 1 )',
+        'echo Done!',
+    ].join('\r\n');
 }
 
 if (process.argv[1]?.endsWith('capcut_export.js')) {
