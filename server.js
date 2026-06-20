@@ -1370,6 +1370,159 @@ app.get('/api/get-prompt', (req, res) => {
     res.json({ prompt: raw.trim().replace(/\n/g, ' ') });
 });
 
+// ===== CAPCUT =====
+const WINDOWS_AGENT = `http://192.168.50.248:5000`;
+
+app.post('/api/export-capcut', (req, res) => {
+    const postId = req.body && req.body.postId;
+    if (!postId) return res.status(400).json({ error: 'Thieu postId' });
+    const outDir = path.join(MEDIA_DIR, '_capcut_exports');
+    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+    let stdout = '', stderr = '', done = false;
+    const child = spawn(process.execPath, ['capcut_export.js', String(postId), outDir], {
+        cwd: __dirname, env: process.env
+    });
+    child.stdout.on('data', d => { stdout += d; });
+    child.stderr.on('data', d => { stderr += d; });
+    child.on('error', err => { if (!done) { done = true; res.status(500).json({ error: err.message }); } });
+    child.on('close', async code => {
+        if (done) return; done = true;
+        if (code !== 0) return res.status(500).json({ error: 'exit ' + code + ': ' + stderr.slice(-200) });
+        const lines = stdout.trim().split('\n');
+        let result = null;
+        for (let i = lines.length - 1; i >= 0; i--) { try { result = JSON.parse(lines[i]); break; } catch(_) {} }
+        if (!result || !result.zipPath || !result.draftId) return res.status(500).json({ error: 'no result. stdout: ' + stdout.slice(-200) });
+        const projectName = result.projectName || path.basename(result.zipPath, '_capcut.zip');
+        const draftId = result.draftId;
+        const simpleBat = buildLocalBatScript(draftId, projectName);
+        const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+        const outZipName = `${projectName}_${ts}_bundle.zip`;
+        res.setHeader('Content-Type', 'application/zip');
+        const safeZipName = outZipName.replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+        res.setHeader('Content-Disposition', `attachment; filename="${safeZipName}"; filename*=UTF-8''${encodeURIComponent(outZipName)}`);
+        const archive = archiver('zip', { zlib: { level: 6 } });
+        archive.on('error', e => res.status(500).json({ error: e.message }));
+        archive.pipe(res);
+        archive.file(result.zipPath, { name: `${projectName}/project.zip` });
+        archive.append(Buffer.from(simpleBat, 'utf8'), { name: `${projectName}/install.bat` });
+        await archive.finalize();
+        res.on('finish', () => { try { fs.unlinkSync(result.zipPath); } catch(_) {} });
+    });
+});
+
+app.get('/api/capcut-zip/:filename', (req, res) => {
+    const filePath = path.join(MEDIA_DIR, '_capcut_exports', req.params.filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + req.params.filename + '"');
+    fs.createReadStream(filePath).pipe(res);
+    setTimeout(() => { try { fs.unlinkSync(filePath); } catch(_) {} }, 10 * 60 * 1000);
+});
+
+function buildLocalBatScript(draftId, projectName) {
+    const CRLF = '\r\n';
+    const safeName = projectName.replace(/'/g, '').replace(/"/g, '').trim();
+    const bat = [];
+    bat.push('@echo off');
+    bat.push('chcp 65001 >nul');
+    bat.push('title CapCut Installer');
+    bat.push('echo.');
+    bat.push('echo === Installing project ===');
+    bat.push('echo.');
+    bat.push('set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\Projects\\com.lveditor.draft"');
+    bat.push('if not exist "%DR%" set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\com.lveditor.draft"');
+    bat.push('if not exist "%DR%" md "%DR%"');
+    bat.push('echo [1/2] Extracting...');
+    bat.push('if exist "%DR%\\' + draftId + '" rd /s /q "%DR%\\' + draftId + '"');
+    bat.push('powershell -NoProfile -Command "Expand-Archive -LiteralPath \'%~dp0project.zip\' -DestinationPath \'%DR%\' -Force"');
+    bat.push('echo [2/2] Updating index...');
+    bat.push('set "PROJ_NAME=' + safeName + '"');
+    const ps = [
+        '$f=\'C:/Users/trinh/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft/' + draftId + '\'',
+        '$r=Join-Path (Split-Path -Parent $f) \'root_meta_info.json\'',
+        '$id=\'' + draftId + '\'',
+        '$n=$env:PROJ_NAME',
+        '$t=[long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())*1000',
+        '$rp=Split-Path -Parent $f',
+        'if(Test-Path $r){$j=Get-Content $r -Raw|ConvertFrom-Json}else{$j=[PSCustomObject]@{all_draft_store=@();draft_ids=0;root_path=$rp}}',
+        '$ne=[PSCustomObject]@{draft_fold_path=($f-replace\'\\\\\',\'/\');draft_id=$id;draft_name=$n;draft_root_path=$rp;draft_json_file=(($f-replace\'\\\\\',\'/\')+\'/draft_content.json\');tm_draft_create=$t;tm_draft_modified=$t;tm_draft_removed=0;tm_duration=300000000;draft_timeline_materials_size=2000000;streaming_edit_draft_ready=$true;cloud_draft_cover=$false;cloud_draft_sync=$false;draft_is_invisible=$false}',
+        '$j.all_draft_store=@($ne)+($j.all_draft_store|Where-Object{$_.draft_id -ne $id})',
+        'ConvertTo-Json $j -Depth 10 -Compress|Set-Content $r -Encoding UTF8',
+        'Write-Host \'OK\'',
+    ].join(';');
+    bat.push('powershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps + '"');
+    bat.push('echo.');
+    bat.push('echo === Done! Open CapCut to see your project ===');
+    bat.push('echo.');
+    bat.push('pause');
+    return bat.join(CRLF);
+}
+
+app.post('/api/render-capcut', (req, res) => {
+    const { postId } = req.body;
+    if (!postId) return res.status(400).json({ error: 'Missing postId' });
+    const outDir = path.join(MEDIA_DIR, '_capcut_exports');
+    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+    let stdout = '', stderr = '', done = false;
+    const child = spawn(process.execPath, ['capcut_export.js', String(postId), outDir], {
+        cwd: __dirname, env: process.env
+    });
+    child.stdout.on('data', d => { stdout += d; });
+    child.stderr.on('data', d => { stderr += d; });
+    child.on('close', async code => {
+        if (done) return; done = true;
+        if (code !== 0) return res.status(500).json({ error: stderr.slice(-200) });
+        const lines = stdout.trim().split('\n');
+        let result = null;
+        for (let i = lines.length - 1; i >= 0; i--) { try { result = JSON.parse(lines[i]); break; } catch(_) {} }
+        if (!result?.zipPath) return res.status(500).json({ error: 'Export failed' });
+        const LINUX_IP = process.env.LINUX_IP || '192.168.50.43';
+        const zipUrl = (req.headers['x-forwarded-proto'] || 'http') + '://' + LINUX_IP + ':' + PORT + '/api/capcut-zip/' + path.basename(result.zipPath);
+        try {
+            const agentRes = await fetch(`${WINDOWS_AGENT}/render`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ draftId: result.draftId, projectName: result.projectName, postId, zipUrl })
+            });
+            const agentData = await agentRes.json();
+            res.json({ ok: true, message: 'Render started on Windows', ...agentData });
+        } catch (e) {
+            res.status(500).json({ error: `Windows agent unreachable: ${e.message}` });
+        }
+    });
+});
+
+app.post('/api/capcut-render-done', upload.single('video'), async (req, res) => {
+    try {
+        const { postId, projectName } = req.body;
+        if (!req.file) return res.status(400).json({ error: 'No file' });
+        const outDir = path.join(MEDIA_DIR, '_rendered');
+        if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+        const outPath = path.join(outDir, `${projectName}_${Date.now()}.mp4`);
+        fs.renameSync(req.file.path, outPath);
+        console.log(`[Render] Done: ${outPath}`);
+        res.json({ ok: true, path: outPath });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/capcut-render-status', (req, res) => {
+    const { postId, status, message } = req.body;
+    console.log(`[Render] Post ${postId}: ${status} - ${message}`);
+    res.json({ ok: true });
+});
+
+app.post('/api/debug-screenshot', (req, res) => {
+    const tempUpload = multer({ dest: '/tmp' }).single('img');
+    tempUpload(req, res, (err) => {
+        if (err || !req.file) return res.status(400).end();
+        const dest = `/tmp/debug_${Date.now()}.png`;
+        fs.renameSync(req.file.path, dest);
+        console.log('[Debug screenshot]', dest);
+        res.json({ ok: true, path: dest });
+    });
+});
+// ===== END CAPCUT =====
+
 app.get('/', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.sendFile(path.join(__dirname, 'index.html'));

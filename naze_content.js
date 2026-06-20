@@ -114,11 +114,10 @@ Task:
 1. Write engaging educational content about the given topic in BOTH Vietnamese AND ${langName} simultaneously.
 2. Style: conversational, curious, mind-blowing facts, build-up from simple to complex.
 3. Structure: Hook (why this question matters) → Simple explanation → Deeper science → Surprising facts → Conclusion.
-4. Target length: 4-5 minutes of voice-over (approximately 600-750 words per language, 40-60 sentences).
-5. Each sentence should be short, punchy, suitable for voice-over (8-20 words).
-6. Use analogies and relatable examples to explain complex concepts.
-7. NEVER cite sources, never add URLs, never add footnotes or references.
-8. Output clean sentences only with no citations whatsoever.`;
+4. Target length: 8-10 minutes of voice-over (approximately 2400-3500 words per language). Divide into paragraphs of 3-5 sentences each. Each "sentence" in the JSON output should be a FULL PARAGRAPH (multiple sentences combined), not a single short sentence. Group related ideas into one cohesive paragraph.
+5. Use analogies and relatable examples to explain complex concepts.
+6. NEVER cite sources, never add URLs, never add footnotes or references.
+7. Output clean sentences only with no citations whatsoever.`;
 
     const res = await httpsPost(
         'https://api.openai.com/v1/responses',

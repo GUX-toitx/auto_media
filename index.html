@@ -67,6 +67,12 @@
                     <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-600 hover:bg-orange-500 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
                         <span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}
                     </button>
+                    <button @click="exportCapcut" :disabled="capcutExporting" class="bg-pink-600 hover:bg-pink-500 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
+                        <span v-if="capcutExporting" class="animate-spin inline-block mr-1">⏳</span>{{ capcutExporting ? 'Exporting...' : '🎬 CapCut Export' }}
+                    </button>
+                    <button @click="renderCapcut" :disabled="capcutRendering" class="bg-rose-700 hover:bg-rose-600 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
+                        <span v-if="capcutRendering" class="animate-spin inline-block mr-1">⏳</span>{{ capcutRendering ? 'Rendering...' : '▶️ CapCut Render' }}
+                    </button>
                     <div v-if="posts.find(p => p.id === activePostId)?.status === 'crawling'" class="flex items-center gap-2 text-blue-400 ml-2">
                         <span class="animate-spin text-2xl">⏳</span>
                         <span class="text-[13px] font-black uppercase tracking-widest">Crawling...</span>
@@ -1023,27 +1029,40 @@
                         {{ r.label }}
                     </button>
                 </div>
+                <div class="ml-auto flex items-center gap-2">
+                    <span class="text-[10px] text-gray-500 uppercase tracking-widest">🔍 Zoom</span>
+                    <input type="range" min="0.5" max="3" step="0.05"
+                        :value="editModal.zoom || 1"
+                        @input="editModal.zoom = parseFloat($event.target.value); onImgLoaded()"
+                        class="w-28 accent-yellow-400">
+                    <span class="text-[10px] text-yellow-400 font-bold w-10">{{ Math.round((editModal.zoom||1)*100) }}%</span>
+                    <button @click="editModal.zoom=1; onImgLoaded()" class="text-[10px] px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-400">Reset</button>
+                </div>
 
-                <!-- Canvas crop -->
-                <div class="relative bg-black rounded-lg overflow-hidden" ref="cropContainerRef" style="max-height:400px">
+                <!-- Canvas crop: ảnh di chuyển, crop box cố định giữa -->
+                <div class="relative bg-black rounded-lg overflow-hidden select-none"
+                    style="height:400px; cursor:grab"
+                    @mousedown="startPanDrag($event)"
+                    @wheel.prevent="onCropWheel($event)">
                     <img :src="editModal.asset.url" ref="editImgRef" @load="onImgLoaded"
-                        class="w-full object-contain select-none edit-img-el" style="max-height:400px;display:block">
-                    <!-- overlay tối 4 phía -->
+                        :style="{ position:'absolute', left: (editModal.panX||0)+'px', top: (editModal.panY||0)+'px', transformOrigin:'0 0', transform: 'scale(' + (editModal.zoom||1) + ')', maxWidth:'none', userSelect:'none', pointerEvents:'none' }"
+                        class="edit-img-el" style="display:block" draggable="false">
                     <template v-if="editModal.cropReady">
-                        <div class="absolute inset-0 bg-black/50 pointer-events-none"></div>
-                        <!-- vùng sáng crop -->
-                        <div class="absolute border-2 border-yellow-400 cursor-move"
-                            style="box-shadow:0 0 0 9999px rgba(0,0,0,0.5)"
+                        <div class="absolute inset-0 pointer-events-none" style="background: rgba(0,0,0,0.45)"></div>
+                        <div class="absolute border-2 border-yellow-400"
+                            style="box-shadow:0 0 0 9999px rgba(0,0,0,0.45); pointer-events:all; cursor:move"
                             :style="{ left: editModal.cropX + 'px', top: editModal.cropY + 'px', width: editModal.cropW + 'px', height: editModal.cropH + 'px' }"
-                            @mousedown="startCropDrag($event)">
-                            <!-- grid lines -->
-                            <div class="absolute inset-0 pointer-events-none" style="background:repeating-linear-gradient(0deg,transparent,transparent 33%,rgba(255,255,255,0.15) 33%,rgba(255,255,255,0.15) 34%),repeating-linear-gradient(90deg,transparent,transparent 33%,rgba(255,255,255,0.15) 33%,rgba(255,255,255,0.15) 34%)"></div>
-                            <!-- resize handles 4 góc -->
-                            <div class="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-yellow-400 cursor-nw-resize" @mousedown.stop="startCropResize($event,'nw')"></div>
-                            <div class="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-yellow-400 cursor-ne-resize" @mousedown.stop="startCropResize($event,'ne')"></div>
-                            <div class="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-yellow-400 cursor-sw-resize" @mousedown.stop="startCropResize($event,'sw')"></div>
-                            <div class="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-yellow-400 cursor-se-resize" @mousedown.stop="startCropResize($event,'se')"></div>
+                            @mousedown.stop="startCropBoxDrag($event)">
+                            <div class="absolute inset-0" style="background:repeating-linear-gradient(0deg,transparent,transparent 33%,rgba(255,255,255,0.1) 33%,rgba(255,255,255,0.1) 34%),repeating-linear-gradient(90deg,transparent,transparent 33%,rgba(255,255,255,0.1) 33%,rgba(255,255,255,0.1) 34%)"></div>
                         </div>
+                        <div class="absolute border-t-2 border-l-2 border-yellow-400 w-5 h-5 cursor-nw-resize" style="pointer-events:all"
+                            :style="{left: editModal.cropX+'px', top: editModal.cropY+'px'}" @mousedown.stop="startCropResize($event,'nw')"></div>
+                        <div class="absolute border-t-2 border-r-2 border-yellow-400 w-5 h-5 cursor-ne-resize" style="pointer-events:all"
+                            :style="{left: (editModal.cropX+editModal.cropW-20)+'px', top: editModal.cropY+'px'}" @mousedown.stop="startCropResize($event,'ne')"></div>
+                        <div class="absolute border-b-2 border-l-2 border-yellow-400 w-5 h-5 cursor-sw-resize" style="pointer-events:all"
+                            :style="{left: editModal.cropX+'px', top: (editModal.cropY+editModal.cropH-20)+'px'}" @mousedown.stop="startCropResize($event,'sw')"></div>
+                        <div class="absolute border-b-2 border-r-2 border-yellow-400 w-5 h-5 cursor-se-resize" style="pointer-events:all"
+                            :style="{left: (editModal.cropX+editModal.cropW-20)+'px', top: (editModal.cropY+editModal.cropH-20)+'px'}" @mousedown.stop="startCropResize($event,'se')"></div>
                     </template>
                 </div>
 
@@ -2208,7 +2227,8 @@ createApp({
         }
 
         const crawling = ref(false);
-
+        const capcutExporting = ref(false);
+        const capcutRendering = ref(false);
         async function triggerCrawlAll() {
             if (!activePostId.value) return;
             crawling.value = true;
@@ -2225,6 +2245,35 @@ createApp({
                 }
                 await selectPost({ id: activePostId.value });
             }, 5000);
+        }
+
+        async function exportCapcut() {
+            if (!activePostId.value) return;
+            capcutExporting.value = true;
+            showToast('🎬 Đang xuất CapCut draft...', 10000);
+            try {
+                const res = await fetch('/api/export-capcut', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: activePostId.value }) });
+                if (!res.ok) { const e = await res.json(); return showToast('❌ ' + (e.error || 'Export thất bại')); }
+                const blob = await res.blob();
+                const cd = res.headers.get('Content-Disposition') || '';
+                const fname = cd.match(/filename="([^"]+)"/)?.[1] || 'capcut_bundle.zip';
+                const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fname; a.click();
+                showToast('✅ Export xong! Kiểm tra file tải về.');
+            } catch(e) { showToast('❌ ' + e.message); }
+            finally { capcutExporting.value = false; }
+        }
+
+        async function renderCapcut() {
+            if (!activePostId.value) return;
+            capcutRendering.value = true;
+            showToast('▶️ Đang gửi render...', 10000);
+            try {
+                const res = await fetch('/api/render-capcut', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: activePostId.value }) });
+                const data = await res.json();
+                if (!res.ok) return showToast('❌ ' + (data.error || 'Render thất bại'));
+                showToast('✅ ' + (data.message || 'Render started!'));
+            } catch(e) { showToast('❌ ' + e.message); }
+            finally { capcutRendering.value = false; }
         }
 
         async function refetchMedia(para) {
@@ -2425,7 +2474,7 @@ createApp({
                 duration_val: asset.duration || 0,
                 cropX: 0, cropY: 0, cropW: 0, cropH: 0,
                 scaleX: 1, scaleY: 1, cropReady: false,
-                ratio: '16:9', saving: false
+                ratio: '16:9', saving: false, zoom: 1, panX: 0, panY: 0
             };
         }
 
@@ -2533,47 +2582,80 @@ createApp({
         }
 
         function onImgLoaded(e) {
-            const img = e.target;
-            editModal.value.scaleX = img.naturalWidth / img.clientWidth;
-            editModal.value.scaleY = img.naturalHeight / img.clientHeight;
-            // init crop theo ratio 16:9 căn giữa
-            const containerW = img.clientWidth;
-            const containerH = img.clientHeight;
+            const img = (e && e.target) || document.querySelector('.edit-img-el');
+            if (!img) return;
+            const zoom = editModal.value.zoom || 1;
+            const CONTAINER_H = 400;
+            const naturalW = img.naturalWidth, naturalH = img.naturalHeight;
+            const fitScale = Math.min(700 / naturalW, CONTAINER_H / naturalH);
+            const dispW = naturalW * fitScale * zoom;
+            const dispH = naturalH * fitScale * zoom;
             const ratio = editModal.value.ratio !== 'Free' ? cropRatios.find(r => r.label === editModal.value.ratio) : null;
-            let w = containerW * 0.8, h = ratio ? w * ratio.h / ratio.w : containerH * 0.8;
-            if (h > containerH * 0.9) { h = containerH * 0.9; w = ratio ? h * ratio.w / ratio.h : w; }
-            editModal.value.cropW = Math.round(w);
-            editModal.value.cropH = Math.round(h);
-            editModal.value.cropX = Math.round((containerW - w) / 2);
-            editModal.value.cropY = Math.round((containerH - h) / 2);
+            let cw = Math.min(dispW * 0.9, 700 * 0.9);
+            let ch = ratio ? cw * ratio.h / ratio.w : Math.min(dispH * 0.9, CONTAINER_H * 0.9);
+            if (ch > CONTAINER_H * 0.95) { ch = CONTAINER_H * 0.95; cw = ratio ? ch * ratio.w / ratio.h : cw; }
+            editModal.value.cropW = Math.round(cw);
+            editModal.value.cropH = Math.round(ch);
+            editModal.value.cropX = Math.round((700 - cw) / 2);
+            editModal.value.cropY = Math.round((CONTAINER_H - ch) / 2);
+            if (!editModal.value.panX && !editModal.value.panY) {
+                editModal.value.panX = Math.round((700 - dispW) / 2);
+                editModal.value.panY = Math.round((CONTAINER_H - dispH) / 2);
+            }
+            editModal.value.scaleX = naturalW / dispW * zoom;
+            editModal.value.scaleY = naturalH / dispH * zoom;
             editModal.value.cropReady = true;
         }
 
         function setCropRatio(r) {
             editModal.value.ratio = r.label;
-            if (r.w === 0) return; // Free
-            const img = document.querySelector('.edit-img-el');
-            if (!img) return;
-            const containerW = img.clientWidth;
-            const containerH = img.clientHeight;
+            if (r.w === 0) return;
             let w = editModal.value.cropW, h = w * r.h / r.w;
-            if (h > containerH) { h = containerH * 0.9; w = h * r.w / r.h; }
+            if (h > 400 * 0.9) { h = 400 * 0.9; w = h * r.w / r.h; }
             editModal.value.cropW = Math.round(w);
             editModal.value.cropH = Math.round(h);
         }
 
-        function startCropDrag(e) {
+        function startCropBoxDrag(e) {
+            e.preventDefault();
             const startX = e.clientX - editModal.value.cropX;
             const startY = e.clientY - editModal.value.cropY;
-            const img = document.querySelector('.edit-img-el');
-            const maxX = img ? img.clientWidth - editModal.value.cropW : 9999;
-            const maxY = img ? img.clientHeight - editModal.value.cropH : 9999;
+            const startPanX = editModal.value.panX || 0;
+            const startPanY = editModal.value.panY || 0;
+            const startCropX = editModal.value.cropX;
+            const startCropY = editModal.value.cropY;
             const move = (ev) => {
-                editModal.value.cropX = Math.max(0, Math.min(maxX, ev.clientX - startX));
-                editModal.value.cropY = Math.max(0, Math.min(maxY, ev.clientY - startY));
+                const newCropX = ev.clientX - startX;
+                const newCropY = ev.clientY - startY;
+                const dx = newCropX - startCropX;
+                const dy = newCropY - startCropY;
+                editModal.value.cropX = newCropX;
+                editModal.value.cropY = newCropY;
+                editModal.value.panX = startPanX - dx;
+                editModal.value.panY = startPanY - dy;
             };
             const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
-            document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+            document.addEventListener('mousemove', move);
+            document.addEventListener('mouseup', up);
+        }
+
+        function startPanDrag(e) {
+            e.preventDefault();
+            const startX = e.clientX - (editModal.value.panX || 0);
+            const startY = e.clientY - (editModal.value.panY || 0);
+            const move = (ev) => {
+                editModal.value.panX = ev.clientX - startX;
+                editModal.value.panY = ev.clientY - startY;
+            };
+            const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+            document.addEventListener('mousemove', move);
+            document.addEventListener('mouseup', up);
+        }
+
+        function onCropWheel(e) {
+            const delta = e.deltaY > 0 ? -0.1 : 0.1;
+            editModal.value.zoom = Math.max(0.3, Math.min(5, (editModal.value.zoom || 1) + delta));
+            onImgLoaded();
         }
 
         function startCropResize(e, corner) {
@@ -2581,7 +2663,6 @@ createApp({
             const origX = editModal.value.cropX, origY = editModal.value.cropY;
             const origW = editModal.value.cropW, origH = editModal.value.cropH;
             const ratio = editModal.value.ratio !== 'Free' ? cropRatios.find(r => r.label === editModal.value.ratio) : null;
-            const img = document.querySelector('.edit-img-el');
             const move = (ev) => {
                 const dx = ev.clientX - startX, dy = ev.clientY - startY;
                 let newW = origW, newH = origH, newX = origX, newY = origY;
@@ -2589,7 +2670,6 @@ createApp({
                 else if (corner === 'sw') { newW = Math.max(50, origW - dx); newH = ratio ? newW * ratio.h / ratio.w : Math.max(50, origH + dy); newX = origX + origW - newW; }
                 else if (corner === 'ne') { newW = Math.max(50, origW + dx); newH = ratio ? newW * ratio.h / ratio.w : Math.max(50, origH - dy); newY = origY + origH - newH; }
                 else if (corner === 'nw') { newW = Math.max(50, origW - dx); newH = ratio ? newW * ratio.h / ratio.w : Math.max(50, origH - dy); newX = origX + origW - newW; newY = origY + origH - newH; }
-                if (img) { newX = Math.max(0, Math.min(img.clientWidth - newW, newX)); newY = Math.max(0, Math.min(img.clientHeight - newH, newY)); }
                 editModal.value.cropX = Math.round(newX); editModal.value.cropY = Math.round(newY);
                 editModal.value.cropW = Math.round(newW); editModal.value.cropH = Math.round(newH);
             };
@@ -2599,13 +2679,19 @@ createApp({
 
         async function submitEdit() {
             editModal.value.saving = true;
-            const { type, asset, start, end, cropX, cropY, cropW, cropH, scaleX, scaleY, _para, _section } = editModal.value;
+            const { type, asset, start, end, _para, _section } = editModal.value;
             try {
                 let res;
                 if (type === 'video') {
                     res = await fetch('/api/trim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath, start, end, duration: editModal.value.duration_val }) });
                 } else {
-                    res = await fetch('/api/crop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath, x: Math.round(cropX * scaleX), y: Math.round(cropY * scaleY), width: Math.round(cropW * scaleX), height: Math.round(cropH * scaleY), duration: editModal.value.duration_val }) });
+                    const zoom = editModal.value.zoom || 1;
+                    const { panX = 0, panY = 0, cropX, cropY, cropW, cropH, scaleX, scaleY } = editModal.value;
+                    const realX = Math.round((cropX - panX) * scaleX / zoom);
+                    const realY = Math.round((cropY - panY) * scaleY / zoom);
+                    const realW = Math.round(cropW * scaleX / zoom);
+                    const realH = Math.round(cropH * scaleY / zoom);
+                    res = await fetch('/api/crop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath, x: Math.max(0,realX), y: Math.max(0,realY), width: realW, height: realH, duration: editModal.value.duration_val }) });
                 }
                 const r = await res.json();
                 if (r.success) {
@@ -3275,7 +3361,9 @@ createApp({
             startTrimFromTimeline,
             onImgLoaded,
             setCropRatio,
-            startCropDrag,
+            startCropBoxDrag,
+            startPanDrag,
+            onCropWheel,
             startCropResize,
             submitEdit,
             collectTextsFromDOM,
@@ -3298,8 +3386,8 @@ createApp({
             downloadVoice,
             pollingTimer,
             startPollingVoice,
-            crawling,
-            triggerCrawlAll,
+            crawling, capcutExporting, capcutRendering,
+            triggerCrawlAll, exportCapcut, renderCapcut,
             refetchMedia,
             aiGenerate,
             submitAiGenerate,
