@@ -59,7 +59,7 @@ Task:
 1. Write a detailed sports analysis article simultaneously in Vietnamese AND ${langName}.
 2. Use the most up-to-date data: current squad, recent form, head-to-head, key players, tactical setup.
 3. Pronounce player names, coaches, tournaments correctly in both languages.
-4. Cover: team form, key players, tactics, injury updates, prediction.
+4. Content: A logical and detailed analysis of both teams (including their head-to-head history if available - this is a pre-match analysis). Further analysis includes: team form, tactics, key players (their rivalry, e.g., midfield, forwards, defenders), injury updates, predictions, etc. Also, include interesting information about the match (such as potential record breaks, team transfers or any hot news; any recent stories about players or coaches from either team reported in the press - this is only if you check and find accurate information from reliable sources).
 5. Target duration: 8-10 minutes of presentation content (approximately 2400-3500 words in the target language). Divide the analysis into paragraphs of 3-5 sentences each. Each "sentence" in the JSON output should be a FULL PARAGRAPH (multiple sentences combined), not a single short sentence. Group related ideas into one cohesive paragraph.
 6. For each paragraph, provide the flow in Vietnamese and sequentially list the important keywords (following the subtitle flow) to search for images that match the subtitle.
 7. NEVER cite sources, never add footnotes, never mention where data comes from, never add URLs, never add links in parentheses like ([source.com](url)).
@@ -133,7 +133,7 @@ async function getKeywordsFromGPT(sentence) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'You are a sports image search expert. Given a sports commentary paragraph, return 4-8 specific English Bing image search queries to find relevant photos. Prefer specific player names, team names, or match names when present. If the paragraph is about history, economy, or culture (no specific players), use relevant contextual terms (e.g. "Japan football 1980s", "Toyota factory 1980"). Always return at least 4 queries. Return ONLY a raw JSON array, no explanation.'
+                        content: 'You are a sports image search expert. Given a sports commentary, return 7 specific Bing image search queries (language optional, depending on context for the easiest image search) to find related images. Prioritize specific names of coaches, players, teams, or matches, and timeframes if available. For example: "Japan national soccer team 1980" --> search for "Japan national soccer team 1980" (language optional, you can handle it for easier searching); "Manchester United lost to Barca in the 2008 Champions League final" --> search for "Manchester United vs Barca Champions League 2008" (language optional, you can handle it for easier searching). Return only a raw JSON array, without explanation.'
                     },
                     { role: 'user', content: sentence }
                 ],
