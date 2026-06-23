@@ -76,7 +76,7 @@ async function downloadMedia(url, targetDir, ext, keyword = '') {
 export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCount) {
     if (type === 'video') return 0;
     let downloaded = 0;
-    const searchUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(keyword)}&safesearch=off&qft=+filterui:photo-photo`;
+    const searchUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(keyword)}&safesearch=off&qft=+filterui:photo-photo&setlang=vi&cc=vn&mkt=vi-VN`;
 
     const MAX_ATTEMPTS = 3;
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -88,21 +88,39 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
         try {
             const page = await browser.newPage();
             if (proxy?.user) await page.authenticate({ username: proxy.user, password: proxy.pass });
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0');
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
             console.log(`      [${keyword}][Web IMAGE Bot] Đang thâm nhập Bing${proxy ? ' via ' + proxy.host : ''}: ${keyword}`);
             await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            console.log(`      [${keyword}][DEBUG] Page loaded, clearing and typing keyword...`);
+            try {
+                await page.waitForSelector('#sb_form_q', { timeout: 5000 });
+                await page.click('#sb_form_q', { clickCount: 3 });
+                await page.keyboard.press('Backspace');
+                await page.type('#sb_form_q', keyword);
+                console.log(`      [${keyword}][DEBUG] Keyword typed, clicking search button...`);
+                await delay(500);
+                await page.click('#sb_form_go');
+                console.log(`      [${keyword}][DEBUG] Search submitted`);
+            } catch(e) {
+                console.log(`      [${keyword}][DEBUG] Could not submit search: ${e.message}`);
+            }
+            await delay(2500);
             await page.evaluate(() => window.scrollBy(0, 1000));
             await delay(2500);
 
             const html = await page.content();
             const $ = cheerio.load(html);
             let mediaUrls = [];
-            $('a.iusc').each((i, el) => {
+            $('li[data-idx] > div.iuscp > div.imgpt > a.iusc').each((i, el) => {
                 const mData = $(el).attr('m');
-                if (mData) { try { const p = JSON.parse(mData); if (p.murl) mediaUrls.push(p.murl); } catch(_) {} }
+                if (mData) {
+                    try {
+                        const p = JSON.parse(mData);
+                        if (p.murl) mediaUrls.push(p.murl);
+                    } catch(_) {}
+                }
             });
-            console.log(`      [${keyword}] iusc count: ${mediaUrls.length}`);
 
             if (mediaUrls.length < 5) {
                 console.log(`      [${keyword}] Ít kết quả (${mediaUrls.length}), thử proxy khác...`);
@@ -111,6 +129,8 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
             }
 
             mediaUrls = [...new Set(mediaUrls)];
+            console.log(`      [${keyword}][DEBUG] Media URLs extracted (${mediaUrls.length}):`);
+            mediaUrls.forEach((url, idx) => console.log(`        ${idx + 1}. ${url}`));
             for (const url of mediaUrls) {
                 if (downloaded >= neededCount) break;
                 if (await downloadMedia(url, targetDir, 'jpg', keyword)) {
