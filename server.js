@@ -301,18 +301,16 @@ app.post('/api/generate-media', (req, res) => {
                 console.error('[generate-media section] Không import được fetchAndDownloadStock');
                 return;
             }
-            const vFolder = path.join(MEDIA_DIR, projectId, 'assets', '_raw_videos', section);
             const iFolder = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', section);
-            [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+            if (!fs.existsSync(iFolder)) fs.mkdirSync(iFolder, { recursive: true });
             const kwTexts = (Array.isArray(keywords) ? keywords : [keywords]).map(k => typeof k === 'object' ? k.content : k);
             for (const kw of kwTexts) {
-                await fetchAndDownloadStock(kw, 'video', vFolder, 4).catch(() => {});
                 await fetchAndDownloadStock(kw, 'image', iFolder, 8).catch(() => {});
             }
             // Sync vào DB
             const db2 = await getDb();
             const syncDir = async (folderPath, type) => {
-                const exts = type === 'video' ? ['.mp4','.mov'] : ['.jpg','.jpeg','.png','.webp'];
+                const exts = ['.jpg','.jpeg','.png','.webp'];
                 if (!fs.existsSync(folderPath)) return;
                 for (const file of fs.readdirSync(folderPath)) {
                     if (!exts.includes(path.extname(file).toLowerCase())) continue;
@@ -321,7 +319,6 @@ app.post('/api/generate-media', (req, res) => {
                     if (!ex) await db2.run('INSERT INTO Asset (post_id, section, paragraph_id, sentence_id, type, file_path) VALUES (?, ?, NULL, NULL, ?, ?)', [postId, section, type, rel]);
                 }
             };
-            await syncDir(vFolder, 'video');
             await syncDir(iFolder, 'image');
             await db2.close();
             console.log(`[generate-media section] ✅ Xong ${section}`);
@@ -722,10 +719,8 @@ app.post('/api/crawl-all', async (req, res) => {
             const iF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', section);
             [vF, iF].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
             for (const { content: kw } of kws) {
-                await fetchAndDownloadStock(kw, 'video', vF, 4).catch(() => {});
                 await fetchAndDownloadStock(kw, 'image', iF, 8).catch(() => {});
             }
-            await syncDir(vF, 'video', (rel, t) => db.run('INSERT INTO Asset (post_id, section, type, file_path) VALUES (?, ?, ?, ?)', [postId, section, t, rel]));
             await syncDir(iF, 'image', (rel, t) => db.run('INSERT INTO Asset (post_id, section, type, file_path) VALUES (?, ?, ?, ?)', [postId, section, t, rel]));
         }
 
@@ -735,14 +730,11 @@ app.post('/api/crawl-all', async (req, res) => {
             const gid = String(para.order);
             const kws = await db.all('SELECT content FROM Keyword WHERE paragraph_id = ?', [para.id]);
             if (!kws.length) continue;
-            const vF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_videos', gid);
             const iF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', gid);
-            [vF, iF].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+            if (!fs.existsSync(iF)) fs.mkdirSync(iF, { recursive: true });
             for (const { content: kw } of kws) {
-                await fetchAndDownloadStock(kw, 'video', vF, 4).catch(() => {});
                 await fetchAndDownloadStock(kw, 'image', iF, 8).catch(() => {});
             }
-            await syncDir(vF, 'video', (rel, t) => db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [para.id, t, rel]));
             await syncDir(iF, 'image', (rel, t) => db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [para.id, t, rel]));
         }
 
