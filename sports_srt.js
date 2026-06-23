@@ -288,15 +288,16 @@ async function main() {
         fs.mkdirSync(imgDir, { recursive: true });
 
         const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(0), ms))]);
-        await Promise.all(keywords.map(kw => {
+        // Chạy tuần tự để Bing không bị mixed results
+        for (const kw of keywords) {
             console.log(`    -> Crawl ảnh: "${kw}"`);
-            return withTimeout(
+            await withTimeout(
                 fetchFromGoogleImageBot(kw, 'image', imgDir, IMAGES_PER_KEYWORD)
                     .then(got => console.log(`    -> Tải được: ${got} ảnh (${kw})`))
                     .catch(e => console.error(`    -> Lỗi crawl: ${e.message}`)),
                 60000
             );
-        }));
+        }
 
         const imageExts = new Set(['.jpg', '.jpeg', '.png', '.webp']);
         if (fs.existsSync(imgDir)) {

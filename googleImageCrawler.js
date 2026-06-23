@@ -12,141 +12,119 @@ puppeteer.use(StealthPlugin());
 
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
+// Load proxies từ file, xoay vòng
+const PROXY_FILE = path.join(path.dirname(new URL(import.meta.url).pathname), 'proxies.txt');
+let _proxies = null;
+let _proxyIndex = 0;
+function getNextProxy() {
+    if (!_proxies) {
+        try {
+            _proxies = fs.readFileSync(PROXY_FILE, 'utf8').trim().split('\n')
+                .map(l => l.trim()).filter(Boolean)
+                .map(l => { const [host, port, user, pass] = l.split(':'); return { host, port, user, pass }; })
+                .filter(p => p.host && p.port);
+            console.log(`[Proxy] Loaded ${_proxies.length} proxies`);
+        } catch (_) { _proxies = []; }
+    }
+    if (!_proxies.length) return null;
+    const proxy = _proxies[_proxyIndex % _proxies.length];
+    _proxyIndex++;
+    return proxy;
+}
+
 async function downloadMedia(url, targetDir, ext, keyword = '') {
     if (url.includes('onelink.me') || url.includes('app-store') || url.includes('play.google')) return false;
-    // Bỏ qua stock photo site chặn hotlink - sẽ tải ảnh rác
-    const stockDomains = ['alamy.com', 'gettyimages.com', 'shutterstock.com', 'istockphoto.com', 'dreamstime.com', 'depositphotos.com', '123rf.com', 'stock.adobe.com', 'pond5.com', 'bigstockphoto.com'];
-    if (stockDomains.some(d => url.includes(d))) return false;
+    const blockDomains = [
+        'alamy.com', 'gettyimages.com', 'shutterstock.com', 'istockphoto.com',
+        'dreamstime.com', 'depositphotos.com', '123rf.com', 'stock.adobe.com',
+        'pond5.com', 'bigstockphoto.com',
+        'freepik.com', 'vecteezy.com', 'flaticon.com', 'vectorstock.com',
+        'pinterest.', 'tumblr.com', 'deviantart.com',
+        'garena', 'freefire', 'gamerant', 'steam',
+        'goodfreephotos.com', 'wallpapercave.com', 'alphacoders.com',
+        'freepng', 'pngtree', 'nicepng', 'kindpng', 'cleanpng',
+        'easydrawforkids', 'howtodrawforkids', 'paintingvalley', 'clipartmag',
+        'clipartkey', 'ac-illust.com', 'illustmint.com',
+        'blogspot.com', 'hatena.com',
+    ];
+    if (blockDomains.some(d => url.toLowerCase().includes(d))) return false;
 
     const savePath = claimNextStockPath(targetDir, ext);
     let success = false;
-
     try {
-        const fetchOptions = { headers: { 'User-Agent': 'Mozilla/5.0' } };
-
-        // Ép Timeout 15s để chống treo Bot
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000);
-        fetchOptions.signal = controller.signal;
-
-        const res = await fetch(url, fetchOptions);
+        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: controller.signal });
         clearTimeout(timeoutId);
-
         if (res.ok) {
             const contentType = (res.headers.get('content-type') || '').toLowerCase();
-
-            // 🟢 2. BẢO VỆ CHO VIDEO: Bắt buộc phải là video thật
-            if (ext === 'mp4' && !contentType.includes('video')) {
-                return false;
-            }
-
-            // 🟢 3. BẢO VỆ CHO ẢNH (Vừa thêm): Bắt buộc phải là ảnh thật (loại trừ HTML từ onelink.me)
-            if (ext === 'jpg' && !contentType.includes('image')) {
-                console.log(`      [Bỏ qua] Server không trả về Ảnh thật! (Bị lỗi giả danh URL: ${url})`);
-                return false;
-            }
-
+            if (ext === 'jpg' && !contentType.includes('image')) return false;
             const buffer = await res.arrayBuffer();
-
-            // 🟢 4. BẢO VỆ DUNG LƯỢNG
-            if (ext === 'mp4') {
-                if (buffer.byteLength < 100 * 1024) return false; // Nhỏ hơn 100KB -> Rác
-                if (buffer.byteLength > 35 * 1024 * 1024) return false; // Lớn hơn 35MB -> Treo RAM
-            } else if (ext === 'jpg') {
-                if (buffer.byteLength < 5 * 1024) return false; // Ảnh bé hơn 5KB -> Rác/Icon nhỏ
-            }
-
-            // Vượt qua TẤT CẢ rào cản thì mới được lưu
+            if (ext === 'jpg' && buffer.byteLength < 20 * 1024) return false; // < 20KB -> rác
             fs.writeFileSync(savePath, Buffer.from(buffer));
             success = true;
             return true;
         }
     } catch (e) {
-        if (e.name !== 'AbortError') {
-             console.error(`      [${keyword}][Bing Lỗi Tải File] URL: ${url} - ${e.message}`);
-        }
+        if (e.name !== 'AbortError') console.error(`      [${keyword}][Lỗi Tải] ${url} - ${e.message}`);
     } finally {
-        if (!success) {
-            try { fs.unlinkSync(savePath); } catch (_) {}
-        }
+        if (!success) { try { fs.unlinkSync(savePath); } catch (_) {} }
     }
     return false;
 }
 
 export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCount) {
+    if (type === 'video') return 0;
     let downloaded = 0;
-    const ext = type === 'video' ? 'mp4' : 'jpg';
+    const searchUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(keyword)}&safesearch=off&qft=+filterui:photo-photo`;
 
-    // ĐỊNH TUYẾN TÌM KIẾM
-    const searchUrl = type === 'video' 
-        ? `https://www.bing.com/videos/search?q=${encodeURIComponent(keyword)}&safesearch=off`
-        : `https://www.bing.com/images/search?q=${encodeURIComponent(keyword)}&safesearch=off`;
+    const MAX_ATTEMPTS = 3;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        const proxy = getNextProxy();
+        const browserArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1920,1080'];
+        if (proxy) browserArgs.push(`--proxy-server=http://${proxy.host}:${proxy.port}`);
 
-    const browserArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1920,1080'];
+        const browser = await puppeteer.launch({ headless: 'new', args: browserArgs });
+        try {
+            const page = await browser.newPage();
+            if (proxy?.user) await page.authenticate({ username: proxy.user, password: proxy.pass });
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0');
 
-    const browser = await puppeteer.launch({ headless: "new", args: browserArgs });
-    
-    try {
-        const page = await browser.newPage();
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0');
-
-        console.log(`      [${keyword}][Web ${type.toUpperCase()} Bot] Đang thâm nhập Bing: ${keyword}`);
-        await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-
-        let mediaUrls = [];
-
-        if (type === 'video') {
-            return 0;
-        } else {
-            // BÓC ẢNH (Giữ nguyên thuật toán bóc ảnh Full HD cực tốt)
+            console.log(`      [${keyword}][Web IMAGE Bot] Đang thâm nhập Bing${proxy ? ' via ' + proxy.host : ''}: ${keyword}`);
+            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
             await page.evaluate(() => window.scrollBy(0, 1000));
-            await delay(2000);
+            await delay(2500);
+
             const html = await page.content();
             const $ = cheerio.load(html);
-
+            let mediaUrls = [];
             $('a.iusc').each((i, el) => {
                 const mData = $(el).attr('m');
-                if (mData) {
-                    try {
-                        const parsed = JSON.parse(mData);
-                        if (parsed.murl) mediaUrls.push(parsed.murl);
-                    } catch (e) {}
-                }
+                if (mData) { try { const p = JSON.parse(mData); if (p.murl) mediaUrls.push(p.murl); } catch(_) {} }
             });
             console.log(`      [${keyword}] iusc count: ${mediaUrls.length}`);
-            if (mediaUrls.length === 0) {
-                // Lưu screenshot để debug
-                await page.screenshot({ path: path.join(targetDir, `debug_bing_${Date.now()}.jpg`) });
-                $('img.mimg').each((i, el) => {
-                    const src = $(el).attr('src') || $(el).attr('data-src');
-                    if (src && src.startsWith('http')) mediaUrls.push(src);
-                });
-            }        }
 
-        // Lọc trùng lặp
-        mediaUrls = [...new Set(mediaUrls)];
-
-        if (mediaUrls.length === 0) {
-            console.log(`      [${keyword}][Web ${type.toUpperCase()} Bot] ⚠️ Không thấy ${type}.`);
-            await page.screenshot({ path: path.join(targetDir, `debug_bing_${type}_${Date.now()}.jpg`) });
-            return 0;
-        }
-
-        console.log(`      [${keyword}][Web ${type.toUpperCase()} Bot] Tìm thấy ${mediaUrls.length} tài nguyên. Đang tải...`);
-
-        for (const url of mediaUrls) {
-            if (downloaded >= neededCount) break;
-            // Hàm downloadMedia sẽ tự động thêm đuôi .mp4 vào cuối file khi lưu
-            if (await downloadMedia(url, targetDir, ext, keyword)) {
-                downloaded++;
-                console.log(`\x1b[33m      [${keyword}][Web ${type.toUpperCase()} Bot] 📥 ${type.toUpperCase()} bốc từ: ${url}\x1b[0m`);
-                console.log(`      [${keyword}][Web ${type.toUpperCase()} Bot] ---> Đã lấy thành công ${downloaded}/${neededCount}`);
+            if (mediaUrls.length < 5) {
+                console.log(`      [${keyword}] Ít kết quả (${mediaUrls.length}), thử proxy khác...`);
+                await browser.close().catch(() => {});
+                continue;
             }
+
+            mediaUrls = [...new Set(mediaUrls)];
+            for (const url of mediaUrls) {
+                if (downloaded >= neededCount) break;
+                if (await downloadMedia(url, targetDir, 'jpg', keyword)) {
+                    downloaded++;
+                    console.log(`\x1b[33m      [${keyword}][Web IMAGE Bot] 📥 IMAGE bốc từ: ${url}\x1b[0m`);
+                    console.log(`      [${keyword}][Web IMAGE Bot] ---> Đã lấy thành công ${downloaded}/${neededCount}`);
+                }
+            }
+            break; // thành công
+        } catch (e) {
+            console.error(`      [${keyword}][Web Lỗi Tổng] ${e.message}`);
+        } finally {
+            await browser.close().catch(() => {});
         }
-    } catch (error) {
-        console.error(`      [${keyword}][Web Lỗi Tổng] ${error.message}`);
-    } finally {
-        await browser.close().catch(() => {});
     }
     return downloaded;
 }

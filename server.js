@@ -296,16 +296,16 @@ app.post('/api/generate-media', (req, res) => {
             }
             await db.close();
             // Import và crawl trực tiếp
-            const { fetchAndDownloadStock } = await import('./sync_assets_db.js').catch(() => ({}));
-            if (!fetchAndDownloadStock) {
-                console.error('[generate-media section] Không import được fetchAndDownloadStock');
+            const { fetchFromGoogleImageBot } = await import('./googleImageCrawler.js').catch(() => ({}));
+            if (!fetchFromGoogleImageBot) {
+                console.error('[generate-media section] Không import được fetchFromGoogleImageBot');
                 return;
             }
             const iFolder = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', section);
             if (!fs.existsSync(iFolder)) fs.mkdirSync(iFolder, { recursive: true });
             const kwTexts = (Array.isArray(keywords) ? keywords : [keywords]).map(k => typeof k === 'object' ? k.content : k);
             for (const kw of kwTexts) {
-                await fetchAndDownloadStock(kw, 'image', iFolder, 8).catch(() => {});
+                await fetchFromGoogleImageBot(kw, 'image', iFolder, 8).catch(() => {});
             }
             // Sync vào DB
             const db2 = await getDb();
@@ -692,8 +692,8 @@ app.post('/api/crawl-all', async (req, res) => {
     const { postId } = req.body;
     res.json({ success: true, message: 'Đang crawl...' });
     (async () => {
-        const { fetchAndDownloadStock } = await import('./sync_assets_db.js').catch(() => ({}));
-        if (!fetchAndDownloadStock) return;
+        const { fetchFromGoogleImageBot } = await import('./googleImageCrawler.js').catch(() => ({}));
+        if (!fetchFromGoogleImageBot) return;
         const db = await getDb();
         const post = await db.get('SELECT id, project_id FROM Post WHERE id = ?', [postId]);
         if (!post) { await db.close(); return; }
@@ -701,7 +701,7 @@ app.post('/api/crawl-all', async (req, res) => {
         await db.run('UPDATE Post SET status = ? WHERE id = ?', ['crawling', postId]);
 
         const syncDir = async (folder, type, insertFn) => {
-            const exts = type === 'video' ? ['.mp4','.mov'] : ['.jpg','.jpeg','.png','.webp'];
+            const exts = ['.jpg','.jpeg','.png','.webp'];
             if (!fs.existsSync(folder)) return;
             for (const file of fs.readdirSync(folder)) {
                 if (!exts.includes(path.extname(file).toLowerCase())) continue;
@@ -713,13 +713,12 @@ app.post('/api/crawl-all', async (req, res) => {
 
         // Sections
         for (const section of ['hook', 'summary', 'conclusion']) {
-            const kws = await db.all('SELECT content FROM Keyword WHERE post_id = ? AND section = ?', [postId, section]);
+            const kws = await db.all('SELECT content FROM Keyword WHERE post_id = ? AND section = ? AND type = ?', [postId, section, 'factual']);
             if (!kws.length) continue;
-            const vF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_videos', section);
             const iF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', section);
-            [vF, iF].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+            if (!fs.existsSync(iF)) fs.mkdirSync(iF, { recursive: true });
             for (const { content: kw } of kws) {
-                await fetchAndDownloadStock(kw, 'image', iF, 8).catch(() => {});
+                await fetchFromGoogleImageBot(kw, 'image', iF, 8).catch(() => {});
             }
             await syncDir(iF, 'image', (rel, t) => db.run('INSERT INTO Asset (post_id, section, type, file_path) VALUES (?, ?, ?, ?)', [postId, section, t, rel]));
         }
@@ -728,12 +727,12 @@ app.post('/api/crawl-all', async (req, res) => {
         const paragraphs = await db.all('SELECT id, "order" FROM Paragraph WHERE post_id = ? ORDER BY "order"', [postId]);
         for (const para of paragraphs) {
             const gid = String(para.order);
-            const kws = await db.all('SELECT content FROM Keyword WHERE paragraph_id = ?', [para.id]);
+            const kws = await db.all("SELECT content FROM Keyword WHERE paragraph_id = ? AND type = 'factual'", [para.id]);
             if (!kws.length) continue;
             const iF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', gid);
             if (!fs.existsSync(iF)) fs.mkdirSync(iF, { recursive: true });
             for (const { content: kw } of kws) {
-                await fetchAndDownloadStock(kw, 'image', iF, 8).catch(() => {});
+                await fetchFromGoogleImageBot(kw, 'image', iF, 8).catch(() => {});
             }
             await syncDir(iF, 'image', (rel, t) => db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [para.id, t, rel]));
         }
