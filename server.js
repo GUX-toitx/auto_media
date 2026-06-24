@@ -1336,6 +1336,26 @@ app.post('/api/create-sports', upload.fields([{ name: 'srt', maxCount: 1 }, { na
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/create-podcast', express.json(), async (req, res) => {
+    const { projectId, topic, script, style, targetLang } = req.body;
+    if (!topic?.trim() || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu topic hoặc projectId' });
+    try {
+        const targetDir = path.join(MEDIA_DIR, projectId);
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        let args;
+        if (script?.trim()) {
+            // Script mode: lưu script ra file rồi truyền vào
+            const scriptPath = path.join(targetDir, 'input_script.txt');
+            fs.writeFileSync(scriptPath, script.trim());
+            args = ['podcast.js', projectId, '--script', scriptPath, topic.trim(), targetLang || 'vi'];
+        } else {
+            // Topic mode
+            args = ['podcast.js', projectId, '--topic', style || 'dialog', targetLang || 'vi', topic.trim()];
+        }
+        spawnSportsJob(args, 'podcast', projectId, res);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/download-url', async (req, res) => {
     try {
         const { url, videoId, paragraphId } = req.body;

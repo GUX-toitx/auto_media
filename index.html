@@ -23,6 +23,7 @@
                 <button @click="openProfilePage" :class="['flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all', page === 'profiles' ? 'bg-green-600 text-white shadow-lg shadow-green-500/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white']">🧑💻 Profiles</button>
             </div>
             <button @click="sportsModal.open = true" class="w-full py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-orange-600 hover:bg-orange-500 text-white">⚽ Sports SRT</button>
+            <button @click="podcastModal.open = true" class="w-full py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-purple-600 hover:bg-purple-500 text-white">🎙️ Podcast</button>
         </div>
         <div class="flex-1 overflow-y-auto p-4 space-y-1">
             <div v-for="post in posts" :key="post.id" class="flex items-stretch gap-1">
@@ -1662,6 +1663,61 @@
         </div>
     </div>
 
+
+    <!-- PODCAST MODAL -->
+    <div v-if="podcastModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="podcastModal.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-8 w-[500px] space-y-5">
+            <div class="flex items-center justify-between">
+                <h3 class="text-lg font-black text-white">🎙️ Tạo Podcast</h3>
+                <button @click="podcastModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+            <!-- Mode tabs -->
+            <div class="flex gap-1 bg-gray-800 rounded-xl p-1">
+                <button @click="podcastModal.mode = 'topic'" :class="['flex-1 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-widest transition-all', podcastModal.mode === 'topic' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white']">✍️ Nhập Topic</button>
+                <button @click="podcastModal.mode = 'script'" :class="['flex-1 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-widest transition-all', podcastModal.mode === 'script' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white']">📄 Nhập Script</button>
+            </div>
+            <!-- Project ID -->
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Project ID</label>
+                <input v-model="podcastModal.projectId" type="text" placeholder="vd: podcast_quan_lan_2025" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-purple-500">
+            </div>
+            <!-- Lang -->
+            <div class="flex gap-2 flex-wrap">
+                <button v-for="l in [{code:'vi',label:'🇻🇳 VI'},{code:'en',label:'🇺🇸 EN'},{code:'ja',label:'🇯🇵 JA'},{code:'ko',label:'🇰🇷 KO'}]" :key="l.code"
+                    @click="podcastModal.targetLang = l.code"
+                    class="px-3 py-1 rounded-lg text-[11px] font-black transition-colors"
+                    :class="podcastModal.targetLang === l.code ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">
+                    {{ l.label }}
+                </button>
+            </div>
+            <!-- Topic mode -->
+            <div v-if="podcastModal.mode === 'topic'">
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Topic</label>
+                <textarea v-model="podcastModal.topic" rows="3" placeholder="VD: Gió Quan Lạn và những ngày năm ấy..." class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-purple-500 resize-none"></textarea>
+                <div class="flex gap-2 mt-2">
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">Dạng:</label>
+                    <button @click="podcastModal.style = 'dialog'" :class="['px-3 py-1 rounded-lg text-[11px] font-black', podcastModal.style === 'dialog' ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400']">🎭 Hội thoại</button>
+                    <button @click="podcastModal.style = 'monologue'" :class="['px-3 py-1 rounded-lg text-[11px] font-black', podcastModal.style === 'monologue' ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400']">🎤 Độc thoại</button>
+                </div>
+            </div>
+            <!-- Script mode -->
+            <div v-if="podcastModal.mode === 'script'" class="space-y-2">
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Tiêu đề</label>
+                <input v-model="podcastModal.topic" placeholder="Tiêu đề episode" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-purple-500">
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mt-2">Script</label>
+                <p class="text-gray-600 text-[10px]">GPT sẽ tự parse [Voice], [Giọng Nam], [Giọng Nữ]... thành từng segment.</p>
+                <textarea v-model="podcastModal.script" rows="8" placeholder="Dán kịch bản vào đây..." class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[11px] text-gray-200 outline-none focus:border-purple-500 resize-none font-mono leading-relaxed"></textarea>
+            </div>
+            <div class="flex gap-3 justify-end pt-2">
+                <button @click="podcastModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
+                <button @click="submitPodcast" :disabled="podcastModal.loading || !podcastModal.projectId.trim() || !podcastModal.topic.trim()"
+                    class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white">
+                    {{ podcastModal.loading ? '⏳ Đang tạo...' : '🎙️ Tạo' }}
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- TOAST -->
     <div v-if="toast" class="fixed top-6 right-6 z-50 bg-blue-600 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-lg">{{ toast }}</div>
 </div>
@@ -1720,6 +1776,7 @@ createApp({
         });
 
         const sportsModal = ref({ open: false, mode: 'srt', projectId: '', file: null, fileTranslated: null, prompt: '', loading: false, targetLang: 'vi' });
+        const podcastModal = ref({ open: false, mode: 'topic', projectId: '', topic: '', script: '', style: 'dialog', targetLang: 'vi', loading: false });
 
         async function submitSports() {
             const { file, fileTranslated, targetLang, mode, prompt } = sportsModal.value;
@@ -1752,6 +1809,31 @@ createApp({
                 } else { alert('❌ ' + (r.error || 'Lỗi')); }
             } catch (e) { alert('❌ ' + e.message); }
             sportsModal.value.loading = false;
+        }
+
+        async function submitPodcast() {
+            const { mode, topic, script, style, targetLang } = podcastModal.value;
+            const projectId = podcastModal.value.projectId.trim() || ('podcast_' + Date.now());
+            if (!topic.trim()) return;
+            if (mode === 'script' && !script.trim()) return showToast('❌ Chưa nhập script');
+            podcastModal.value.loading = true;
+            try {
+                const res = await fetch('/api/create-podcast', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ projectId, topic, script: mode === 'script' ? script : null, style, targetLang })
+                });
+                const r = await res.json();
+                if (r.success) {
+                    podcastModal.value.open = false;
+                    podcastModal.value.projectId = '';
+                    podcastModal.value.topic = '';
+                    podcastModal.value.script = '';
+                    showToast('✅ Đang tạo podcast...');
+                    await loadPosts();
+                } else { showToast('❌ ' + (r.error || 'Lỗi')); }
+            } catch (e) { showToast('❌ ' + e.message); }
+            podcastModal.value.loading = false;
         }
 
         async function submitNewProject() {
@@ -3259,6 +3341,7 @@ createApp({
             activeProjectId,
             sportsModal,
             submitSports,
+            podcastModal, submitPodcast,
             voiceModal,
             editModal,
             uploadModal,
