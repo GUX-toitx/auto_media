@@ -46,6 +46,48 @@ async function downloadMedia(url, targetDir, ext, keyword = '') {
         'easydrawforkids', 'howtodrawforkids', 'paintingvalley', 'clipartmag',
         'clipartkey', 'ac-illust.com', 'illustmint.com',
         'blogspot.com', 'hatena.com',
+        // scribd & docs
+        'scribd.com', 'scribdassets.com', 'slideshare.net', 'docplayer',
+        // shopping / ecommerce
+        'item-shopping.c.yimg.jp', 'shopping.yahoo.co.jp', 'amazon.', 'rakuten.',
+        'mercari.', 'ebay.', 'aliexpress.', 'shopee.', 'lazada.',
+        'kyoshin-k.co.jp', 'sologear', 'ledg_', 'ipros.jp',
+        // science / medical / technical
+        'spring8.or.jp', 'seikagaku.jbsoc', 'bpsbioscience.', 'netdekagaku.',
+        'sooki.co.jp', 'fittertraining.com', 'weldinginfo.org', 'megmeet-welding.',
+        'arccaptain.com', 'riselaser.net', 'thepipingmart.com', 'artizono.com',
+        // indonesian food / unrelated
+        'portalmadura.com', 'greatindonesia.com', 'gresiksatu.com', 'suara.com',
+        'tourbanyuwangi.com', 'wisatarakyat.com', 'cdntap.com',
+        // stock photo
+        'deviantart.net', 'staticflickr.com', 'hippopx.com', 'pxhere.com', 'pixabay.com',
+        'joeyblsphotography.com', 'photolibrary.jp', 'westend61.de',
+        // travel / unrelated
+        '4travel.jp', 'tripadvisor.com', 'media-cdn.tripadvisor',
+        // random blog / unrelated
+        'fc2.com', 'kyun2-girls.com', 'livedoor.blogimg', 'stampo.fun',
+        'gkhub.in', 'gifsbuddy.com', 'tattooimprints.com', 'pngfre.com',
+        'hitopedia.net', 'fantasytipsters.com', 'notrecinema.com',
+        'billboard.com', 'vsthemes.org', 'entertainmentnow.com',
+        'intechopen.com', 'europepmc.org', 'geocam.ru', 'astronomy.com',
+        'slideplayer.com', 'prwarter.com', 'visualsp.com', 'netsolwater.com',
+        // stock photo CDN
+        'microcms-assets.io', 'pexels.com', 'unsplash.com',
+        // travel / tourism
+        'beautiful-photo.net', 'jnto.image', 'thetravelimages.com',
+        'ctfassets.net', 'rurubu.jp', 'tabi-labo.com', 'retrip.jp',
+        'klook.com', 'kkday.com', 'engoo.com', 'travel-zentech.jp',
+        // auction
+        'auctions.c.yimg.jp', 'auc-pctr.c.yimg.jp',
+        // unrelated JP sites
+        'kanji.reader.bz', 'haryu-korea.net', 'exblog.jp',
+        'seesaa.net', 'ameba.jp', 'asayokonikki',
+        // s3 / cdn random
+        'all-stars-bucket.s3.amazonaws.com',
+        // facebook
+        'lookaside.fbsbx.com',
+        // stadium shop
+        'stadium-hub.com', 'shouf.io',
     ];
     if (blockDomains.some(d => url.toLowerCase().includes(d))) return false;
 
@@ -84,7 +126,7 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
         const browserArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1920,1080'];
         if (proxy) browserArgs.push(`--proxy-server=http://${proxy.host}:${proxy.port}`);
 
-        const browser = await puppeteer.launch({ headless: 'new', args: browserArgs });
+        const browser = await puppeteer.launch({ headless: false, args: browserArgs });
         try {
             const page = await browser.newPage();
             if (proxy?.user) await page.authenticate({ username: proxy.user, password: proxy.pass });
