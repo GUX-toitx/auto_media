@@ -76,7 +76,7 @@ async function downloadMedia(url, targetDir, ext, keyword = '') {
 export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCount) {
     if (type === 'video') return 0;
     let downloaded = 0;
-    const searchUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(keyword)}&safesearch=off&qft=+filterui:photo-photo&setlang=vi&cc=vn&mkt=vi-VN`;
+    const searchUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(keyword)}&safesearch=off&qft=+filterui:photo-photo&setlang=ja&cc=jp&mkt=ja-JP`;
 
     const MAX_ATTEMPTS = 3;
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -89,6 +89,7 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
             const page = await browser.newPage();
             if (proxy?.user) await page.authenticate({ username: proxy.user, password: proxy.pass });
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+            await page.setExtraHTTPHeaders({ 'Accept-Language': 'ja-JP,ja;q=0.9,en;q=0.8' });
 
             console.log(`      [${keyword}][Web IMAGE Bot] Đang thâm nhập Bing${proxy ? ' via ' + proxy.host : ''}: ${keyword}`);
             await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
