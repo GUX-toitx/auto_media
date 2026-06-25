@@ -110,15 +110,20 @@ function buildKenBurnsKeyframes(duration, presetIndex, s0, s1) {
             curveType: 'Line',
         }))
     });
+    // Nhích keyframe vào trong 1 chút (không đặt sát đầu/cuối) cho dễ click khi edit.
+    // Margin ~8% mỗi bên, tối đa 0.3s; guard cho slot quá ngắn.
+    const margin = Math.min(Math.round(duration * 0.08), 300_000);
+    const t0 = duration > margin * 2 + 1 ? margin : 0;
+    const t1 = duration > margin * 2 + 1 ? duration - margin : duration;
     return [
-        makeKF('KFTypeScaleX',    [{ time: 0, v: s0 }, { time: duration, v: s1 }]),
-        makeKF('KFTypeScaleY',    [{ time: 0, v: s0 }, { time: duration, v: s1 }]),
-        makeKF('KFTypePositionX', [{ time: 0, v: p.x0 }, { time: duration, v: p.x1 }]),
+        makeKF('KFTypeScaleX',    [{ time: t0, v: s0 }, { time: t1, v: s1 }]),
+        makeKF('KFTypeScaleY',    [{ time: t0, v: s0 }, { time: t1, v: s1 }]),
+        makeKF('KFTypePositionX', [{ time: t0, v: p.x0 }, { time: t1, v: p.x1 }]),
     ];
 }
 
 // Build video segment dựa trên template thật
-function buildVideoSegment(matId, startTime, duration, presetIndex, matWidth, matHeight) {
+function buildVideoSegment(matId, startTime, slotDur, srcDur, presetIndex, matWidth, matHeight, isVideo = false) {
     const base = JSON.parse(JSON.stringify(templateContent.tracks[0].segments[0]));
     const segId = uuid();
     const speedId = uuid();
@@ -128,37 +133,42 @@ function buildVideoSegment(matId, startTime, duration, presetIndex, matWidth, ma
     const colorId = uuid();
     const vocalId = uuid();
 
-    // Tính scale để ảnh fill canvas 1920x1080
+    // Tính scale để media fill (cover) canvas 1920x1080.
+    // CapCut: scale 1.0 = fit vừa khung -> cover dựa trên TỈ LỆ khung hình, không phải số pixel.
+    // (vd 16:9 dù 640x360 hay 1920x1080 đều chỉ cần fillScale = 1.0)
     const CANVAS_W = 1920, CANVAS_H = 1080;
     const w = matWidth || CANVAS_W;
     const h = matHeight || CANVAS_H;
-    const fillScale = Math.max(CANVAS_W / w, CANVAS_H / h);
+    const arCanvas = CANVAS_W / CANVAS_H;
+    const arMat = w / h;
+    const fillScale = Math.max(arCanvas / arMat, arMat / arCanvas);
 
-    // Ken Burns preset áp dụng trên tổng scale
+    // Video: đứng yên (chỉ cover, không Ken Burns). Ảnh tĩnh: áp Ken Burns (zoom/pan nhẹ).
     const p = KB_PRESETS[presetIndex % KB_PRESETS.length];
-    const s0 = fillScale * p.s0;
-    const s1 = fillScale * p.s1;
+    const s0 = isVideo ? fillScale : fillScale * p.s0;
+    const s1 = isVideo ? fillScale : fillScale * p.s1;
+    const tx0 = isVideo ? 0.0 : p.x0;
 
-    const kbPresets = buildKenBurnsKeyframes(duration, presetIndex, s0, s1);
+    const kbPresets = isVideo ? [] : buildKenBurnsKeyframes(slotDur, presetIndex, s0, s1);
 
     return {
         segment: {
             ...base,
             id: segId,
             material_id: matId,
-            source_timerange: { start: 0, duration },
-            target_timerange: { start: startTime, duration },
+            source_timerange: { start: 0, duration: srcDur },
+            target_timerange: { start: startTime, duration: slotDur },
             render_timerange: { start: 0, duration: 0 },
             extra_material_refs: [speedId, placeholderId, canvasId, soundChannelId, colorId, vocalId],
             render_index: 0,
             track_render_index: 0,
             common_keyframes: kbPresets,
             keyframe_refs: [],
-            // Set clip.scale = fillScale để ảnh fill full màn hình ngay từ đầu
+            // clip.scale = fillScale để media fill full màn hình
             clip: {
                 scale: { x: s0, y: s0 },
                 rotation: 0.0,
-                transform: { x: p.x0, y: 0.0 },
+                transform: { x: tx0, y: 0.0 },
                 flip: { vertical: false, horizontal: false },
                 alpha: 1.0
             },
@@ -195,15 +205,17 @@ function buildAudioSegment(matId, startTime, duration, extraRefs) {
     };
 }
 
-export async function exportCapcut(postId, outputDir) {
+export async function exportCapcut(postId, outputDir, contentType = null) {
     const db = await getDb();
     const post = await db.get('SELECT * FROM Post WHERE id = ?', [postId]);
     if (!post) throw new Error(`Post ${postId} not found`);
 
     const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
-    const isVi = post.voice_content_type === 'content_vi';
+    // contentType override: 'content_vi' | 'content' | null (auto theo voice_content_type)
+    const resolvedType = contentType || post.voice_content_type || 'content_vi';
+    const isVi = resolvedType === 'content_vi';
 
-    console.log(`[CapCut] Export post ${postId} (${post.project_id})`);
+    console.log(`[CapCut] Export post ${postId} (${post.project_id}) contentType=${resolvedType}`);
 
     const paragraphs = await db.all(`SELECT * FROM Paragraph WHERE post_id = ? ORDER BY "order"`, [postId]);
 
@@ -242,13 +254,15 @@ export async function exportCapcut(postId, outputDir) {
     for (const para of paragraphs) {
         // Lấy audio — gom tất cả ParagraphDetail audio thành 1 file ghép
         const audioField = isVi ? 'content_vi_audio' : 'content_audio';
-        const paraAudioUrl = para[audioField] || para['audio'];
+        const altField   = isVi ? 'content_audio' : 'content_vi_audio';
+        // Ưu tiên field theo ngôn ngữ, fallback sang field còn lại nếu rỗng
+        const paraAudioUrl = para[audioField] || para[altField] || para['audio'];
         // Lấy từ ParagraphDetail nếu para không có audio trực tiếp
         const paraDetails = await db.all(
-            `SELECT ${audioField} FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"`,
+            `SELECT ${audioField}, ${altField} FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"`,
             [para.id]
         );
-        const detailAudioUrls = paraDetails.map(d => d[audioField]).filter(Boolean);
+        const detailAudioUrls = paraDetails.map(d => d[audioField] || d[altField]).filter(Boolean);
         const audioUrls = paraAudioUrl ? [paraAudioUrl] : detailAudioUrls;
 
         let audioDuration = 5_000_000;
@@ -295,31 +309,56 @@ export async function exportCapcut(postId, outputDir) {
             `SELECT * FROM Asset WHERE paragraph_id = ? AND selected = 1 ORDER BY "order"`,
             [para.id]
         );
-        const allAssets = assets.length ? assets : await db.all(
-            `SELECT * FROM Asset WHERE paragraph_id = ? ORDER BY id LIMIT 3`,
-            [para.id]
-        );
+        let allAssets = assets;
+        if (!allAssets.length) {
+            // Chưa chọn gì -> tự chọn video phù hợp: gom video đủ phủ độ dài audio đoạn này
+            const vids = await db.all(
+                `SELECT * FROM Asset WHERE paragraph_id = ? AND type = 'video' ORDER BY id`,
+                [para.id]
+            );
+            const picked = [];
+            let acc = 0;
+            for (const v of vids) {
+                picked.push(v);
+                acc += v.duration ? v.duration * 1_000_000 : 5_000_000;
+                if (acc >= audioDuration) break; // đủ phủ audio thì dừng
+            }
+            allAssets = picked.length ? picked : await db.all(
+                // Đoạn không có video -> dùng ảnh
+                `SELECT * FROM Asset WHERE paragraph_id = ? ORDER BY id LIMIT 3`,
+                [para.id]
+            );
+            if (allAssets.length) console.log(`[CapCut] Para ${para.order}: tự chọn ${allAssets.length} ${picked.length ? 'video' : 'ảnh'} (chưa có lựa chọn)`);
+        }
 
         const segStart = totalDuration;
 
         if (allAssets.length === 0) {
             totalDuration += audioDuration;
         } else {
-            const assetDur = Math.round(audioDuration / allAssets.length);
-            for (const asset of allAssets) {
+            // Chia đều audioDuration thành N slice; slice cuối gánh phần dư để Σ slice = audioDuration.
+            // totalDuration tiến theo slice (không theo độ dài video đã cắt) → audio luôn liền mạch, không dồn.
+            const N = allAssets.length;
+            let sliceAcc = 0;
+            for (let ai = 0; ai < N; ai++) {
+                const asset = allAssets[ai];
+                const slotDur = (ai === N - 1) ? (audioDuration - sliceAcc) : Math.round(audioDuration / N);
+                sliceAcc += slotDur;
                 const srcPath = path.join(MEDIA_DIR, asset.file_path);
-                if (!fs.existsSync(srcPath)) { totalDuration += assetDur; continue; }
+                if (!fs.existsSync(srcPath)) { totalDuration += slotDur; continue; }
                 const ext = path.extname(asset.file_path).toLowerCase();
                 const assetFileName = `asset_${fileIndex++}${ext}`;
                 const destPath = path.join(assetsDir, assetFileName);
                 fs.copyFileSync(srcPath, destPath);
                 const isVideo = ['.mp4', '.mov', '.avi'].includes(ext);
                 const mediaInfo = isVideo ? getMediaInfo(destPath) : { width: 1920, height: 1080 };
-                const actualDur = isVideo ? Math.min(asset.duration ? asset.duration * 1_000_000 : assetDur, assetDur) : assetDur;
+                const realDur = isVideo ? (asset.duration ? Math.round(asset.duration * 1_000_000) : slotDur) : slotDur;
+                // Slot timeline luôn = slotDur (phủ đủ audio); nguồn video chỉ lấy tối đa = slotDur (dài hơn → cắt; ngắn hơn → đứng hình phần dư)
+                const srcDur = isVideo ? Math.min(realDur, slotDur) : slotDur;
                 const matId = uuid();
-                const mat = buildVideoMaterial(matId, destPath, actualDur, assetFileName, isVideo, draftId);
+                const mat = buildVideoMaterial(matId, destPath, isVideo ? realDur : slotDur, assetFileName, isVideo, draftId);
                 content.materials.videos.push(mat);
-                const { segment, extraMaterials } = buildVideoSegment(matId, totalDuration, actualDur, videoIndex++, mediaInfo.width, mediaInfo.height);
+                const { segment, extraMaterials } = buildVideoSegment(matId, totalDuration, slotDur, srcDur, videoIndex++, mediaInfo.width, mediaInfo.height, isVideo);
                 videoSegments.push(segment);
                 // Extra materials
                 const speedMat = { ...JSON.parse(JSON.stringify(templateContent.materials.speeds[0])), id: extraMaterials.speedId };
@@ -334,7 +373,7 @@ export async function exportCapcut(postId, outputDir) {
                 content.materials.placeholder_infos.push(phMat);
                 const scVideoMat = { ...JSON.parse(JSON.stringify(templateContent.materials.sound_channel_mappings[0])), id: extraMaterials.soundChannelId };
                 content.materials.sound_channel_mappings.push(scVideoMat);
-                totalDuration += actualDur;
+                totalDuration += slotDur;
             }
         }
 
@@ -504,11 +543,11 @@ export function generateBat(zipFileName, projectName) {
 }
 
 if (process.argv[1]?.endsWith('capcut_export.js')) {
-    const [,, postId, outputDir] = process.argv;
-    if (!postId) { console.error('Usage: node capcut_export.js <postId> [outputDir]'); process.exit(1); }
+    const [,, postId, outputDir, contentType] = process.argv;
+    if (!postId) { console.error('Usage: node capcut_export.js <postId> [outputDir] [contentType]'); process.exit(1); }
     const outDir = outputDir || path.join(MEDIA_DIR, '_capcut_exports');
     if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-    exportCapcut(parseInt(postId), outDir)
+    exportCapcut(parseInt(postId), outDir, contentType || null)
         .then(r => console.log(`[CapCut] Done: ${r.zipPath}`))
         .catch(e => { console.error('[CapCut] Error:', e.message); process.exit(1); });
 }

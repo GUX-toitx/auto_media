@@ -783,11 +783,14 @@ app.post('/api/crawl-vn', async (req, res) => {
 // API: Tạo mới dự án từ nội dung
 app.post('/api/export-capcut', (req, res) => {
     const postId = req.body && req.body.postId;
+    const contentType = req.body && req.body.contentType;
     if (!postId) return res.status(400).json({ error: 'Thieu postId' });
     const outDir = path.join(MEDIA_DIR, '_capcut_exports');
     if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
     let stdout = '', stderr = '', done = false;
-    const child = spawn(process.execPath, ['capcut_export.js', String(postId), outDir], {
+    const args = ['capcut_export.js', String(postId), outDir];
+    if (contentType) args.push(contentType);
+    const child = spawn(process.execPath, args, {
         cwd: __dirname, env: process.env
     });
     child.stdout.on('data', d => { stdout += d; });
@@ -828,6 +831,24 @@ app.post('/api/export-capcut', (req, res) => {
         res.on('finish', () => { try { fs.unlinkSync(result.zipPath); } catch(_) {} });
     });
 })
+// Proxy audio CDN -> same-origin để client đọc bytes vẽ waveform (tránh CORS)
+app.get('/api/audio-proxy', async (req, res) => {
+    const url = req.query.url;
+    if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return res.status(400).end();
+    let u;
+    try { u = new URL(url); } catch { return res.status(400).end(); }
+    if (!u.hostname.endsWith('b-cdn.net')) return res.status(403).end(); // allowlist, tránh SSRF
+    try {
+        const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        if (!r.ok) return res.status(r.status).end();
+        const buf = Buffer.from(await r.arrayBuffer());
+        res.setHeader('Content-Type', r.headers.get('content-type') || 'audio/mpeg');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.end(buf);
+    } catch (e) { res.status(502).end(); }
+});
+
 app.get('/api/capcut-zip/:filename', (req, res) => {
     const filePath = path.join(MEDIA_DIR, '_capcut_exports', req.params.filename);
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
