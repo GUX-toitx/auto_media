@@ -287,8 +287,19 @@ async function main() {
         const imgDir = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', String(index));
         fs.mkdirSync(imgDir, { recursive: true });
 
+        const syncImages = async () => {
+            const imageExts = new Set(['.jpg', '.jpeg', '.png', '.webp']);
+            if (!fs.existsSync(imgDir)) return;
+            for (const file of fs.readdirSync(imgDir)) {
+                if (!imageExts.has(path.extname(file).toLowerCase())) continue;
+                const rel = path.join(projectId, 'assets', '_raw_images', String(index), file);
+                const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
+                if (!exists) await db.run('INSERT INTO Asset (paragraph_id, type, file_path) VALUES (?, ?, ?)', [paragraphId, 'image', rel]);
+            }
+        };
+
         const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(0), ms))]);
-        // Chạy tuần tự để Bing không bị mixed results
+        // Chạy tuần tự, sync vào DB ngay sau mỗi keyword
         for (const kw of keywords) {
             console.log(`    -> Crawl ảnh: "${kw}"`);
             await withTimeout(
@@ -297,18 +308,7 @@ async function main() {
                     .catch(e => console.error(`    -> Lỗi crawl: ${e.message}`)),
                 60000
             );
-        }
-
-        const imageExts = new Set(['.jpg', '.jpeg', '.png', '.webp']);
-        if (fs.existsSync(imgDir)) {
-            for (const file of fs.readdirSync(imgDir)) {
-                if (!imageExts.has(path.extname(file).toLowerCase())) continue;
-                const rel = path.join(projectId, 'assets', '_raw_images', String(index), file);
-                const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
-                if (!exists) {
-                    await db.run('INSERT INTO Asset (paragraph_id, type, file_path) VALUES (?, ?, ?)', [paragraphId, 'image', rel]);
-                }
-            }
+            await syncImages(); // sync ngay sau mỗi keyword
         }
     }
 
