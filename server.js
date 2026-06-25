@@ -1375,12 +1375,14 @@ app.get('/api/get-prompt', (req, res) => {
 const WINDOWS_AGENT = `http://192.168.50.248:5000`;
 
 app.post('/api/export-capcut', (req, res) => {
-    const postId = req.body && req.body.postId;
+    const { postId, contentType } = req.body || {};
     if (!postId) return res.status(400).json({ error: 'Thieu postId' });
     const outDir = path.join(MEDIA_DIR, '_capcut_exports');
     if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
     let stdout = '', stderr = '', done = false;
-    const child = spawn(process.execPath, ['capcut_export.js', String(postId), outDir], {
+    const args = ['capcut_export.js', String(postId), outDir];
+    if (contentType) args.push(contentType);
+    const child = spawn(process.execPath, args, {
         cwd: __dirname, env: process.env
     });
     child.stdout.on('data', d => { stdout += d; });
@@ -1409,6 +1411,24 @@ app.post('/api/export-capcut', (req, res) => {
         await archive.finalize();
         res.on('finish', () => { try { fs.unlinkSync(result.zipPath); } catch(_) {} });
     });
+});
+
+// Proxy audio CDN -> same-origin để client đọc bytes vẽ waveform (tránh CORS)
+app.get('/api/audio-proxy', async (req, res) => {
+    const url = req.query.url;
+    if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return res.status(400).end();
+    let u;
+    try { u = new URL(url); } catch { return res.status(400).end(); }
+    if (!u.hostname.endsWith('b-cdn.net')) return res.status(403).end(); // allowlist, tránh SSRF
+    try {
+        const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        if (!r.ok) return res.status(r.status).end();
+        const buf = Buffer.from(await r.arrayBuffer());
+        res.setHeader('Content-Type', r.headers.get('content-type') || 'audio/mpeg');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.end(buf);
+    } catch (e) { res.status(502).end(); }
 });
 
 app.get('/api/capcut-zip/:filename', (req, res) => {
@@ -1460,12 +1480,14 @@ function buildLocalBatScript(draftId, projectName) {
 }
 
 app.post('/api/render-capcut', (req, res) => {
-    const { postId } = req.body;
+    const { postId, contentType } = req.body;
     if (!postId) return res.status(400).json({ error: 'Missing postId' });
     const outDir = path.join(MEDIA_DIR, '_capcut_exports');
     if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
     let stdout = '', stderr = '', done = false;
-    const child = spawn(process.execPath, ['capcut_export.js', String(postId), outDir], {
+    const renderArgs = ['capcut_export.js', String(postId), outDir];
+    if (contentType) renderArgs.push(contentType);
+    const child = spawn(process.execPath, renderArgs, {
         cwd: __dirname, env: process.env
     });
     child.stdout.on('data', d => { stdout += d; });

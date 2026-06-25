@@ -452,17 +452,10 @@ except Exception as e:
 
         const imgDir = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', String(index));
         const vidDir = path.join(MEDIA_DIR, projectId, 'assets', '_raw_videos', String(index));
-        const { mkdirSync, existsSync } = await import('fs');
+        const { mkdirSync, existsSync, readdirSync } = await import('fs');
         if (!existsSync(imgDir)) mkdirSync(imgDir, { recursive: true });
         if (!existsSync(vidDir)) mkdirSync(vidDir, { recursive: true });
 
-        await Promise.all(keywords.map(kw => Promise.allSettled([
-            fetchImages(kw, imgDir, IMAGES_PER_KEYWORD).then(n => console.log(`      [${kw}] ${n} images`)).catch(e => console.error(`      [${kw}] img loi: ${e.message}`)),
-            fetchFromStoryblocksBot(kw, 'video', vidDir, 4).then(n => console.log(`      [${kw}] ${n} videos`)).catch(() => {}),
-        ])));
-
-        // Sync vào DB
-        const { readdirSync } = await import('fs');
         const syncDir = async (dir, type, exts) => {
             if (!existsSync(dir)) return;
             for (const file of readdirSync(dir)) {
@@ -472,8 +465,16 @@ except Exception as e:
                 if (!ex) await db.run('INSERT INTO Asset (paragraph_id, type, file_path) VALUES (?, ?, ?)', [paragraphId, type, rel]);
             }
         };
-        await syncDir(imgDir, 'image', ['.jpg', '.jpeg', '.png', '.webp']);
-        await syncDir(vidDir, 'video', ['.mp4', '.mov']);
+
+        // Chạy tuần tự, sync DB ngay sau mỗi keyword
+        for (const kw of keywords) {
+            await Promise.allSettled([
+                fetchFromGoogleImageBot(kw, 'image', imgDir, IMAGES_PER_KEYWORD).then(n => console.log(`      [${kw}] ${n} images`)).catch(e => console.error(`      [${kw}] img loi: ${e.message}`)),
+                fetchFromStoryblocksBot(kw, 'video', vidDir, 4).then(n => console.log(`      [${kw}] ${n} videos`)).catch(() => {}),
+            ]);
+            await syncDir(imgDir, 'image', ['.jpg', '.jpeg', '.png', '.webp']);
+            await syncDir(vidDir, 'video', ['.mp4', '.mov']);
+        }
     }
 
     await db.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]);

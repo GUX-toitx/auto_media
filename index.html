@@ -14,7 +14,7 @@
     </style>
 </head>
 <body class="bg-gray-950 text-gray-100 font-sans h-screen flex overflow-hidden">
-<div id="app" class="flex w-full h-full overflow-hidden">
+<div id="app" class="flex w-full h-full overflow-hidden" @click="showCapcutMenu = false">
     <!-- SIDEBAR -->
     <aside class="w-64 bg-gray-900 border-r border-gray-800 flex flex-col h-full shrink-0">
         <div class="p-3 border-b border-gray-800 flex gap-2 flex-col">
@@ -67,9 +67,16 @@
                     <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-600 hover:bg-orange-500 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
                         <span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}
                     </button>
-                    <button @click="exportCapcut" :disabled="capcutExporting" class="bg-pink-600 hover:bg-pink-500 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
-                        <span v-if="capcutExporting" class="animate-spin inline-block mr-1">⏳</span>{{ capcutExporting ? 'Exporting...' : '🎬 CapCut Export' }}
-                    </button>
+                    <div class="relative">
+                        <button @click.stop="showCapcutMenu = !showCapcutMenu" :disabled="capcutExporting" class="bg-pink-600 hover:bg-pink-500 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
+                            <span v-if="capcutExporting" class="animate-spin inline-block mr-1">⏳</span>{{ capcutExporting ? 'Exporting...' : '🎬 CapCut Export ▾' }}
+                        </button>
+                        <div v-if="showCapcutMenu" class="absolute top-full left-0 mt-1 flex flex-col gap-1 z-50 min-w-[160px]">
+                            <button @click.stop="capcutLang=''; showCapcutMenu=false; exportCapcut()" class="bg-pink-700 hover:bg-pink-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">Auto</button>
+                            <button @click.stop="capcutLang='content_vi'; showCapcutMenu=false; exportCapcut()" class="bg-pink-700 hover:bg-pink-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🇻🇳 Tiếng Việt</button>
+                            <button @click.stop="capcutLang='content'; showCapcutMenu=false; exportCapcut()" class="bg-pink-700 hover:bg-pink-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🌍 Target Lang</button>
+                        </div>
+                    </div>
                     <button @click="renderCapcut" :disabled="capcutRendering" class="bg-rose-700 hover:bg-rose-600 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
                         <span v-if="capcutRendering" class="animate-spin inline-block mr-1">⏳</span>{{ capcutRendering ? 'Rendering...' : '▶️ CapCut Render' }}
                     </button>
@@ -94,8 +101,8 @@
                                 <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveHookDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
                             </div>
                             <div class="grid grid-cols-2 gap-1">
-                                <div><audio v-if="d.content_vi_audio" controls :src="d.content_vi_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                                <div><audio v-if="d.content_audio" controls :src="d.content_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                <div><audio-bar v-if="d.content_audio" :src="d.content_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                             </div>
                             <!-- Assets for this detail -->
                             <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
@@ -271,8 +278,8 @@
                                 <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveSummaryDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
                             </div>
                             <div class="grid grid-cols-2 gap-1">
-                                <div><audio v-if="d.content_vi_audio" controls :src="d.content_vi_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                                <div><audio v-if="d.content_audio" controls :src="d.content_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                <div><audio-bar v-if="d.content_audio" :src="d.content_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                             </div>
                             <!-- Assets for this detail -->
                             <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
@@ -450,8 +457,8 @@
                                         <div contenteditable="true" @blur="saveParaField(para, 'title', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-300 leading-relaxed min-h-[32px] outline-none focus:border-yellow-500">{{ para.title }}</div>
                                     </div>
                                     <div class="grid grid-cols-2 gap-2">
-                                        <div><audio v-if="para.title_vi_audio" controls :src="para.title_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
-                                        <div><audio v-if="para.title_audio" controls :src="para.title_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                                        <div><audio-bar v-if="para.title_vi_audio" :src="para.title_vi_audio"></audio-bar><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                                        <div><audio-bar v-if="para.title_audio" :src="para.title_audio"></audio-bar><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
                                     </div>
                                 </div>
                                 <!-- Content row -->
@@ -466,8 +473,8 @@
                                                 <div contenteditable="true" @blur="saveParaDetailField(d, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500">{{ d.content }}</div>
                                             </div>
                                             <div class="grid grid-cols-2 gap-1">
-                                                <div><audio v-if="d.content_vi_audio" controls :src="d.content_vi_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                                                <div><audio v-if="d.content_audio" controls :src="d.content_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                                <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                                <div><audio-bar v-if="d.content_audio" :src="d.content_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                                             </div>
                                             <!-- Assets for this detail -->
                                             <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
@@ -607,8 +614,8 @@
                                                     <div contenteditable="true" @blur="saveSentenceField(s, 'title', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-300 leading-relaxed min-h-[28px] outline-none focus:border-yellow-500">{{ s.title }}</div>
                                                 </div>
                                                 <div class="grid grid-cols-2 gap-2">
-                                                    <div><audio v-if="s.title_vi_audio" controls :src="s.title_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
-                                                    <div><audio v-if="s.title_audio" controls :src="s.title_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                                                    <div><audio-bar v-if="s.title_vi_audio" :src="s.title_vi_audio"></audio-bar><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                                                    <div><audio-bar v-if="s.title_audio" :src="s.title_audio"></audio-bar><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
                                                 </div>
                                             </div>
                                             <!-- Sentence content - hiển thị details -->
@@ -623,8 +630,8 @@
                                                             <div contenteditable="true" @blur="saveDetailField(d, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500">{{ d.content }}</div>
                                                         </div>
                                                         <div class="grid grid-cols-2 gap-1">
-                                                            <div><audio v-if="d.content_vi_audio" controls :src="d.content_vi_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                                                            <div><audio v-if="d.content_audio" controls :src="d.content_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                                            <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                                            <div><audio-bar v-if="d.content_audio" :src="d.content_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                                                         </div>
                                                         <!-- Assets for this detail -->
                                                         <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
@@ -815,8 +822,8 @@
                                 <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveConclusionDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
                             </div>
                             <div class="grid grid-cols-2 gap-1">
-                                <div><audio v-if="d.content_vi_audio" controls :src="d.content_vi_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                                <div><audio v-if="d.content_audio" controls :src="d.content_audio" class="w-full h-6" preload="metadata"></audio><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                <div><audio-bar v-if="d.content_audio" :src="d.content_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                             </div>
                             <!-- Assets for this detail -->
                             <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
@@ -1751,7 +1758,128 @@
 </div>
 
 <script>
-const { createApp, ref, computed, watch } = Vue;
+const { createApp, ref, computed, watch, onMounted, onUnmounted } = Vue;
+
+// Thanh audio waveform custom: play/seek + thời gian m:ss.s chính xác
+const AudioBar = {
+  props: { src: { type: String, required: true } },
+  template: `
+    <div class="flex items-center gap-1.5 bg-gray-950 border border-gray-800 rounded px-1.5 py-1 w-full select-none">
+      <button type="button" @click="toggle" class="shrink-0 w-6 h-6 rounded-full bg-pink-600 hover:bg-pink-500 text-white text-[9px] flex items-center justify-center leading-none">{{ playing ? '❚❚' : '▶' }}</button>
+      <div ref="track" @click="seek" class="relative flex-1 h-7 cursor-pointer overflow-hidden rounded bg-gray-900">
+        <canvas ref="cv" class="absolute inset-0 w-full h-full"></canvas>
+        <div class="absolute top-0 bottom-0 left-0 bg-pink-500/20 pointer-events-none" :style="{ width: pct + '%' }"></div>
+        <div class="absolute top-0 bottom-0 w-0.5 bg-pink-400 pointer-events-none" :style="{ left: pct + '%' }"></div>
+      </div>
+      <span class="shrink-0 text-[9px] font-mono tabular-nums text-pink-300">{{ fmt(cur) }}/<b class="text-pink-200">{{ fmt(dur) }}</b></span>
+    </div>
+  `,
+  setup(props) {
+    const cv = ref(null), track = ref(null);
+    const playing = ref(false), cur = ref(0), dur = ref(0);
+    let audio = null, raf = 0, peaks = null, io = null, decoded = false;
+    const pct = computed(() => dur.value > 0 ? Math.min(100, cur.value / dur.value * 100) : 0);
+    const fmt = (s) => {
+      s = Number(s) || 0;
+      const m = Math.floor(s / 60);
+      const sec = s - m * 60;
+      return m + ':' + sec.toFixed(1).padStart(4, '0');
+    };
+    const ensure = () => {
+      if (audio) return audio;
+      audio = new Audio();
+      audio.preload = 'metadata';
+      audio.src = props.src;
+      audio.addEventListener('loadedmetadata', () => { dur.value = audio.duration || 0; });
+      audio.addEventListener('timeupdate', () => { cur.value = audio.currentTime || 0; });
+      audio.addEventListener('play', () => { playing.value = true; loop(); });
+      audio.addEventListener('pause', () => { playing.value = false; });
+      audio.addEventListener('ended', () => { playing.value = false; cur.value = 0; });
+      return audio;
+    };
+    const loop = () => { if (audio && !audio.paused) { cur.value = audio.currentTime; raf = requestAnimationFrame(loop); } };
+    const toggle = () => { const a = ensure(); a.paused ? a.play() : a.pause(); };
+    const seek = (ev) => {
+      const a = ensure(); const el = track.value; if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const p = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+      const d = dur.value || a.duration || 0;
+      if (d) { a.currentTime = p * d; cur.value = a.currentTime; }
+    };
+    const ctx2d = () => {
+      const c = cv.value; if (!c) return null;
+      const w = c.clientWidth || 1, h = c.clientHeight || 1;
+      if (c.width !== w) c.width = w;
+      if (c.height !== h) c.height = h;
+      return c.getContext('2d');
+    };
+    const drawFlat = () => {
+      const ctx = ctx2d(); if (!ctx) return;
+      const w = cv.value.width, h = cv.value.height;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = '#374151';
+      ctx.fillRect(0, h / 2 - 1, w, 2);
+    };
+    const drawPeaks = () => {
+      const ctx = ctx2d(); if (!ctx || !peaks) return;
+      const w = cv.value.width, h = cv.value.height, n = peaks.length;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = '#6b7280';
+      const bw = w / n;
+      for (let i = 0; i < n; i++) {
+        const ph = Math.max(2, peaks[i] * (h - 2));
+        ctx.fillRect(i * bw, (h - ph) / 2, Math.max(1, bw * 0.6), ph);
+      }
+    };
+    const decode = async () => {
+      if (decoded) return; decoded = true;
+      try {
+        let ab;
+        try { // CDN có CORS -> đọc thẳng; lỗi thì qua proxy same-origin
+          const r = await fetch(props.src);
+          if (!r.ok) throw 0;
+          ab = await r.arrayBuffer();
+        } catch (_) {
+          const r2 = await fetch('/api/audio-proxy?url=' + encodeURIComponent(props.src));
+          if (!r2.ok) throw 0;
+          ab = await r2.arrayBuffer();
+        }
+        const AC = window.AudioContext || window.webkitAudioContext;
+        const ac = new AC();
+        const audioBuf = await ac.decodeAudioData(ab);
+        if (ac.close) ac.close();
+        if (!dur.value) dur.value = audioBuf.duration;
+        const data = audioBuf.getChannelData(0);
+        const N = 140, block = Math.max(1, Math.floor(data.length / N)), pk = [];
+        let max = 1e-4;
+        for (let i = 0; i < N; i++) {
+          let s = 0; const st = i * block;
+          for (let j = 0; j < block; j += 32) { const v = Math.abs(data[st + j] || 0); if (v > s) s = v; }
+          pk.push(s); if (s > max) max = s;
+        }
+        peaks = pk.map(v => v / max);
+        drawPeaks();
+      } catch (e) { /* giữ flat bar nếu decode lỗi */ }
+    };
+    onMounted(() => {
+      drawFlat();
+      ensure();
+      try {
+        io = new IntersectionObserver((ents) => {
+          ents.forEach(e => { if (e.isIntersecting) { decode(); if (io) { io.disconnect(); io = null; } } });
+        }, { rootMargin: '150px' });
+        io.observe(cv.value);
+      } catch (e) { decode(); }
+    });
+    onUnmounted(() => { if (raf) cancelAnimationFrame(raf); if (io) io.disconnect(); if (audio) { audio.pause(); audio.src = ''; } });
+    watch(() => props.src, (nv) => {
+      peaks = null; decoded = false; cur.value = 0; dur.value = 0;
+      if (audio) audio.src = nv;
+      drawFlat(); decode();
+    });
+    return { cv, track, playing, cur, dur, pct, fmt, toggle, seek };
+  }
+};
 
 createApp({
     setup() {
@@ -2243,6 +2371,8 @@ createApp({
         const crawling = ref(false);
         const capcutExporting = ref(false);
         const capcutRendering = ref(false);
+        const capcutLang = ref('');
+        const showCapcutMenu = ref(false);
         async function triggerCrawlAll() {
             if (!activePostId.value) return;
             crawling.value = true;
@@ -2264,9 +2394,12 @@ createApp({
         async function exportCapcut() {
             if (!activePostId.value) return;
             capcutExporting.value = true;
-            showToast('🎬 Đang xuất CapCut draft...', 10000);
+            const langLabel = capcutLang.value === 'content_vi' ? '🇻🇳 VI' : capcutLang.value === 'content' ? 'Target' : 'Auto';
+            showToast(`🎬 Đang xuất CapCut draft (${langLabel})...`, 10000);
             try {
-                const res = await fetch('/api/export-capcut', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: activePostId.value }) });
+                const body = { postId: activePostId.value };
+                if (capcutLang.value) body.contentType = capcutLang.value;
+                const res = await fetch('/api/export-capcut', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                 if (!res.ok) { const e = await res.json(); return showToast('❌ ' + (e.error || 'Export thất bại')); }
                 const blob = await res.blob();
                 const cd = res.headers.get('Content-Disposition') || '';
@@ -3229,7 +3362,7 @@ createApp({
             if (mediaPollingInterval) clearInterval(mediaPollingInterval);
             mediaPollingInterval = setInterval(() => {
                 fetchLatestMedia();
-            }, 5000);
+            }, 2000);
         };
 
         const stopMediaPolling = () => {
@@ -3400,7 +3533,7 @@ createApp({
             downloadVoice,
             pollingTimer,
             startPollingVoice,
-            crawling, capcutExporting, capcutRendering,
+            crawling, capcutExporting, capcutRendering, capcutLang, showCapcutMenu,
             triggerCrawlAll, exportCapcut, renderCapcut,
             refetchMedia,
             aiGenerate,
@@ -3435,7 +3568,7 @@ createApp({
             submitNewProject,
         };
     }
-}).mount('#app');
+}).component('audio-bar', AudioBar).mount('#app');
 </script>
 </body>
 </html>
