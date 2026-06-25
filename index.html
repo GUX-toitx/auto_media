@@ -525,6 +525,16 @@
                                         </span>
                                         <input @keydown.enter="addKeyword($event, para, 'factual')" placeholder="+ factual" class="bg-transparent border border-dashed border-blue-800 rounded px-2 py-0.5 text-[10px] text-blue-400 outline-none w-28 focus:border-blue-500">
                                     </div>
+                                    <!-- Gợi ý ảnh/video -->
+                                    <div v-if="(para.keywords || []).filter(k => k.type === 'image_suggestion').length" class="flex flex-wrap gap-1 items-center">
+                                        <span class="text-[9px] font-black text-emerald-400 uppercase tracking-widest w-20 shrink-0">🖼️ Gợi ý</span>
+                                        <span v-for="kw in (para.keywords || []).filter(k => k.type === 'image_suggestion')" :key="kw.id"
+                                            class="text-[10px] px-2 py-0.5 rounded-full border border-emerald-800 text-emerald-300 bg-emerald-900/20 cursor-pointer hover:bg-emerald-700/30"
+                                            title="Click để crawl ảnh"
+                                            @click="addKeyword({target:{value:kw.content},preventDefault:()=>{}}, para, 'factual')">
+                                            {{ kw.content }}
+                                        </span>
+                                    </div>
                                     <div v-if="false" class="flex flex-wrap gap-1 items-center">
                                         <span class="text-[9px] font-black text-purple-400 uppercase tracking-widest w-20 shrink-0">Cinematic</span>
                                         <span v-for="kw in (para.keywords || []).filter(k => k.type === 'cinematic')" :key="kw.id" class="keyword-tag text-[10px] border-purple-800 text-purple-300">
@@ -2206,6 +2216,10 @@ createApp({
             const r = await fetch('/api/add-keyword', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paragraphId: para.id, content: kw, type }) });
             const { id } = await r.json();
             para.keywords.push({ id, content: kw, type });
+            // Trigger crawl ngay
+            showToast(`🔍 Crawl "${kw}"...`, 3000);
+            fetch('/api/generate-media', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ videoId: activeProjectId.value, groupId: para.id, keywords: [{ content: kw, type }] }) });
         }
 
         async function saveContent(para, silent = false) {

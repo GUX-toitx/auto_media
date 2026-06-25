@@ -421,6 +421,35 @@ except Exception as e:
             await db.run('INSERT INTO Keyword (paragraph_id, content, type) VALUES (?, ?, ?)', [paragraphId, kw, 'factual']);
         }
 
+        // Sinh image_suggestion bằng GPT-4o-mini
+        try {
+            const sugRes = await httpsPost(
+                'https://api.openai.com/v1/chat/completions',
+                { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+                {
+                    model: 'gpt-4o-mini',
+                    messages: [
+                        { role: 'system', content: 'You are an image/video suggestion expert. Read the given text and return a JSON array of Vietnamese search terms (5-8 terms) describing visuals that would illustrate the content. Return ONLY a JSON array, no explanation. Example: ["bầu trời đầy sao", "vũ trụ nhìn từ không gian", "trái đất từ vệ tinh"]' },
+                        { role: 'user', content: text }
+                    ],
+                    temperature: 0.3
+                }
+            );
+            if (sugRes.status === 200) {
+                const sugData = JSON.parse(sugRes.body);
+                const raw = sugData.choices?.[0]?.message?.content || '[]';
+                let sugs = [];
+                try { sugs = JSON.parse(raw); } catch(_) {
+                    const m = raw.match(/\[.*\]/s);
+                    if (m) try { sugs = JSON.parse(m[0]); } catch(_) {}
+                }
+                for (const sug of sugs) {
+                    if (sug) await db.run('INSERT INTO Keyword (paragraph_id, content, type) VALUES (?, ?, ?)', [paragraphId, sug, 'image_suggestion']);
+                }
+                console.log(`    Gợi ý ảnh (${sugs.length}): ${sugs.slice(0,3).join(' | ')}`);
+            }
+        } catch(e) { console.error(`    Gợi ý ảnh lỗi: ${e.message}`); }
+
         const imgDir = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', String(index));
         const vidDir = path.join(MEDIA_DIR, projectId, 'assets', '_raw_videos', String(index));
         const { mkdirSync, existsSync } = await import('fs');

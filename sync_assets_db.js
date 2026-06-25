@@ -128,17 +128,13 @@ async function runConcurrently(tasks, limit) {
     return Promise.allSettled(results);
 }
 
-export export async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = VIDEOS_PER_SOURCE) {
+export async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = VIDEOS_PER_SOURCE) {
     if (!keyword) return 0;
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
     const providers = [
         { name: 'Storyblocks (Bot)', fetcher: fetchFromStoryblocksBot },
         { name: 'Pexels', fetcher: fetchFromPexels },
-        { name: 'DVIDS (Bot)', fetcher: fetchFromDvidsBot },
-        { name: 'Bellingcat (Bot)', fetcher: fetchFromBellingcatBot },
-        { name: 'AP News (Bot)', fetcher: fetchFromApnewsBot },
-        { name: 'Al Jazeera (Bot)', fetcher: fetchFromAlJazeeraBot },
         { name: 'Google Image (Bot)', fetcher: fetchFromGoogleImageBot },
     ];
 

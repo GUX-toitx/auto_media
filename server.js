@@ -226,7 +226,7 @@ app.post('/api/move-asset', async (req, res) => {
                 await db.run(`INSERT INTO Asset (${col}, type, file_path, duration) VALUES (?, ?, ?, ?)`,
                     [targetDetailId, asset.type, newRel, asset.duration]);
             } else {
-                // Từ detail -> detail: chỉ update id
+                // Từ paragraph/sentence -> detail: update và xóa sạch các foreign key cũ
                 await db.run(`UPDATE Asset SET
                     hook_detail_id = NULL, summary_detail_id = NULL, conclusion_detail_id = NULL,
                     paragraph_detail_id = NULL, sentence_detail_id = NULL,
@@ -330,15 +330,16 @@ app.post('/api/generate-media', (req, res) => {
         return res.json({ success: true, message: 'Crawl section media...' });
     }
 
+    const kwTexts = (Array.isArray(keywords) ? keywords : [keywords]).map(k => typeof k === 'object' ? k.content : k).filter(Boolean);
     console.log(`\n[HỆ THỐNG] Bắt đầu lấy Media cho: Dự án ${videoId} | Nhóm ${groupId}`);
-    console.log(`[HỆ THỐNG] Từ khóa: ${keywords.join(', ')}`);
+    console.log(`[HỆ THỐNG] Từ khóa: ${kwTexts.join(', ')}`);
 
     const pythonProcess = spawn('node', [
         'craw_sub.js',
         '--mode', 'single',
         '--videoId', videoId,
         '--paragraphId', String(groupId),
-        '--keywords', keywords.join(',')
+        '--keywords', kwTexts.join(',')
     ]);
 
     pythonProcess.stdout.on('data', (data) => {
