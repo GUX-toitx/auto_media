@@ -3,53 +3,32 @@ import dns from 'dns';
 dns.setDefaultResultOrder('ipv4first');
 import fs from 'fs';
 import path from 'path';
-import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import * as cheerio from 'cheerio';
+import { createRequire } from 'module';
 import { claimNextStockPath } from './stockNaming.js';
 
-puppeteer.use(StealthPlugin());
+const require = createRequire(import.meta.url);
+const { GOOGLE_IMG_SCRAP } = require('google-img-scrap');
 
-const delay = ms => new Promise(res => setTimeout(res, ms));
+const blockDomains = [
+    'alamy.com', 'gettyimages.com', 'shutterstock.com', 'istockphoto.com',
+    'dreamstime.com', 'depositphotos.com', '123rf.com', 'stock.adobe.com',
+    'pond5.com', 'bigstockphoto.com',
+    'freepik.com', 'vecteezy.com', 'flaticon.com', 'vectorstock.com',
+    'pinterest.', 'tumblr.com', 'deviantart.com',
+    'garena', 'freefire', 'gamerant', 'steam',
+    'goodfreephotos.com', 'wallpapercave.com', 'alphacoders.com',
+    'freepng', 'pngtree', 'nicepng', 'kindpng', 'cleanpng',
+    'easydrawforkids', 'howtodrawforkids', 'paintingvalley', 'clipartmag',
+    'clipartkey', 'ac-illust.com', 'illustmint.com',
+    'blogspot.com', 'hatena.com',
+];
 
-// Load proxies từ file, xoay vòng
-const PROXY_FILE = path.join(path.dirname(new URL(import.meta.url).pathname), 'proxies.txt');
-let _proxies = null;
-let _proxyIndex = 0;
-function getNextProxy() {
-    if (!_proxies) {
-        try {
-            _proxies = fs.readFileSync(PROXY_FILE, 'utf8').trim().split('\n')
-                .map(l => l.trim()).filter(Boolean)
-                .map(l => { const [host, port, user, pass] = l.split(':'); return { host, port, user, pass }; })
-                .filter(p => p.host && p.port);
-            console.log(`[Proxy] Loaded ${_proxies.length} proxies`);
-        } catch (_) { _proxies = []; }
-    }
-    if (!_proxies.length) return null;
-    const proxy = _proxies[_proxyIndex % _proxies.length];
-    _proxyIndex++;
-    return proxy;
-}
-
-async function downloadMedia(url, targetDir, ext, keyword = '') {
+async function downloadMedia(url, targetDir, keyword = '') {
+    if (!url) return false;
     if (url.includes('onelink.me') || url.includes('app-store') || url.includes('play.google')) return false;
-    const blockDomains = [
-        'alamy.com', 'gettyimages.com', 'shutterstock.com', 'istockphoto.com',
-        'dreamstime.com', 'depositphotos.com', '123rf.com', 'stock.adobe.com',
-        'pond5.com', 'bigstockphoto.com',
-        'freepik.com', 'vecteezy.com', 'flaticon.com', 'vectorstock.com',
-        'pinterest.', 'tumblr.com', 'deviantart.com',
-        'garena', 'freefire', 'gamerant', 'steam',
-        'goodfreephotos.com', 'wallpapercave.com', 'alphacoders.com',
-        'freepng', 'pngtree', 'nicepng', 'kindpng', 'cleanpng',
-        'easydrawforkids', 'howtodrawforkids', 'paintingvalley', 'clipartmag',
-        'clipartkey', 'ac-illust.com', 'illustmint.com',
-        'blogspot.com', 'hatena.com',
-    ];
     if (blockDomains.some(d => url.toLowerCase().includes(d))) return false;
 
-    const savePath = claimNextStockPath(targetDir, ext);
+    const savePath = claimNextStockPath(targetDir, 'jpg');
     let success = false;
     try {
         const controller = new AbortController();
@@ -58,9 +37,9 @@ async function downloadMedia(url, targetDir, ext, keyword = '') {
         clearTimeout(timeoutId);
         if (res.ok) {
             const contentType = (res.headers.get('content-type') || '').toLowerCase();
-            if (ext === 'jpg' && !contentType.includes('image')) return false;
+            if (!contentType.includes('image')) return false;
             const buffer = await res.arrayBuffer();
-            if (ext === 'jpg' && buffer.byteLength < 20 * 1024) return false; // < 20KB -> rác
+            if (buffer.byteLength < 20 * 1024) return false; // < 20KB -> rác
             fs.writeFileSync(savePath, Buffer.from(buffer));
             success = true;
             return true;
@@ -75,76 +54,28 @@ async function downloadMedia(url, targetDir, ext, keyword = '') {
 
 export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCount) {
     if (type === 'video') return 0;
+    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
     let downloaded = 0;
-    const searchUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(keyword)}&safesearch=off&qft=+filterui:photo-photo&setlang=vi&cc=vn&mkt=vi-VN`;
+    console.log(`      [${keyword}][Google IMG Scrap] Đang tìm: "${keyword}"`);
 
-    const MAX_ATTEMPTS = 3;
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-        const proxy = getNextProxy();
-        const browserArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1920,1080'];
-        if (proxy) browserArgs.push(`--proxy-server=http://${proxy.host}:${proxy.port}`);
+    try {
+        const result = await GOOGLE_IMG_SCRAP({ search: keyword, limit: neededCount * 3 });
+        const images = result.result || [];
+        console.log(`      [${keyword}] Tìm được ${images.length} ảnh, đang tải...`);
 
-        const browser = await puppeteer.launch({ headless: 'new', args: browserArgs });
-        try {
-            const page = await browser.newPage();
-            if (proxy?.user) await page.authenticate({ username: proxy.user, password: proxy.pass });
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
-
-            console.log(`      [${keyword}][Web IMAGE Bot] Đang thâm nhập Bing${proxy ? ' via ' + proxy.host : ''}: ${keyword}`);
-            await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-            console.log(`      [${keyword}][DEBUG] Page loaded, clearing and typing keyword...`);
-            try {
-                await page.waitForSelector('#sb_form_q', { timeout: 5000 });
-                await page.click('#sb_form_q', { clickCount: 3 });
-                await page.keyboard.press('Backspace');
-                await page.type('#sb_form_q', keyword);
-                console.log(`      [${keyword}][DEBUG] Keyword typed, clicking search button...`);
-                await delay(500);
-                await page.click('#sb_form_go');
-                console.log(`      [${keyword}][DEBUG] Search submitted`);
-            } catch(e) {
-                console.log(`      [${keyword}][DEBUG] Could not submit search: ${e.message}`);
+        for (const img of images) {
+            if (downloaded >= neededCount) break;
+            if (!img.url) continue;
+            if (await downloadMedia(img.url, targetDir, keyword)) {
+                downloaded++;
+                console.log(`\x1b[33m      [${keyword}][Google IMG Scrap] 📥 IMAGE bốc từ: ${img.url}\x1b[0m`);
+                console.log(`      [${keyword}][Google IMG Scrap] ---> Đã lấy thành công ${downloaded}/${neededCount}`);
             }
-            await delay(2500);
-            await page.evaluate(() => window.scrollBy(0, 1000));
-            await delay(2500);
-
-            const html = await page.content();
-            const $ = cheerio.load(html);
-            let mediaUrls = [];
-            $('li[data-idx] > div.iuscp > div.imgpt > a.iusc').each((i, el) => {
-                const mData = $(el).attr('m');
-                if (mData) {
-                    try {
-                        const p = JSON.parse(mData);
-                        if (p.murl) mediaUrls.push(p.murl);
-                    } catch(_) {}
-                }
-            });
-
-            if (mediaUrls.length < 5) {
-                console.log(`      [${keyword}] Ít kết quả (${mediaUrls.length}), thử proxy khác...`);
-                await browser.close().catch(() => {});
-                continue;
-            }
-
-            mediaUrls = [...new Set(mediaUrls)];
-            console.log(`      [${keyword}][DEBUG] Media URLs extracted (${mediaUrls.length}):`);
-            mediaUrls.forEach((url, idx) => console.log(`        ${idx + 1}. ${url}`));
-            for (const url of mediaUrls) {
-                if (downloaded >= neededCount) break;
-                if (await downloadMedia(url, targetDir, 'jpg', keyword)) {
-                    downloaded++;
-                    console.log(`\x1b[33m      [${keyword}][Web IMAGE Bot] 📥 IMAGE bốc từ: ${url}\x1b[0m`);
-                    console.log(`      [${keyword}][Web IMAGE Bot] ---> Đã lấy thành công ${downloaded}/${neededCount}`);
-                }
-            }
-            break; // thành công
-        } catch (e) {
-            console.error(`      [${keyword}][Web Lỗi Tổng] ${e.message}`);
-        } finally {
-            await browser.close().catch(() => {});
         }
+    } catch (e) {
+        console.error(`      [${keyword}][Google IMG Scrap Lỗi] ${e.message}`);
     }
+
     return downloaded;
 }
