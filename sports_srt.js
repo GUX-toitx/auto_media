@@ -59,7 +59,7 @@ Task:
 1. Write a detailed sports analysis article simultaneously in Vietnamese AND ${langName}.
 2. Use the most up-to-date data: current squad, recent form, head-to-head, key players, tactical setup.
 3. Pronounce player names, coaches, tournaments correctly in both languages.
-4. Content: A logical and detailed analysis of both teams (including their head-to-head history if available - this is a pre-match analysis). Further analysis includes: team form, tactics, key players (their rivalry, e.g., midfield, forwards, defenders), injury updates, predictions, etc. Also, include interesting information about the match (such as potential record breaks, team transfers or any hot news; any recent stories about players or coaches from either team reported in the press - this is only if you check and find accurate information from reliable sources).
+4. Content: Provide a detailed and logical analysis of a specific team or player, or both teams (pre-match analysis, including head-to-head history if available). Each category I've mentioned should be analyzed in a suitable format. Pre-match analysis will be more in-depth, including: form, tactics, key players (competition between players, e.g., midfielders, forwards, defenders), injury information, predictions, etc. Additionally, include interesting match-related information (such as potential records, player transfers, or any breaking news; any recent stories about players or coaches from either team reported in the press – this should only be done if you verify and find accurate information from reliable sources).
 5. Target duration: 8-10 minutes of presentation content (approximately 2400-3500 words in the target language). Divide the analysis into paragraphs of 3-5 sentences each. Each "sentence" in the JSON output should be a FULL PARAGRAPH (multiple sentences combined), not a single short sentence. Group related ideas into one cohesive paragraph.
 6. For each paragraph, provide the flow in Vietnamese and sequentially list the important keywords (following the subtitle flow) to search for images that match the subtitle.
 7. NEVER cite sources, never add footnotes, never mention where data comes from, never add URLs, never add links in parentheses like ([source.com](url)).
@@ -133,7 +133,7 @@ async function getKeywordsFromGPT(sentence) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'You are a sports image search expert. Given a sports commentary, return 7 specific Bing image search queries (language optional, depending on context for the easiest image search) to find related images. Prioritize specific names of coaches, players, teams, or matches, and timeframes if available. For example: "Japan national soccer team 1980" --> search for "Japan national soccer team 1980" (language optional, you can handle it for easier searching); "Manchester United lost to Barca in the 2008 Champions League final" --> search for "Manchester United vs Barca Champions League 2008" (language optional, you can handle it for easier searching). Return only a raw JSON array, without explanation.'
+                        content: 'You are a sports image search expert for Japanese Bing image search. Given a Vietnamese sports commentary sentence, return Japanese search queries optimized for Bing Images Japan. Rules: 1) Each query MUST be in Japanese (日本語). 2) Return as many queries as needed to fully cover the meaning of the sentence - typically 4 to 7 queries for normal sentences, but if the sentence contains many distinct subjects (multiple players, teams, events, historical moments), return as many as needed with no upper limit. For very simple sentences with one subject, return as few as 2. 3) Be SPECIFIC: include exact player names (in Japanese), team names, tournament names, and year if mentioned. 4) Each query should target a different visual subject in the sentence. 5) Avoid generic or overlapping queries. 6) Use Japanese sports terminology naturally used by Japanese media. 7) Return ONLY a raw JSON array of strings, no explanation.'
                     },
                     { role: 'user', content: sentence }
                 ],
@@ -151,12 +151,12 @@ async function getKeywordsFromGPT(sentence) {
     content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     try {
         const parsed = JSON.parse(content);
-        if (Array.isArray(parsed)) return parsed.filter(Boolean).slice(0, 6);
+        if (Array.isArray(parsed)) return parsed.filter(Boolean);
         const val = Object.values(parsed)[0];
-        return Array.isArray(val) ? val.filter(Boolean).slice(0, 6) : [];
+        return Array.isArray(val) ? val.filter(Boolean) : [];
     } catch {
         const match = content.match(/\[.*?\]/s);
-        if (match) try { return JSON.parse(match[0]).filter(Boolean).slice(0, 6); } catch(_) {}
+        if (match) try { return JSON.parse(match[0]).filter(Boolean); } catch(_) {}
         return [];
     }
 }
