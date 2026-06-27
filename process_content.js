@@ -35,6 +35,8 @@ const contentArg = getArg('--content');
 const targetLang = getArg('--targetLang') || 'en';
 const countryGl = getArg('--country');   // quốc gia ưu tiên (gl) cho Google News, rỗng = US
 const countryHl = getArg('--clang');     // ngôn ngữ địa phương (hl)
+const daysArg = parseInt(getArg('--days'), 10);
+const newsDays = Number.isFinite(daysArg) && daysArg > 0 ? daysArg : 3;   // cửa sổ tin "when:Nd" (mặc định 3)
 
 // LUỒNG MỚI: input là MẢNG TỪ KHÓA + MẢNG DOMAIN NGUỒN (JSON). Tổ hợp tất cả qua Google News.
 function parseArr(raw) { try { const v = JSON.parse(raw); return Array.isArray(v) ? v.map(s => String(s).trim()).filter(Boolean) : []; } catch { return raw ? raw.split(/[|,\n]/).map(s => s.trim()).filter(Boolean) : []; } }
@@ -1037,7 +1039,7 @@ try {
     const bundle = await collectNews({
         keywords, sources: sourceDomains,
         hl: countryHl || 'vi', gl: countryGl || 'VN',   // mặc định bản VN (khớp từ khóa tiếng Việt); chọn quốc gia thì theo đó
-        days: 3, maxArticles: 30, perKeyword: 15,
+        days: newsDays, maxArticles: 30, perKeyword: 15,
     });
     // 2) Đưa title cho GPT-5 xào kịch bản
     const result = await analyzeWithGPT5(topic, bundle.titles, sources);

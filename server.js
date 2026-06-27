@@ -795,10 +795,12 @@ app.post('/api/crawl-vn', async (req, res) => {
 
 // API: Tạo mới dự án từ nội dung
 app.post('/api/create-project', async (req, res) => {
-    const { content, keywords, sources, country, targetLang } = req.body;
+    const { content, keywords, sources, country, targetLang, days } = req.body;
     // LUỒNG MỚI: input là mảng từ khóa + mảng domain nguồn. Vẫn nhận content (chủ đề/tiêu đề) làm tuỳ chọn.
     const kwArr = Array.isArray(keywords) ? keywords.map(s => String(s).trim()).filter(Boolean) : [];
     const srcArr = Array.isArray(sources) ? sources.map(s => String(s).trim()).filter(Boolean) : [];
+    const daysNum = parseInt(days, 10);
+    const newsDays = Number.isFinite(daysNum) && daysNum > 0 ? daysNum : 3;   // cửa sổ tin (when:Nd)
     if (!kwArr.length && !content?.trim()) return res.status(400).json({ error: 'Thiếu từ khóa (keywords) hoặc nội dung' });
     try {
         const projectId = 'proj_' + Date.now();
@@ -814,7 +816,8 @@ app.post('/api/create-project', async (req, res) => {
             '--sources', JSON.stringify(srcArr),
             '--country', cGl,
             '--clang', cHl,
-            '--targetLang', targetLang || 'en'
+            '--targetLang', targetLang || 'en',
+            '--days', String(newsDays)
         ];
         if (content?.trim()) { procArgs.push('--content', content.trim()); }
         const crawlProcess = spawn('node', procArgs, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });

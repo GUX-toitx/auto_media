@@ -1527,6 +1527,14 @@
                 <p class="text-[10px] text-gray-600 mt-1">Ưu tiên báo nước này + quốc tế khi lấy tin RSS. "Tự động" = đoán theo chủ đề.</p>
             </div>
 
+            <!-- Số ngày lấy tin (when:Nd) -->
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Lấy tin trong vòng (ngày)</label>
+                <input type="number" v-model.number="newProjectModal.days" min="1" max="30"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-blue-500" />
+                <p class="text-[10px] text-gray-600 mt-1">Chỉ lấy tin trong N ngày gần nhất (Google News when:Nd). Mặc định 3.</p>
+            </div>
+
             <!-- Mảng từ khóa -->
             <div>
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Từ khóa (mỗi dòng 1 từ khóa)</label>
@@ -1836,6 +1844,7 @@ createApp({
             sourcesText: '',
             customSource: '',
             targetLang: 'en',
+            days: 3,
             loading: false,
             country: '',
             countryOptions: [
@@ -1912,7 +1921,7 @@ createApp({
         }
 
         async function submitNewProject() {
-            const { content, keywordsText, sourcesText, country, countryOptions, targetLang } = newProjectModal.value;
+            const { content, keywordsText, sourcesText, country, countryOptions, targetLang, days } = newProjectModal.value;
             const keywords = (keywordsText || '').split(/[\n,]/).map(s => s.trim()).filter(Boolean);
             const sources = (sourcesText || '').split(/[\n,]/).map(s => s.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '')).filter(Boolean);
             if (!keywords.length && !content.trim()) return;
@@ -1922,7 +1931,7 @@ createApp({
                 const res = await fetch('/api/create-project', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content: content.trim(), keywords, sources, country: { gl: c.gl, hl: c.hl }, targetLang })
+                    body: JSON.stringify({ content: content.trim(), keywords, sources, country: { gl: c.gl, hl: c.hl }, targetLang, days })
                 });
                 const r = await res.json();
                 if (r.success) {
