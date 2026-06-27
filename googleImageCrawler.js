@@ -3,9 +3,55 @@ import dns from 'dns';
 dns.setDefaultResultOrder('ipv4first');
 // File: googleImageCrawler.js (Bản 4.0 - Ảnh từ Google Images qua google-img-scrap, thay Bing)
 import fs from 'fs';
+import proxyChain from 'proxy-chain';
+import { getOldestProxy } from './proxyManager.js';
 import { claimNextStockPath } from './stockNaming.js';
 import googleImgScrap from 'google-img-scrap';
 const { GOOGLE_IMG_SCRAP } = googleImgScrap;
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Giảm nhịp: serialize TOÀN CỤC các call google-img-scrap + giãn cách tối thiểu để tránh Google chặn
+const GI_MIN_GAP = 2500;
+let _giChain = Promise.resolve();
+let _giLast = 0;
+function throttledScrap(config) {
+    const run = async () => {
+        const wait = GI_MIN_GAP - (Date.now() - _giLast);
+        if (wait > 0) await sleep(wait);
+        try { return await GOOGLE_IMG_SCRAP(config); }
+        finally { _giLast = Date.now(); }
+    };
+    const p = _giChain.then(run, run);   // nối đuôi -> chạy lần lượt
+    _giChain = p.catch(() => {});
+    return p;
+}
+
+// Scrape có retry; từ lần 2 dùng PROXY XOAY VÒNG (bọc proxyChain để chromium dùng proxy có auth)
+async function scrapImages(keyword, limit, maxAttempts = 3) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        let anon = null, proxyArg;
+        try {
+            if (attempt >= 2) {
+                const px = await getOldestProxy().catch(() => null);
+                if (px && px.server) {
+                    const authUrl = px.server.replace('http://', `http://${px.username}:${px.password}@`);
+                    try { anon = await proxyChain.anonymizeProxy(authUrl); proxyArg = anon; } catch (_) {}
+                }
+            }
+            const res = await throttledScrap({ search: keyword, limit, ...(proxyArg ? { proxy: proxyArg } : {}) });
+            const result = res?.result || [];
+            if (result.length) return result;
+            console.log(`      [${keyword}][GoogleImage] lần ${attempt} rỗng${proxyArg ? ' (proxy)' : ''}, thử lại...`);
+        } catch (e) {
+            console.error(`      [${keyword}][GoogleImage] lần ${attempt} lỗi: ${e.message}`);
+        } finally {
+            if (anon) await proxyChain.closeAnonymizedProxy(anon, true).catch(() => {});
+        }
+        await sleep(1500 * attempt);
+    }
+    return [];
+}
 
 async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '', source = '') {
     if (url.includes('onelink.me') || url.includes('app-store') || url.includes('play.google')) {
@@ -79,19 +125,14 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
     const ext = 'jpg';
 
     let images = [];
-    try {
-        // lấy dư (x3) để bù ảnh tải lỗi; giữ originalUrl (trang nguồn) để gắn tag
-        const res = await GOOGLE_IMG_SCRAP({ search: keyword, limit: Math.max(neededCount * 3, 20) });
-        const seen = new Set();
-        for (const r of (res?.result || [])) {
-            if (!r.url || seen.has(r.url)) continue;
-            seen.add(r.url);
-            const src = (r.originalUrl || r.url).replace(/\\u003d/gi, '=').replace(/\\u0026/gi, '&').replace(/\\u003f/gi, '?').replace(/\\\//g, '/');
-            images.push({ url: r.url, source: src });
-        }
-    } catch (err) {
-        console.error(`      [${keyword}][GoogleImage] Lỗi scrape: ${err.message}`);
-        return 0;
+    // lấy dư (x3) để bù ảnh tải lỗi; giữ originalUrl (trang nguồn) để gắn tag
+    const result = await scrapImages(keyword, Math.max(neededCount * 3, 20));
+    const seen = new Set();
+    for (const r of result) {
+        if (!r.url || seen.has(r.url)) continue;
+        seen.add(r.url);
+        const src = (r.originalUrl || r.url).replace(/\\u003d/gi, '=').replace(/\\u0026/gi, '&').replace(/\\u003f/gi, '?').replace(/\\\//g, '/');
+        images.push({ url: r.url, source: src });
     }
 
     if (!images.length) {
