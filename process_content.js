@@ -3,10 +3,22 @@ dns.setDefaultResultOrder('ipv4first');
 import 'dotenv/config';
 import https from 'https';
 import http from 'http';
+import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
+import { collectNews } from './news_pipeline.js';
+import { readStockSource } from './stockNaming.js';
+
+// Nuốt lỗi vô hại của puppeteer-extra-stealth khi tạo page lúc nhiều browser bung cùng lúc
+// ("Requesting main frame too early!") — nếu không, unhandledRejection có thể kill cả tiến trình giữa chừng.
+process.on('unhandledRejection', (err) => {
+    const msg = (err && err.message) ? err.message : String(err);
+    if (/main frame too early|Target closed|Session closed/i.test(msg)) return;
+    console.error('[process_content] unhandledRejection:', msg);
+});
 
 const BASE_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
 const DB_DIR = process.env.DB_DIR || '/usr/gux/media-team/db';
@@ -17,14 +29,23 @@ const PORT = process.env.PORT || 3000;
 const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 
 const args = process.argv.slice(2);
+const getArg = (k) => (args.indexOf(k) >= 0 ? args[args.indexOf(k) + 1] : '') || '';
 const projectId = args[args.indexOf('--projectId') + 1];
-const contentArg = args[args.indexOf('--content') + 1];
-const sourcesArg = args[args.indexOf('--sources') + 1] || '';
-const targetLang = args[args.indexOf('--targetLang') + 1] || 'en';
-const sources = sourcesArg ? sourcesArg.split('|').join(', ') : 'Reuters, AP, BBC, CNN, DW, Al Jazeera, NATO';
+const contentArg = getArg('--content');
+const targetLang = getArg('--targetLang') || 'en';
+const countryGl = getArg('--country');   // quốc gia ưu tiên (gl) cho Google News, rỗng = US
+const countryHl = getArg('--clang');     // ngôn ngữ địa phương (hl)
 
-if (!projectId || !contentArg) {
-    console.error('[process_content] Thiếu --projectId hoặc --content');
+// LUỒNG MỚI: input là MẢNG TỪ KHÓA + MẢNG DOMAIN NGUỒN (JSON). Tổ hợp tất cả qua Google News.
+function parseArr(raw) { try { const v = JSON.parse(raw); return Array.isArray(v) ? v.map(s => String(s).trim()).filter(Boolean) : []; } catch { return raw ? raw.split(/[|,\n]/).map(s => s.trim()).filter(Boolean) : []; } }
+const keywords = parseArr(getArg('--keywords'));
+if (!keywords.length && contentArg) keywords.push(contentArg);   // fallback: dùng --content như 1 từ khóa
+const sourceDomains = parseArr(getArg('--sources'));             // vd ["reuters.com","vnexpress.net"]
+const topic = contentArg || keywords.join(', ');                 // tiêu đề/chủ đề cho GPT + đặt tên project
+const sources = sourceDomains.length ? sourceDomains.join(', ') : 'Reuters, AP, BBC, CNN, DW, Al Jazeera';
+
+if (!projectId || !keywords.length) {
+    console.error('[process_content] Thiếu --projectId hoặc --keywords/--content');
     process.exit(1);
 }
 
@@ -114,7 +135,269 @@ function httpsPost(url, headers, body) {
     });
 }
 
-async function analyzeWithGPT5(topic, sources) {
+// GET đơn giản (theo redirect, resolve URL tương đối, có timeout + cookie consent) cho RSS/trang báo/YouTube
+function httpGet(url, depth = 0) {
+    return new Promise((resolve, reject) => {
+        const req = (url.startsWith('http://') ? http : https).get(url, { headers: { 'User-Agent': 'Mozilla/5.0', 'Cookie': 'CONSENT=YES+1', 'Accept-Language': 'en-US,en;q=0.9' } }, (res) => {
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && depth < 5) {
+                res.resume();
+                return httpGet(new URL(res.headers.location, url).href, depth + 1).then(resolve, reject);
+            }
+            let data = '';
+            res.on('data', d => data += d);
+            res.on('end', () => resolve(data));
+        });
+        req.on('error', reject);
+        req.setTimeout(15000, () => { req.destroy(); reject(new Error('timeout')); });
+    });
+}
+
+const decodeXml = (s) => s
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
+    .replace(/&amp;/g, '&');
+
+// Phát hiện quốc gia/ngôn ngữ liên quan từ chủ đề -> truy vấn tiếng Anh + tiếng địa phương (gpt-4o-mini)
+async function detectRegionQueries(topic) {
+    const forced = countryGl && countryHl; // người dùng chọn quốc gia ở giao diện
+    try {
+        const sys = forced
+            ? `Người dùng đưa chủ đề tin tức (tiếng Việt). Quốc gia ưu tiên: ${countryGl}, ngôn ngữ địa phương (mã hl): ${countryHl}. Trả JSON: {"en":"<truy vấn tìm kiếm tiếng Anh, gồm quốc gia + chủ đề>","local":"<truy vấn bằng ngôn ngữ ${countryHl}>"}. CHỈ trả JSON.`
+            : 'Người dùng đưa một chủ đề tin tức (tiếng Việt). Trả về JSON: {"en":"<truy vấn tìm kiếm tiếng Anh, gồm quốc gia + chủ đề chính>","local":"<truy vấn bằng ngôn ngữ chính của quốc gia liên quan, để rỗng nếu mang tính toàn cầu hoặc không rõ nước>","hl":"<mã ngôn ngữ địa phương: ja, zh-Hans, ko, ru, fr, de, ar...; rỗng nếu không>","gl":"<mã quốc gia: JP, CN, KR, RU, FR, DE, IL...; rỗng nếu không>"}. CHỈ trả JSON.';
+        const res = await httpsPost(
+            'https://api.openai.com/v1/chat/completions',
+            { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+            { model: 'gpt-4o-mini', temperature: 0, response_format: { type: 'json_object' },
+              messages: [{ role: 'system', content: sys }, { role: 'user', content: topic }] }
+        );
+        if (res.status !== 200) return forced ? { en: topic, local: '', hl: countryHl, gl: countryGl } : null;
+        const j = JSON.parse(JSON.parse(res.body).choices[0].message.content);
+        if (forced) { j.hl = countryHl; j.gl = countryGl; } // ép theo lựa chọn người dùng
+        return j;
+    } catch (e) { return forced ? { en: topic, local: '', hl: countryHl, gl: countryGl } : null; }
+}
+
+// Lấy tin thật 24h từ Google News — nhiều "edition" theo vùng: nước liên quan + quốc tế (Anh) + VN
+async function fetchGoogleNews(topic, maxItems = 30) {
+    const reg = await detectRegionQueries(topic);
+    const editions = [];
+    // Ưu tiên báo nước được nhắc tới (ngôn ngữ địa phương)
+    if (reg && reg.local && reg.hl && reg.gl) editions.push({ q: reg.local, hl: reg.hl, gl: reg.gl, tag: reg.gl });
+    // Quốc tế tiếng Anh — dùng en-GB (en-US bị chặn/redirect từ server), query tiếng Anh
+    editions.push({ q: (reg && reg.en) || topic, hl: 'en-GB', gl: 'GB', tag: 'Quốc tế' });
+    // Tiếng Việt
+    editions.push({ q: topic, hl: 'vi', gl: 'VN', tag: 'VN' });
+
+    const seen = new Set(), out = [];
+    for (const ed of editions) {
+        try {
+            const ceidLang = ed.hl.split('-')[0];
+            const url = `https://news.google.com/rss/search?q=${encodeURIComponent(ed.q + ' when:1d')}&hl=${ed.hl}&gl=${ed.gl}&ceid=${ed.gl}:${ceidLang}`;
+            const xml = await httpGet(url);
+            let n = 0;
+            for (const m of xml.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+                if (n >= 25) break;
+                const b = m[1];
+                const title = decodeXml((b.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '').replace(/<!\[CDATA\[|\]\]>/g, '').trim());
+                const pub = (b.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] || '').trim();
+                const source = decodeXml((b.match(/<source[^>]*>([\s\S]*?)<\/source>/)?.[1] || '').trim());
+                const link = decodeXml((b.match(/<link>([\s\S]*?)<\/link>/)?.[1] || '').trim());
+                const key = title.toLowerCase().slice(0, 50);
+                if (title && link && !seen.has(key)) { seen.add(key); out.push({ title, pub, source, link, tag: ed.tag }); n++; }
+            }
+            console.log(`[news][gnews] ${ed.tag} (${ed.hl}/${ed.gl}) "${ed.q.slice(0, 40)}": ${n} bài`);
+        } catch (e) { console.error(`[news][gnews] ${ed.tag} lỗi:`, e.message); }
+    }
+    console.log(`[process_content] Google News: ${out.length} bài (nước liên quan + quốc tế + VN)`);
+    return { items: out.slice(0, maxItems), editions, reg };
+}
+
+// ===== Pool ảnh THEO CHỦ ĐỀ: Bing image search theo truy vấn từng edition (ảnh báo thật, đúng chủ đề) =====
+// Giải mã chuỗi bị HTML-entity + \uXXXX trong thuộc tính m="..." của Bing
+const decodeBing = (s) => decodeXml(s).replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16))).replace(/\\\//g, '/');
+async function fetchTopicImagePool(editions, maxPerQuery = 40) {
+    const pool = [], seen = new Set();
+    for (const ed of (editions || [])) {
+        try {
+            // filterui: ảnh photo, ưu tiên 7 ngày gần nhất để bám tin thời sự
+            const url = `https://www.bing.com/images/search?q=${encodeURIComponent(ed.q)}&qft=+filterui:photo-photo+filterui:age-lt10080&form=HDRSC2`;
+            const html = await httpGet(url);
+            let n = 0;
+            for (const m of html.matchAll(/\sm="([^"]+)"/g)) {
+                const j = m[1];
+                if (!j.includes('&quot;murl&quot;')) continue;
+                let img = j.match(/&quot;murl&quot;:&quot;(.*?)&quot;/)?.[1];
+                if (!img) continue;
+                img = decodeBing(img);
+                if (!/^https?:\/\//.test(img) || /\.svg($|\?)/i.test(img)) continue;
+                const title = decodeBing(j.match(/&quot;t&quot;:&quot;(.*?)&quot;/)?.[1] || ed.q);
+                if (!seen.has(img)) { seen.add(img); pool.push({ title, img }); n++; }
+                if (n >= maxPerQuery) break;
+            }
+            console.log(`[news][IMG-search] ${ed.tag} "${ed.q.slice(0, 40)}": ${n} ảnh`);
+        } catch (e) { console.error(`[news][IMG-search] ${ed.tag} lỗi:`, e.message); }
+    }
+    console.log(`[process_content] Topic image pool: ${pool.length} ảnh (Bing image search theo chủ đề)`);
+    pool.slice(0, 3).forEach((a, i) => console.log(`[news][IMG] ví dụ ${i + 1}: "${a.title.slice(0, 45)}" -> ${a.img.slice(0, 70)}`));
+    return pool;
+}
+
+// ===== Pool video THEO CHỦ ĐỀ: YouTube search theo truy vấn từng edition =====
+async function fetchTopicVideoPool(editions, maxPerQuery = 20) {
+    const pool = [], seen = new Set();
+    for (const ed of (editions || [])) {
+        try {
+            const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(ed.q)}&hl=${ed.hl.split('-')[0]}&gl=${ed.gl}`;
+            const html = await httpGet(url);
+            const re = /"videoRenderer":\{"videoId":"([\w-]{11})".*?"title":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"/g;
+            let n = 0, m;
+            while ((m = re.exec(html)) && n < maxPerQuery) {
+                const vid = m[1];
+                let title = m[2];
+                try { title = JSON.parse('"' + title + '"'); } catch { }
+                if (!seen.has(vid)) { seen.add(vid); pool.push({ title, url: `https://www.youtube.com/watch?v=${vid}` }); n++; }
+            }
+            console.log(`[news][YT-search] ${ed.tag} "${ed.q.slice(0, 40)}": ${n} video`);
+        } catch (e) { console.error(`[news][YT-search] ${ed.tag} lỗi:`, e.message); }
+    }
+    console.log(`[process_content] Topic video pool: ${pool.length} video (YouTube search theo chủ đề)`);
+    pool.slice(0, 3).forEach((a, i) => console.log(`[news][YT] ví dụ ${i + 1}: "${a.title.slice(0, 50)}" -> ${a.url}`));
+    return pool;
+}
+
+// ===== (Dự phòng) Ảnh tin từ RSS các báo cố định — chỉ dùng khi pool theo chủ đề rỗng =====
+const NEWS_FEEDS = [
+    'https://feeds.bbci.co.uk/news/world/rss.xml',
+    'https://vnexpress.net/rss/the-gioi.rss',
+    'http://rss.cnn.com/rss/edition_world.rss',
+    'https://moxie.foxnews.com/google-publisher/world.xml',
+];
+
+// Tải 1 ảnh về file (theo redirect, bỏ ảnh quá nhỏ)
+function downloadBinary(url, destPath, depth = 0) {
+    return new Promise((resolve, reject) => {
+        const req = (url.startsWith('http://') ? http : https).get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && depth < 4) {
+                res.resume();
+                return downloadBinary(new URL(res.headers.location, url).href, destPath, depth + 1).then(resolve, reject);
+            }
+            if (res.statusCode !== 200) { res.resume(); return reject(new Error('status ' + res.statusCode)); }
+            const chunks = [];
+            res.on('data', c => chunks.push(c));
+            res.on('end', () => {
+                const buf = Buffer.concat(chunks);
+                if (buf.length < 4000) return reject(new Error('too small')); // bỏ placeholder/icon
+                fs.writeFileSync(destPath, buf);
+                resolve(buf.length);
+            });
+        });
+        req.on('error', reject);
+        req.setTimeout(15000, () => { req.destroy(); reject(new Error('timeout')); });
+    });
+}
+
+const tokenize = (s) => (s || '').toLowerCase().split(/[^a-zà-ỹ0-9]+/i).filter(w => w.length >= 4);
+
+// Lấy pool bài có ảnh từ các feed
+async function fetchNewsPool(maxPerFeed = 50) {
+    const pool = [], seen = new Set();
+    let feedIdx = 0;
+    for (const feed of NEWS_FEEDS) {
+        const host = (feed.match(/\/\/([^/]+)/) || [])[1] || feed;
+        try {
+            const xml = await httpGet(feed);
+            const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, maxPerFeed);
+            // Dump cấu trúc thô 1 item của feed đầu tiên để xem RSS trông như thế nào
+            if (feedIdx === 0 && items[0]) {
+                console.log(`[news][RSS][raw] cấu trúc 1 <item> của ${host}:\n` + items[0][1].trim().slice(0, 600));
+            }
+            let withImg = 0;
+            for (const m of items) {
+                const b = m[1];
+                const title = decodeXml((b.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '').replace(/<!\[CDATA\[|\]\]>/g, '').trim());
+                let img = b.match(/<media:(?:content|thumbnail)[^>]+url="([^"]+)"/i)?.[1]
+                    || b.match(/<enclosure[^>]+url="([^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/i)?.[1]
+                    || (b.match(/<(?:description|content:encoded)>([\s\S]*?)<\/(?:description|content:encoded)>/i)?.[1] || '').match(/https?:\/\/[^"'\s<>]+\.(?:jpg|jpeg|png|webp)/i)?.[0];
+                // Nâng kích thước ảnh BBC (mặc định 240px -> 976px)
+                if (img && img.includes('ichef.bbci.co.uk')) img = img.replace(/\/standard\/\d+\//, '/standard/976/').replace(/\/news\/\d+\//, '/news/976/');
+                if (title && img && !seen.has(img)) { seen.add(img); pool.push({ title, img }); withImg++; }
+            }
+            console.log(`[news][RSS] ${host}: ${items.length} item, ${withImg} có ảnh`);
+        } catch (e) { console.error(`[news][RSS] ${host} lỗi:`, e.message); }
+        feedIdx++;
+    }
+    console.log(`[process_content] News pool: ${pool.length} bài có ảnh (từ ${NEWS_FEEDS.length} feed)`);
+    pool.slice(0, 3).forEach((a, i) => console.log(`[news][RSS] ví dụ ${i + 1}: "${a.title.slice(0, 50)}" -> ${a.img.slice(0, 75)}`));
+    return pool;
+}
+
+// Chọn bài tin có tiêu đề khớp nhất với token của paragraph (dùng cho cả ảnh và video)
+function pickNews(pool, tokens, n, used) {
+    return pool.filter(a => !used.has(a.img || a.url))
+        .map(a => ({ a, score: tokens.reduce((s, w) => s + (a.title.toLowerCase().includes(w) ? 1 : 0), 0) }))
+        .filter(x => x.score > 0)
+        .sort((x, y) => y.score - x.score)
+        .slice(0, n).map(x => x.a);
+}
+
+// ===== Video tin thật từ kênh YouTube hãng tin (tải bằng yt-dlp) =====
+const YT_NEWS_CHANNELS = [
+    'UC16niRr50-MSBwiO3YDb3RA', // BBC News
+    'UCknLrEdhRCp1aegoMqRaCZg', // DW News
+    'UCNye-wNBqNL5ZzHSJj3l8Bg', // Al Jazeera English
+    'UChqUTb7kYRX8-EiaN3XFrSQ', // Reuters
+    'UCabsTV34JwALXKGMqHpvUiA', // VTV24
+    'UCinkijG72G87sn-mtaFJTbA', // VTC14
+    'UCmBT5CqUxf3-K5_IU9tVtBg', // ANTV
+    'UCHCos7l5Nol2OZfFFkDXckg', // VOV
+];
+
+async function fetchNewsVideoPool(maxPerCh = 25) {
+    const pool = [], seen = new Set();
+    let chIdx = 0;
+    for (const ch of YT_NEWS_CHANNELS) {
+        try {
+            const xml = await httpGet(`https://www.youtube.com/feeds/videos.xml?channel_id=${ch}`);
+            const chName = decodeXml((xml.match(/<title>([^<]+)<\/title>/)?.[1] || ch).trim());
+            const items = [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)].slice(0, maxPerCh);
+            // Dump cấu trúc thô 1 entry của kênh đầu tiên
+            if (chIdx === 0 && items[0]) {
+                console.log(`[news][YT][raw] cấu trúc 1 <entry> của ${chName}:\n` + items[0][1].trim().slice(0, 600));
+            }
+            let n = 0;
+            for (const m of items) {
+                const b = m[1];
+                const vid = b.match(/<yt:videoId>([^<]+)<\/yt:videoId>/)?.[1];
+                const title = decodeXml((b.match(/<media:title>([\s\S]*?)<\/media:title>/)?.[1] || b.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '').trim());
+                if (vid && title && !seen.has(vid)) { seen.add(vid); pool.push({ title, url: `https://www.youtube.com/watch?v=${vid}` }); n++; }
+            }
+            console.log(`[news][YT] ${chName}: ${n} video`);
+        } catch (e) { console.error(`[news][YT] kênh ${ch} lỗi:`, e.message); }
+        chIdx++;
+    }
+    console.log(`[process_content] News video pool: ${pool.length} video (từ ${YT_NEWS_CHANNELS.length} kênh)`);
+    pool.slice(0, 3).forEach((a, i) => console.log(`[news][YT] ví dụ ${i + 1}: "${a.title.slice(0, 50)}" -> ${a.url}`));
+    return pool;
+}
+
+// Tải 1 video YouTube (cap 720p cho nhẹ, bỏ video > 15 phút, không tải playlist)
+function downloadYtVideo(url, destPath) {
+    return new Promise((resolve, reject) => {
+        const args = ['--no-warnings', '--no-playlist',
+            '-f', 'best[height<=720][ext=mp4]/best[ext=mp4]/best',
+            '--merge-output-format', 'mp4',
+            '--match-filter', 'duration < 900',
+            '--user-agent', 'Mozilla/5.0', '-o', destPath, url];
+        const p = spawn('yt-dlp', args);
+        let err = '';
+        p.stderr.on('data', d => err += d);
+        p.on('close', code => code === 0 ? resolve(true) : reject(new Error((err.split('\n')[0] || 'code ' + code))));
+        p.on('error', reject);
+    });
+}
+
+async function analyzeWithGPT5(topic, newsTitles, sources) {
     const schema = {
         type: 'object',
         properties: {
@@ -231,11 +514,20 @@ async function analyzeWithGPT5(topic, sources) {
         additionalProperties: false
     };
 
+    // Tin thật từ Google News (đã thu thập sẵn theo từ khóa + nguồn) — GPT bám sự kiện có thật, không bịa
+    const news = newsTitles || [];
+    const newsBlock = news.length ? [
+        'NGUON TIN THUC TE (Google News, moi nhat & sat nhat theo tu khoa + nguon) — BAT BUOC bam vao cac su kien co that duoi day, KHONG duoc bia su kien ngoai danh sach:',
+        ...news.map((a, i) => `${i + 1}. ${a.title}${a.source ? ' — ' + a.source : ''}`),
+        '',
+    ] : [];
+
     const input = [
         'TAO NOI DUNG YOUTUBE DIA CHINH TRI THE GIOI THEO KIEU CINEMATIC STORYTELLING',
         '',
         'CHU DE: ' + topic,
         '',
+        ...newsBlock,
         'MUC TIEU:',
         '- Tao bai phan tich dia chinh tri theo phong cach documentary YouTube hien dai.',
         '- Noi dung phai cuon, co chieu sau va giu retention cao.',
@@ -421,6 +713,7 @@ async function analyzeWithGPT5(topic, sources) {
     console.log('[process_content] === END GPT OUTPUT ===');
     
     const result = JSON.parse(outputText);
+    result._news = news;   // danh sách tiêu đề tin (để ghi log RSS)
     return result;
 }
 
@@ -556,45 +849,156 @@ async function saveToDb(projectId, result) {
         }
     }
     const summaryPath = path.join(BASE_DIR, projectId, 'summary.json');
+    fs.mkdirSync(path.dirname(summaryPath), { recursive: true });   // đảm bảo thư mục project tồn tại
     fs.writeFileSync(summaryPath, JSON.stringify({
         title: result.title,
         hook_vi: result.hook_vi,
         hook_target: result.hook_target
     }, null, 2));
 
-    // Crawl media cho tất cả sections và paragraphs
-    const { fetchAndDownloadStock } = await import('./sync_assets_db.js').catch(() => ({}));
-    if (fetchAndDownloadStock) {
-        const syncDir = async (folder, type, insertFn) => {
-            const exts = type === 'video' ? ['.mp4','.mov'] : ['.jpg','.jpeg','.png','.webp'];
+    // Crawl media cho tất cả sections và paragraphs — TỪ ẢNH/VIDEO ĐÃ CÀO TRONG BÀI BÁO
+    {
+        // Gom toàn bộ media cào được từ các bài (mỗi item gắn tiêu đề bài để khớp token theo đoạn)
+        // Chuẩn hoá URL để gộp cùng 1 ảnh khác kích thước/định dạng/host (bỏ query, /wNNN/, /thumb/, đuôi .webp/.avif, host)
+        const normImg = (u) => u.split('?')[0]
+            .replace(/\/w\d+\//, '/').replace(/\/thumb\/[^/]+\//, '/')
+            .replace(/\.(webp|avif)$/i, '').replace(/^https?:\/\/[^/]+/, '').toLowerCase();
+        const articles = result._articles || [];
+        const newsPool = [], videoPool = [], seenImg = new Set(), seenVid = new Set();
+        for (const a of articles) {
+            for (const img of (a.images || [])) { const k = normImg(img); if (!seenImg.has(k)) { seenImg.add(k); newsPool.push({ title: a.title, img, source: a.source, srcUrl: a.url }); } }
+            for (const v of (a.videos || [])) if (!seenVid.has(v)) { seenVid.add(v); videoPool.push({ title: a.title, url: v, source: a.source, srcUrl: a.url }); }
+        }
+        console.log(`[process_content] Media pool từ ${articles.length} bài: ${newsPool.length} ảnh, ${videoPool.length} video`);
+        const usedNews = new Set(), usedVideos = new Set(), usedHashes = new Set();
+
+        // ===== Nguồn KHÁC (stock: Pexels/Pixabay/Storyblocks/Google) — crawl bổ sung cạnh tin RSS =====
+        const STOCK_VID = 4, STOCK_IMG = 8;   // số video/ảnh stock mỗi keyword
+        const { fetchAndDownloadStock, runConcurrently } = await import('./sync_assets_db.js').catch(() => ({}));
+        // Quét file stock_* mới tải trong thư mục vào DB (bỏ qua file đã có / trùng nội dung)
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        const syncStock = async (folder, type, insertFn) => {
+            const exts = type === 'video' ? ['.mp4', '.mov'] : ['.jpg', '.jpeg', '.png', '.webp'];
             if (!fs.existsSync(folder)) return;
             for (const file of fs.readdirSync(folder)) {
                 if (!exts.includes(path.extname(file).toLowerCase())) continue;
-                const rel = path.relative(BASE_DIR, path.join(folder, file));
-                const ex = await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
-                if (!ex) await insertFn(rel, type);
+                const full = path.join(folder, file);
+                // Bỏ file chưa tải xong / rỗng (tránh chèn asset 0 byte gây lỗi 416)
+                try { if (fs.statSync(full).size < 2000) continue; } catch (_) { continue; }
+                const rel = path.relative(BASE_DIR, full);
+                if (await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel])) continue;
+                try { const h = crypto.createHash('md5').update(fs.readFileSync(full)).digest('hex'); if (usedHashes.has(h)) { fs.unlinkSync(full); continue; } usedHashes.add(h); } catch (_) {}
+                await insertFn(rel, type, readStockSource(full));   // gắn URL nguồn (sidecar .src)
+            }
+        };
+        // Crawl stock SONG SONG (như nguồn cũ) + LIVE SYNC mỗi 2s để asset hiện dần trên màn hình
+        const attachStock = async (kws, iFolder, vFolder, ins) => {
+            if (!fetchAndDownloadStock || !runConcurrently) return;
+            const tasks = [];
+            for (const kw of kws) {
+                tasks.push(() => fetchAndDownloadStock(kw, 'video', vFolder, STOCK_VID).catch(() => {}));
+                tasks.push(() => fetchAndDownloadStock(kw, 'image', iFolder, STOCK_IMG).catch(() => {}));
+            }
+            let downloading = true;
+            const liveSync = async () => {
+                while (downloading) {
+                    try { await syncStock(vFolder, 'video', ins); await syncStock(iFolder, 'image', ins); } catch (_) {}
+                    await sleep(2000);
+                }
+            };
+            const lp = liveSync();
+            await runConcurrently(tasks, 2);   // 2 (mỗi cái lại bung nhiều provider) — tránh quá nhiều browser stealth cùng lúc
+            downloading = false;
+            await lp;
+            await syncStock(vFolder, 'video', ins);   // sync lần cuối
+            await syncStock(iFolder, 'image', ins);
+        };
+
+        // Log RSS của lần chạy này — ghi ra thư mục rss/ khi xong
+        const rssLog = {
+            generatedAt: new Date().toISOString(),
+            projectId,
+            topic,
+            keywords,
+            sources: sourceDomains,
+            articles: articles.map(a => ({ title: a.title, source: a.source, pub: a.pub, url: a.url, keyword: a.keyword, images: a.images?.length || 0, videos: a.videos?.length || 0 })),
+            imagePool: newsPool.map(a => ({ title: a.title, img: a.img })),
+            videoPool: videoPool.map(a => ({ title: a.title, url: a.url })),
+            assignments: {},   // key: "hook"/"summary"/"conclusion" hoặc số thứ tự paragraph
+        };
+
+        // Số ảnh/video tin tối đa lấy cho mỗi section/paragraph (lấy nhiều nhất pool cho phép)
+        const CAP_IMG = 16, CAP_VID = 4;
+        // Chọn tới `cap` mục: ưu tiên khớp token, thiếu thì bù thêm mục mới nhất chưa dùng
+        const pickUpTo = (pool, tokens, cap, used, keyOf) => {
+            const matched = pickNews(pool, tokens, cap, used);
+            if (matched.length >= cap) return matched;
+            const have = new Set(matched.map(keyOf));
+            const extra = pool.filter(a => !used.has(keyOf(a)) && !have.has(keyOf(a))).slice(0, cap - matched.length);
+            return matched.concat(extra);
+        };
+
+        // Gắn ảnh tin (tối đa CAP_IMG) + video tin (tối đa CAP_VID) vào 1 nhóm (section hoặc paragraph)
+        const attachNews = async (tokens, gid, iFolder, vFolder, ins) => {
+            const rec = { tokens, images: [], videos: [] };
+            rssLog.assignments[gid] = rec;
+            if (newsPool.length) {
+                const imgMatch = pickUpTo(newsPool, tokens, CAP_IMG, usedNews, a => a.img);
+                let ni = 0;
+                for (const art of imgMatch) {
+                    const dest = path.join(iFolder, `news_${gid}_${ni++}.jpg`);
+                    try {
+                        await downloadBinary(art.img, dest);
+                        usedNews.add(art.img);
+                        const h = crypto.createHash('md5').update(fs.readFileSync(dest)).digest('hex');
+                        if (usedHashes.has(h)) { fs.unlinkSync(dest); continue; }   // ảnh trùng nội dung -> bỏ
+                        usedHashes.add(h);
+                        const rel = path.relative(BASE_DIR, dest);
+                        if (!await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel])) await ins(rel, 'image', art.srcUrl);
+                        rec.images.push({ title: art.title, img: art.img, file: rel });
+                        console.log(`[process_content] News ảnh ${gid}: ${art.title.slice(0, 45)}`);
+                    } catch (_) { /* bỏ ảnh lỗi */ }
+                }
+            }
+            if (videoPool.length) {
+                const vidMatch = pickUpTo(videoPool, tokens, CAP_VID, usedVideos, a => a.url);
+                let vi = 0;
+                for (const art of vidMatch) {
+                    usedVideos.add(art.url);
+                    const dest = path.join(vFolder, `news_${gid}_${vi++}.mp4`);
+                    try {
+                        // file mp4/webm trực tiếp -> tải thẳng; youtube/vimeo/m3u8 -> yt-dlp
+                        if (/\.(mp4|webm)(\?|$)/i.test(art.url)) await downloadBinary(art.url, dest);
+                        else await downloadYtVideo(art.url, dest);
+                        if (fs.existsSync(dest)) {
+                            const h = crypto.createHash('md5').update(fs.readFileSync(dest)).digest('hex');
+                            if (usedHashes.has(h)) { fs.unlinkSync(dest); continue; }   // video trùng nội dung -> bỏ
+                            usedHashes.add(h);
+                            const rel = path.relative(BASE_DIR, dest);
+                            if (!await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel])) await ins(rel, 'video', art.srcUrl);
+                            rec.videos.push({ title: art.title, url: art.url, file: rel });
+                            console.log(`[process_content] News video ${gid}: ${art.title.slice(0, 45)}`);
+                        }
+                    } catch (e) { console.error(`[process_content] yt-dlp ${gid}: ${e.message}`); }
+                }
             }
         };
 
-        // Sections: hook, summary, conclusion
+        // Sections: hook, summary, conclusion — RSS news khớp keyword của section
         for (const section of ['hook', 'summary', 'conclusion']) {
             const kws = await db.all('SELECT content FROM Keyword WHERE post_id = ? AND section = ?', [postId, section]);
             if (!kws.length) continue;
             const vFolder = path.join(BASE_DIR, projectId, 'assets', '_raw_videos', section);
             const iFolder = path.join(BASE_DIR, projectId, 'assets', '_raw_images', section);
             [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
-            for (const { content: kw } of kws) {
-                console.log(`[process_content] Crawl ${section}: ${kw}`);
-                await fetchAndDownloadStock(kw, 'video', vFolder, 4).catch(() => {});
-                await fetchAndDownloadStock(kw, 'image', iFolder, 8).catch(() => {});
-            }
-            const ins = (rel, type) => db.run('INSERT INTO Asset (post_id, section, type, file_path) VALUES (?, ?, ?, ?)', [postId, section, type, rel]);
-            await syncDir(vFolder, 'video', ins);
-            await syncDir(iFolder, 'image', ins);
+            const ins = (rel, type, srcUrl) => db.run('INSERT INTO Asset (post_id, section, type, file_path, source_url) VALUES (?, ?, ?, ?, ?)', [postId, section, type, rel, srcUrl || null]);
+            const tokens = [...new Set(kws.flatMap(k => tokenize(k.content)))];
+            await attachNews(tokens, section, iFolder, vFolder, ins);
+            await attachStock(kws.map(k => k.content), iFolder, vFolder, ins);   // nguồn khác (stock) bổ sung
         }
 
-        // Paragraphs
-        const paragraphs = await db.all('SELECT id, "order" FROM Paragraph WHERE post_id = ? ORDER BY "order"', [postId]);
+        // Paragraphs — RSS news khớp tiêu đề + keyword của từng đoạn
+        const paragraphs = await db.all('SELECT id, "order", title, title_vi FROM Paragraph WHERE post_id = ? ORDER BY "order"', [postId]);
         for (const para of paragraphs) {
             const gid = String(para.order);
             const kws = await db.all('SELECT content FROM Keyword WHERE paragraph_id = ?', [para.id]);
@@ -602,15 +1006,21 @@ async function saveToDb(projectId, result) {
             const vFolder = path.join(BASE_DIR, projectId, 'assets', '_raw_videos', gid);
             const iFolder = path.join(BASE_DIR, projectId, 'assets', '_raw_images', gid);
             [vFolder, iFolder].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
-            for (const { content: kw } of kws) {
-                console.log(`[process_content] Crawl paragraph ${gid}: ${kw}`);
-                await fetchAndDownloadStock(kw, 'video', vFolder, 4).catch(() => {});
-                await fetchAndDownloadStock(kw, 'image', iFolder, 8).catch(() => {});
-            }
-            const ins = (rel, type) => db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [para.id, type, rel]);
-            await syncDir(vFolder, 'video', ins);
-            await syncDir(iFolder, 'image', ins);
+            const ins = (rel, type, srcUrl) => db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path, source_url) VALUES (?, NULL, ?, ?, ?)', [para.id, type, rel, srcUrl || null]);
+            const newsTokens = [...new Set([...tokenize(para.title_vi), ...tokenize(para.title), ...kws.flatMap(k => tokenize(k.content))])];
+            await attachNews(newsTokens, gid, iFolder, vFolder, ins);
+            await attachStock(kws.map(k => k.content), iFolder, vFolder, ins);   // nguồn khác (stock) bổ sung
         }
+
+        // Ghi kết quả RSS của lần chạy này vào thư mục rss/ (tạo nếu chưa có)
+        try {
+            const rssDir = path.join(process.cwd(), 'rss');
+            if (!fs.existsSync(rssDir)) fs.mkdirSync(rssDir, { recursive: true });
+            const stamp = rssLog.generatedAt.replace(/[:.]/g, '-');
+            const outFile = path.join(rssDir, `${projectId}_${stamp}.json`);
+            fs.writeFileSync(outFile, JSON.stringify(rssLog, null, 2));
+            console.log(`[process_content] 📝 Đã ghi kết quả RSS: ${path.relative(process.cwd(), outFile)}`);
+        } catch (e) { console.error(`[process_content] Ghi log RSS lỗi: ${e.message}`); }
     }
 
     await db.run('UPDATE Post SET status = NULL WHERE project_id = ?', [postTitle]);
@@ -622,8 +1032,17 @@ async function saveToDb(projectId, result) {
 }
 
 try {
-    const result = await analyzeWithGPT5(contentArg, sources);
+    // 1) Thu thập tin mới & sát nhất (Google News theo từ khóa × domain nguồn) + cào HẾT ảnh/video trong bài
+    console.log(`[process_content] Thu thập tin: ${keywords.length} từ khóa × ${sourceDomains.length} nguồn`);
+    const bundle = await collectNews({
+        keywords, sources: sourceDomains,
+        hl: countryHl || 'vi', gl: countryGl || 'VN',   // mặc định bản VN (khớp từ khóa tiếng Việt); chọn quốc gia thì theo đó
+        days: 3, maxArticles: 30, perKeyword: 15,
+    });
+    // 2) Đưa title cho GPT-5 xào kịch bản
+    const result = await analyzeWithGPT5(topic, bundle.titles, sources);
     console.log(`[process_content] GPT-5 trả về ${result.luan_diem?.length || 0} luận điểm`);
+    result._articles = bundle.articles;   // media đã cào để gán vào paragraph/section
     await saveToDb(projectId, result);
     process.exit(0);
 } catch (e) {

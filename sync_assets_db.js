@@ -13,7 +13,7 @@ import { fetchFromBellingcatBot } from './bellingcatCrawler.js';
 import { fetchFromApnewsBot } from './apnewsCrawler.js';
 import { fetchFromAlJazeeraBot } from './aljazeeraCrawler.js';
 import { fetchFromGoogleImageBot } from './googleImageCrawler.js';
-import { claimNextStockPath } from './stockNaming.js';
+import { claimNextStockPath, readStockSource } from './stockNaming.js';
 
 const MEDIA_DIR = process.env.MEDIA_DIR;
 const DB_PATH = path.join(process.env.DB_DIR, 'media_system.sqlite');
@@ -29,7 +29,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // HÀM TẢI FILE
 // ==========================================
 async function downloadFileHelper(url, targetDir, ext) {
-    const savePath = claimNextStockPath(targetDir, ext);
+    const savePath = claimNextStockPath(targetDir, ext, url);
     let success = false;
     try {
         const controller = new AbortController();
@@ -75,7 +75,7 @@ async function fetchFromPexels(keyword, type, targetDir, neededCount) {
                 downloadUrl = item.src.large;
             }
             if (downloadUrl) {
-                const savePath = claimNextStockPath(targetDir, ext);
+                const savePath = claimNextStockPath(targetDir, ext, downloadUrl);
                 let ok = false;
                 try {
                     const res = await fetch(downloadUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
@@ -114,7 +114,7 @@ const withTimeout = (promise, ms, name) => {
     return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
 };
 
-async function runConcurrently(tasks, limit) {
+export async function runConcurrently(tasks, limit) {
     const results = [];
     const executing = new Set();
     for (const task of tasks) {
@@ -152,7 +152,7 @@ export async function fetchAndDownloadStock(keyword, type, targetDir, countPerSo
         } catch (e) { console.log(`      [${p.name}] Lỗi: ${e.message}`); return 0; }
     });
 
-    const results = await runConcurrently(tasks, 10);
+    const results = await runConcurrently(tasks, 3);   // giới hạn provider chạy đồng thời -> tránh quá nhiều browser puppeteer/stealth cùng lúc (lỗi "main frame too early")
     let total = 0;
     for (const r of results) if (r.status === 'fulfilled') total += (r.value || 0);
     console.log(`   -> [${type.toUpperCase()}] "${keyword}" xong: ${total} ${type}`);
@@ -173,10 +173,11 @@ async function syncAssetsToDB(db, folderPath, assetType, paragraphId, sentenceId
         const relativePath = path.join(projectId, 'assets', subDir, gid, file);
         const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
         if (!exists) {
+            const srcUrl = readStockSource(path.join(folderPath, file));   // URL nguồn (sidecar .src)
             if (postId && section) {
-                await db.run('INSERT INTO Asset (post_id, section, paragraph_id, sentence_id, type, file_path) VALUES (?, ?, NULL, NULL, ?, ?)', [postId, section, assetType, relativePath]);
+                await db.run('INSERT INTO Asset (post_id, section, paragraph_id, sentence_id, type, file_path, source_url) VALUES (?, ?, NULL, NULL, ?, ?, ?)', [postId, section, assetType, relativePath, srcUrl]);
             } else {
-                await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, ?, ?, ?)', [paragraphId, sentenceId || null, assetType, relativePath]);
+                await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path, source_url) VALUES (?, ?, ?, ?, ?)', [paragraphId, sentenceId || null, assetType, relativePath, srcUrl]);
             }
             console.log(`      [SYNC] ${assetType} -> ${file}`);
         }
@@ -374,4 +375,8 @@ async function main() {
     }
 }
 
-main().catch(e => console.error('LỖI:', e.message));
+// Chỉ chạy daemon khi gọi trực tiếp (node sync_assets_db.js). Khi bị import (vd process_content.js
+// lấy fetchAndDownloadStock) thì KHÔNG chạy main để tránh vô tình khởi động lại vòng lặp crawl.
+if ((process.argv[1] || '').endsWith('sync_assets_db.js')) {
+    main().catch(e => console.error('LỖI:', e.message));
+}

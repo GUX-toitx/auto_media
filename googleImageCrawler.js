@@ -1,26 +1,18 @@
 import { fetchIPv4 as fetch } from './fetchIPv4.js';
 import dns from 'dns';
 dns.setDefaultResultOrder('ipv4first');
-// File: googleImageCrawler.js (Bản 3.0 - Săn Video OVP của Bing)
+// File: googleImageCrawler.js (Bản 4.0 - Ảnh từ Google Images qua google-img-scrap, thay Bing)
 import fs from 'fs';
-import path from 'path';
-import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import * as cheerio from 'cheerio';
-import proxyChain from 'proxy-chain';
-import { getOldestProxy } from './proxyManager.js';
 import { claimNextStockPath } from './stockNaming.js';
+import googleImgScrap from 'google-img-scrap';
+const { GOOGLE_IMG_SCRAP } = googleImgScrap;
 
-puppeteer.use(StealthPlugin());
-
-const delay = ms => new Promise(res => setTimeout(res, ms));
-
-async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
+async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '', source = '') {
     if (url.includes('onelink.me') || url.includes('app-store') || url.includes('play.google')) {
         return false;
     }
 
-    const savePath = claimNextStockPath(targetDir, ext);
+    const savePath = claimNextStockPath(targetDir, ext, source || url);   // lưu trang nguồn (hoặc URL ảnh) làm tag
     let success = false;
 
     try {
@@ -80,92 +72,40 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
 }
 
 export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCount) {
+    // Chỉ ảnh — dùng Google Images (google-img-scrap) thay cho Bing. Video không hỗ trợ ở provider này.
+    if (type === 'video') return 0;
+
     let downloaded = 0;
-    const ext = type === 'video' ? 'mp4' : 'jpg';
+    const ext = 'jpg';
 
-    // ĐỊNH TUYẾN TÌM KIẾM
-    const searchUrl = type === 'video' 
-        ? `https://www.bing.com/videos/search?q=${encodeURIComponent(keyword)}&safesearch=off`
-        : `https://www.bing.com/images/search??q=${encodeURIComponent(keyword)}&safesearch=off&form=HDRSC3`;
-
-    const proxy = await getOldestProxy();
-    let anonymizedProxyUrl = null;
-    const browserArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1920,1080'];
-
-    if (proxy) {
-        const proxyServerClean = proxy.server.replace('http://', '').replace('https://', '');
-        if (proxy.username && proxy.password) {
-            try {
-                anonymizedProxyUrl = await proxyChain.anonymizeProxy(`http://${proxy.username}:${proxy.password}@${proxyServerClean}`);
-                browserArgs.push(`--proxy-server=${anonymizedProxyUrl}`);
-            } catch (e) { return 0; }
-        } else {
-            browserArgs.push(`--proxy-server=http://${proxyServerClean}`);
+    let images = [];
+    try {
+        // lấy dư (x3) để bù ảnh tải lỗi; giữ originalUrl (trang nguồn) để gắn tag
+        const res = await GOOGLE_IMG_SCRAP({ search: keyword, limit: Math.max(neededCount * 3, 20) });
+        const seen = new Set();
+        for (const r of (res?.result || [])) {
+            if (!r.url || seen.has(r.url)) continue;
+            seen.add(r.url);
+            const src = (r.originalUrl || r.url).replace(/\\u003d/gi, '=').replace(/\\u0026/gi, '&').replace(/\\u003f/gi, '?').replace(/\\\//g, '/');
+            images.push({ url: r.url, source: src });
         }
+    } catch (err) {
+        console.error(`      [${keyword}][GoogleImage] Lỗi scrape: ${err.message}`);
+        return 0;
     }
 
-    const browser = await puppeteer.launch({ headless: "new", args: browserArgs });
-    
-    try {
-        const page = await browser.newPage();
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0');
+    if (!images.length) {
+        console.log(`      [${keyword}][GoogleImage] ⚠️ Không thấy ảnh.`);
+        return 0;
+    }
+    console.log(`      [${keyword}][GoogleImage] Tìm thấy ${images.length} ảnh. Đang tải...`);
 
-        console.log(`      [${keyword}][Web ${type.toUpperCase()} Bot] Đang thâm nhập Bing: ${keyword}`);
-        await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-
-        let mediaUrls = [];
-
-        if (type === 'video') {
-            return 0;
-        } else {
-            // BÓC ẢNH (Giữ nguyên thuật toán bóc ảnh Full HD cực tốt)
-            await page.evaluate(() => window.scrollBy(0, 1000));
-            await delay(2000);
-            const html = await page.content();
-            const $ = cheerio.load(html);
-
-            $('a.iusc').each((i, el) => {
-                const mData = $(el).attr('m');
-                if (mData) {
-                    try {
-                        const parsed = JSON.parse(mData);
-                        if (parsed.murl) mediaUrls.push(parsed.murl);
-                    } catch (e) {}
-                }
-            });
-            if (mediaUrls.length === 0) {
-                $('img.mimg').each((i, el) => {
-                    const src = $(el).attr('src') || $(el).attr('data-src');
-                    if (src) mediaUrls.push(src);
-                });
-            }
+    for (const { url, source } of images) {
+        if (downloaded >= neededCount) break;
+        if (await downloadMedia(url, targetDir, ext, null, keyword, source)) {
+            downloaded++;
+            console.log(`\x1b[33m      [${keyword}][GoogleImage] 📥 ${downloaded}/${neededCount} <- ${source.slice(0, 70)}\x1b[0m`);
         }
-
-        // Lọc trùng lặp
-        mediaUrls = [...new Set(mediaUrls)];
-
-        if (mediaUrls.length === 0) {
-            console.log(`      [${keyword}][Web ${type.toUpperCase()} Bot] ⚠️ Không thấy ${type}.`);
-            await page.screenshot({ path: path.join(targetDir, `debug_bing_${type}_${Date.now()}.jpg`) });
-            return 0;
-        }
-
-        console.log(`      [${keyword}][Web ${type.toUpperCase()} Bot] Tìm thấy ${mediaUrls.length} tài nguyên. Đang tải...`);
-
-        for (const url of mediaUrls) {
-            if (downloaded >= neededCount) break;
-            // Hàm downloadMedia sẽ tự động thêm đuôi .mp4 vào cuối file khi lưu
-            if (await downloadMedia(url, targetDir, ext, proxy, keyword)) {
-                downloaded++;
-                console.log(`\x1b[33m      [${keyword}][Web ${type.toUpperCase()} Bot] 📥 ${type.toUpperCase()} bốc từ: ${url}\x1b[0m`);
-                console.log(`      [${keyword}][Web ${type.toUpperCase()} Bot] ---> Đã lấy thành công ${downloaded}/${neededCount}`);
-            }
-        }
-    } catch (error) {
-        console.error(`      [${keyword}][Web Lỗi Tổng] ${error.message}`);
-    } finally {
-        await browser.close().catch(() => {});
-        if (anonymizedProxyUrl) await proxyChain.closeAnonymizedProxy(anonymizedProxyUrl, true).catch(() => {});
     }
     return downloaded;
 }

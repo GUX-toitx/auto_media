@@ -54,9 +54,9 @@ app.get('/api/posts/:postId', async (req, res) => {
         );
         // Load assets for each hook_detail
         for (const detail of post.hook_details) {
-            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE hook_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
-            detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
-            detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
+            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration, source_url FROM Asset WHERE hook_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
+            detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null }));
+            detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null }));
         }
         
         // ConclusionDetail
@@ -65,9 +65,9 @@ app.get('/api/posts/:postId', async (req, res) => {
             [post.id]
         );
         for (const detail of post.conclusion_details) {
-            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE conclusion_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
-            detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
-            detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
+            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration, source_url FROM Asset WHERE conclusion_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
+            detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null }));
+            detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null }));
         }
         
         // SummaryDetail
@@ -77,21 +77,21 @@ app.get('/api/posts/:postId', async (req, res) => {
         );
         // Load assets for each summary_detail
         for (const detail of post.summary_details) {
-            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE summary_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
-            detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
-            detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
+            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration, source_url FROM Asset WHERE summary_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
+            detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null }));
+            detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null }));
         }
 
         // Lấy keywords và assets cho từng section của post
         const sections = {};
         for (const section of ['hook', 'summary', 'conclusion']) {
             const kws = await db.all('SELECT id, content, type FROM Keyword WHERE post_id = ? AND section = ? ORDER BY id', [post.id, section]);
-            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE post_id = ? AND section = ? AND hook_detail_id IS NULL AND summary_detail_id IS NULL AND conclusion_detail_id IS NULL ORDER BY selected DESC, COALESCE(source_id, id), id', [post.id, section]);
+            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration, source_url FROM Asset WHERE post_id = ? AND section = ? AND hook_detail_id IS NULL AND summary_detail_id IS NULL AND conclusion_detail_id IS NULL ORDER BY selected DESC, COALESCE(source_id, id), id', [post.id, section]);
             const projectId = (post.project_id || '').replace(/_[a-z]{2}$/, '');
             sections[section] = {
                 keywords: kws,
-                videos: assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 })),
-                images: assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 })),
+                videos: assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null })),
+                images: assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null })),
             };
         }
 
@@ -114,9 +114,9 @@ app.get('/api/posts/:postId', async (req, res) => {
             );
             // Load assets for each paragraph_detail
             for (const detail of para.details) {
-                const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE paragraph_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
-                detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
-                detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
+                const assets = await db.all('SELECT id, type, selected, "order", file_path, duration, source_url FROM Asset WHERE paragraph_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
+                detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null }));
+                detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null }));
             }
             const rawSentences = await db.all(
                 'SELECT id, content, content_vi, title, title_vi, content_audio, content_vi_audio, title_audio, title_vi_audio, audio, sentence_uuid, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"',
@@ -129,9 +129,9 @@ app.get('/api/posts/:postId', async (req, res) => {
                 );
                 // Load assets for each sentence_detail
                 for (const detail of details) {
-                    const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE sentence_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
-                    detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
-                    detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
+                    const assets = await db.all('SELECT id, type, selected, "order", file_path, duration, source_url FROM Asset WHERE sentence_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
+                    detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null }));
+                    detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null }));
                 }
                 return { ...s, sentenceUuid: s.sentence_uuid, audioUrl: s.audio ? (s.audio.startsWith('http') ? s.audio : `/${s.audio}`) : null, details };
             }));
@@ -144,15 +144,15 @@ app.get('/api/posts/:postId', async (req, res) => {
 
             // File media từ DB (exclude assets assigned to details)
             const assets = await db.all(
-                'SELECT id, type, selected, "order", file_path, sentence_id, paragraph_id, duration FROM Asset WHERE (paragraph_id = ? OR sentence_id IN (SELECT id FROM Sentence WHERE paragraph_id = ?)) AND paragraph_detail_id IS NULL AND sentence_detail_id IS NULL ORDER BY id',
+                'SELECT id, type, selected, "order", file_path, sentence_id, paragraph_id, duration, source_url FROM Asset WHERE (paragraph_id = ? OR sentence_id IN (SELECT id FROM Sentence WHERE paragraph_id = ?)) AND paragraph_detail_id IS NULL AND sentence_detail_id IS NULL ORDER BY id',
                 [para.id, para.id]
             );
             para.videos = assets
                 .filter(a => a.type === 'video' && (a.paragraph_id || a.sentence_id))
-                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: a.file_path.startsWith('http') ? a.file_path : `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0 }));
+                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: a.file_path.startsWith('http') ? a.file_path : `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0, sourceUrl: a.source_url || null }));
             para.images = assets
                 .filter(a => a.type === 'image' && (a.paragraph_id || a.sentence_id))
-                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: a.file_path.startsWith('http') ? a.file_path : `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0 }));
+                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: a.file_path.startsWith('http') ? a.file_path : `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0, sourceUrl: a.source_url || null }));
 
             // Audios & generated videos từ thư mục output
             para.audios = {};
@@ -723,12 +723,13 @@ app.post('/api/crawl-all', async (req, res) => {
             const vF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_videos', section);
             const iF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', section);
             [vF, iF].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+            const insS = (rel, t) => db.run('INSERT INTO Asset (post_id, section, type, file_path) VALUES (?, ?, ?, ?)', [postId, section, t, rel]);
             for (const { content: kw } of kws) {
                 await fetchAndDownloadStock(kw, 'video', vF, 4).catch(() => {});
+                await syncDir(vF, 'video', insS);   // insert vào DB ngay sau mỗi keyword (realtime)
                 await fetchAndDownloadStock(kw, 'image', iF, 8).catch(() => {});
+                await syncDir(iF, 'image', insS);
             }
-            await syncDir(vF, 'video', (rel, t) => db.run('INSERT INTO Asset (post_id, section, type, file_path) VALUES (?, ?, ?, ?)', [postId, section, t, rel]));
-            await syncDir(iF, 'image', (rel, t) => db.run('INSERT INTO Asset (post_id, section, type, file_path) VALUES (?, ?, ?, ?)', [postId, section, t, rel]));
         }
 
         // Paragraphs
@@ -740,12 +741,13 @@ app.post('/api/crawl-all', async (req, res) => {
             const vF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_videos', gid);
             const iF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', gid);
             [vF, iF].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+            const insP = (rel, t) => db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [para.id, t, rel]);
             for (const { content: kw } of kws) {
                 await fetchAndDownloadStock(kw, 'video', vF, 4).catch(() => {});
+                await syncDir(vF, 'video', insP);   // insert vào DB ngay sau mỗi keyword (realtime)
                 await fetchAndDownloadStock(kw, 'image', iF, 8).catch(() => {});
+                await syncDir(iF, 'image', insP);
             }
-            await syncDir(vF, 'video', (rel, t) => db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [para.id, t, rel]));
-            await syncDir(iF, 'image', (rel, t) => db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [para.id, t, rel]));
         }
 
         await db.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]);
@@ -793,23 +795,29 @@ app.post('/api/crawl-vn', async (req, res) => {
 
 // API: Tạo mới dự án từ nội dung
 app.post('/api/create-project', async (req, res) => {
-    const { content, sources, targetLang } = req.body;
-    if (!content?.trim()) return res.status(400).json({ error: 'Thiếu nội dung' });
+    const { content, keywords, sources, country, targetLang } = req.body;
+    // LUỒNG MỚI: input là mảng từ khóa + mảng domain nguồn. Vẫn nhận content (chủ đề/tiêu đề) làm tuỳ chọn.
+    const kwArr = Array.isArray(keywords) ? keywords.map(s => String(s).trim()).filter(Boolean) : [];
+    const srcArr = Array.isArray(sources) ? sources.map(s => String(s).trim()).filter(Boolean) : [];
+    if (!kwArr.length && !content?.trim()) return res.status(400).json({ error: 'Thiếu từ khóa (keywords) hoặc nội dung' });
     try {
         const projectId = 'proj_' + Date.now();
         const targetDir = path.join(MEDIA_DIR, projectId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-        fs.writeFileSync(path.join(targetDir, 'original_content.txt'), content.trim());
-        if (sources?.length) {
-            fs.writeFileSync(path.join(targetDir, 'sources.txt'), sources.join('\n'));
-        }
-        const crawlProcess = spawn('node', [
+        fs.writeFileSync(path.join(targetDir, 'original_content.txt'), (content?.trim()) || kwArr.join('\n'));
+        const cGl = (country && country.gl) || '';
+        const cHl = (country && country.hl) || '';
+        const procArgs = [
             'process_content.js',
             '--projectId', projectId,
-            '--content', content.trim(),
-            '--sources', (sources || []).join('|'),
+            '--keywords', JSON.stringify(kwArr),
+            '--sources', JSON.stringify(srcArr),
+            '--country', cGl,
+            '--clang', cHl,
             '--targetLang', targetLang || 'en'
-        ], { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+        ];
+        if (content?.trim()) { procArgs.push('--content', content.trim()); }
+        const crawlProcess = spawn('node', procArgs, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
         crawlProcess.stdout.on('data', d => process.stdout.write(`[process_content] ${d}`));
         crawlProcess.stderr.on('data', d => process.stderr.write(`[process_content] ${d}`));
         crawlProcess.unref();
@@ -1346,5 +1354,236 @@ app.post('/api/crawl-status/notify', (req, res) => {
     pushCrawlStatus(postTitle, status);
     res.json({ success: true });
 });
+
+
+// ===== CapCut export/render (port từ main_sports) =====
+app.post('/api/export-capcut', (req, res) => {
+    const postId = req.body && req.body.postId;
+    const contentType = req.body && req.body.contentType;
+    if (!postId) return res.status(400).json({ error: 'Thieu postId' });
+    const outDir = path.join(MEDIA_DIR, '_capcut_exports');
+    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+    let stdout = '', stderr = '', done = false;
+    const args = ['capcut_export.js', String(postId), outDir];
+    if (contentType) args.push(contentType);
+    const child = spawn(process.execPath, args, {
+        cwd: __dirname, env: process.env
+    });
+    child.stdout.on('data', d => { stdout += d; });
+    child.stderr.on('data', d => { stderr += d; });
+    child.on('error', err => { if (!done) { done = true; res.status(500).json({ error: err.message }); } });
+    child.on('close', async code => {
+        if (done) return; done = true;
+        if (code !== 0) return res.status(500).json({ error: 'exit ' + code + ': ' + stderr.slice(-200) });
+        const lines = stdout.trim().split('\n');
+        let result = null;
+        for (let i = lines.length - 1; i >= 0; i--) { try { result = JSON.parse(lines[i]); break; } catch(_) {} }
+        if (!result || !result.zipPath || !result.draftId) return res.status(500).json({ error: 'no result. stdout: ' + stdout.slice(-200) });
+
+        const projectName = result.projectName || path.basename(result.zipPath, '_capcut.zip');
+        const draftId = result.draftId;
+        const bat = buildBatScript(null, draftId, projectName); // zipUrl=null vì zip nằm sẵn trong folder
+        const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+        const outZipName = `${projectName}_${ts}_bundle.zip`;
+
+        // Tạo zip bundle: giải nén draft zip rồi đóng gói lại kèm file bat
+        res.setHeader('Content-Type', 'application/zip');
+        const safeZipName = outZipName.replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+        res.setHeader('Content-Disposition', `attachment; filename="${safeZipName}"; filename*=UTF-8''${encodeURIComponent(outZipName)}`);
+
+        const archive = (await import('archiver')).default('zip', { zlib: { level: 6 } });
+        archive.on('error', e => res.status(500).json({ error: e.message }));
+        archive.pipe(res);
+
+        // Thêm toàn bộ nội dung draft zip vào bundle (dưới thư mục project/)
+        archive.file(result.zipPath, { name: `${projectName}/project.zip` });
+
+        // Tạo file bat đơn giản: chỉ cần giải nén và update index
+        const simpleBat = buildLocalBatScript(draftId, projectName);
+        archive.append(Buffer.from(simpleBat, 'utf8'), { name: `${projectName}/install.bat` });
+
+        await archive.finalize();
+        // Xóa zip gốc sau khi done
+        res.on('finish', () => { try { fs.unlinkSync(result.zipPath); } catch(_) {} });
+    });
+})
+// Proxy audio CDN -> same-origin để client đọc bytes vẽ waveform (tránh CORS)
+app.get('/api/audio-proxy', async (req, res) => {
+    const url = req.query.url;
+    if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return res.status(400).end();
+    let u;
+    try { u = new URL(url); } catch { return res.status(400).end(); }
+    if (!u.hostname.endsWith('b-cdn.net')) return res.status(403).end(); // allowlist, tránh SSRF
+    try {
+        const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        if (!r.ok) return res.status(r.status).end();
+        const buf = Buffer.from(await r.arrayBuffer());
+        res.setHeader('Content-Type', r.headers.get('content-type') || 'audio/mpeg');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.end(buf);
+    } catch (e) { res.status(502).end(); }
+});
+
+app.get('/api/capcut-zip/:filename', (req, res) => {
+    const filePath = path.join(MEDIA_DIR, '_capcut_exports', req.params.filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + req.params.filename + '"');
+    fs.createReadStream(filePath).pipe(res);
+    setTimeout(() => { try { fs.unlinkSync(filePath); } catch(_) {} }, 10 * 60 * 1000);
+});
+
+function buildLocalBatScript(draftId, projectName) {
+    const CRLF = '\r\n';
+    // Sanitize projectName: bỏ ký tự gây lỗi trong PS/bat
+    const safeName = projectName.replace(/'/g, '').replace(/"/g, '').trim();
+    const bat = [];
+    bat.push('@echo off');
+    bat.push('chcp 65001 >nul');
+    bat.push('title CapCut Installer');
+    bat.push('echo.');
+    bat.push('echo === Installing project ===');
+    bat.push('echo.');
+    bat.push('set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\Projects\\com.lveditor.draft"');
+    bat.push('if not exist "%DR%" set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\com.lveditor.draft"');
+    bat.push('if not exist "%DR%" md "%DR%"');
+    bat.push('echo [1/2] Extracting...');
+    bat.push('if exist "%DR%\\' + draftId + '" rd /s /q "%DR%\\' + draftId + '"');
+    bat.push('powershell -NoProfile -Command "Expand-Archive -LiteralPath \'%~dp0project.zip\' -DestinationPath \'%DR%\' -Force"');
+    bat.push('echo [2/2] Updating index...');
+    bat.push('set "PROJ_NAME=' + safeName + '"');
+    const ps = [
+        '$f=\'C:/Users/trinh/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft/' + draftId + '\'',
+        '$r=Join-Path (Split-Path -Parent $f) \'root_meta_info.json\'',
+        '$id=\'' + draftId + '\'',
+        '$n=$env:PROJ_NAME',
+        '$t=[long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())*1000',
+        '$rp=Split-Path -Parent $f',
+        'if(Test-Path $r){$j=Get-Content $r -Raw|ConvertFrom-Json}else{$j=[PSCustomObject]@{all_draft_store=@();draft_ids=0;root_path=$rp}}',
+        '$ne=[PSCustomObject]@{draft_fold_path=($f-replace\'\\\\\',\'/\');draft_id=$id;draft_name=$n;draft_root_path=$rp;draft_json_file=(($f-replace\'\\\\\',\'/\')+\'/draft_content.json\');tm_draft_create=$t;tm_draft_modified=$t;tm_draft_removed=0;tm_duration=300000000;draft_timeline_materials_size=2000000;streaming_edit_draft_ready=$true;cloud_draft_cover=$false;cloud_draft_sync=$false;draft_is_invisible=$false}',
+        '$j.all_draft_store=@($ne)+($j.all_draft_store|Where-Object{$_.draft_id -ne $id})',
+        'ConvertTo-Json $j -Depth 10 -Compress|Set-Content $r -Encoding UTF8',
+        'Write-Host \'OK\'',
+    ].join(';');
+    bat.push('powershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps + '"');
+    bat.push('echo.');
+    bat.push('echo === Done! Open CapCut to see your project ===');
+    bat.push('echo.');
+    bat.push('pause');
+    return bat.join(CRLF);
+}
+
+function buildBatScript(zipUrl, draftId, projectName) {
+    const CRLF = '\r\n';
+    const bat = [];
+    bat.push('@echo off');
+    bat.push('chcp 65001 >nul');
+    bat.push('title CapCut Project Installer');
+    bat.push('setlocal enabledelayedexpansion');
+    bat.push('echo.');
+    bat.push('echo === CapCut Project Installer: ' + projectName + ' ===');
+    bat.push('echo.');
+    bat.push('set "CTMP=%TEMP%\\capcut_tmp_%RANDOM%"');
+    bat.push('set "ZIP=%CTMP%\\project.zip"');
+    bat.push('md "%CTMP%"');
+    bat.push('');
+    bat.push('echo [1/3] Downloading...');
+    bat.push('powershell -NoProfile -Command "Invoke-WebRequest -Uri \'' + zipUrl + '\' -OutFile \'%ZIP%\' -UseBasicParsing"');
+    bat.push('if not exist "%ZIP%" ( echo FAILED: Download & pause & exit /b 1 )');
+    bat.push('echo OK');
+    bat.push('');
+    bat.push('echo [2/3] Installing...');
+    bat.push('set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\Projects\\com.lveditor.draft"');
+    bat.push('if not exist "%DR%" set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\com.lveditor.draft"');
+    bat.push('if not exist "%DR%" md "%DR%"');
+    bat.push('if exist "%DR%\\' + draftId + '" rd /s /q "%DR%\\' + draftId + '"');
+    bat.push('powershell -NoProfile -Command "Expand-Archive -LiteralPath \'%ZIP%\' -DestinationPath \'%DR%\' -Force"');
+    bat.push('set "DDIR=%DR%\\' + draftId + '"');
+    bat.push('if not exist "%DDIR%" ( echo FAILED: Extract & pause & exit /b 1 )');
+    bat.push('echo OK');
+    bat.push('');
+    bat.push('echo [3/3] Updating CapCut index...');
+    const ps = [
+        '$f=\'%DDIR%\'',
+        '$r=Join-Path (Split-Path -Parent $f) \'root_meta_info.json\'',
+        '$id=\'' + draftId + '\'',
+        '$n=\'' + projectName + '\'',
+        '$t=[long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())*1000',
+        '$fp=\'' + 'C:/Users/trinh/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft/' + draftId + '\'',
+        '$rp=\'' + 'C:/Users/trinh/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft' + '\'',
+        'if(Test-Path $r){$j=Get-Content $r -Raw|ConvertFrom-Json}else{$j=[PSCustomObject]@{all_draft_store=@();draft_ids=0;root_path=$rp}}',
+        '$ne=[PSCustomObject]@{draft_fold_path=$fp;draft_id=$id;draft_name=$n;draft_root_path=$rp;draft_json_file=($fp+\'/draft_content.json\');tm_draft_create=$t;tm_draft_modified=$t;tm_draft_removed=0;tm_duration=300000000;draft_timeline_materials_size=2000000;streaming_edit_draft_ready=$true;cloud_draft_cover=$false;cloud_draft_sync=$false;draft_is_invisible=$false}',
+        '$j.all_draft_store=@($ne)+($j.all_draft_store|Where-Object{$_.draft_id -ne $id})',
+        'ConvertTo-Json $j -Depth 10 -Compress|Set-Content $r -Encoding UTF8',
+        'Write-Host \'OK\'',
+    ].join(';');
+    bat.push('powershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps + '"');
+    bat.push('rd /s /q "%CTMP%" 2>nul');
+    bat.push('echo.');
+    bat.push('echo === Done! Mo CapCut va chon du an: ' + projectName + ' ===');
+    bat.push('echo.');
+    bat.push('pause');
+    bat.push('endlocal');
+    return bat.join(CRLF);
+}
+
+const WINDOWS_AGENT = `http://192.168.50.248:5000`;
+
+app.post('/api/render-capcut', (req, res) => {
+    const { postId } = req.body;
+    if (!postId) return res.status(400).json({ error: 'Missing postId' });
+    const outDir = path.join(MEDIA_DIR, '_capcut_exports');
+    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+    let stdout = '', stderr = '', done = false;
+    const child = spawn(process.execPath, ['capcut_export.js', String(postId), outDir], {
+        cwd: __dirname, env: process.env
+    });
+    child.stdout.on('data', d => { stdout += d; });
+    child.stderr.on('data', d => { stderr += d; });
+    child.on('close', async code => {
+        if (done) return; done = true;
+        if (code !== 0) return res.status(500).json({ error: stderr.slice(-200) });
+        const lines = stdout.trim().split('\n');
+        let result = null;
+        for (let i = lines.length - 1; i >= 0; i--) { try { result = JSON.parse(lines[i]); break; } catch(_) {} }
+        if (!result?.zipPath) return res.status(500).json({ error: 'Export failed' });
+        // Cài vào CapCut folder trên Windows rồi render
+        const LINUX_IP = process.env.LINUX_IP || '192.168.50.43';
+        const zipUrl = (req.headers['x-forwarded-proto'] || 'http') + '://' + LINUX_IP + ':' + PORT + '/api/capcut-zip/' + path.basename(result.zipPath);
+        try {
+            const agentRes = await fetch(`${WINDOWS_AGENT}/render`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ draftId: result.draftId, projectName: result.projectName, postId, zipUrl })
+            });
+            const agentData = await agentRes.json();
+            res.json({ ok: true, message: 'Render started on Windows', ...agentData });
+        } catch (e) {
+            res.status(500).json({ error: `Windows agent unreachable: ${e.message}` });
+        }
+    });
+});
+
+
+app.post('/api/capcut-render-done', upload.single('video'), async (req, res) => {
+    try {
+        const { postId, projectName } = req.body;
+        if (!req.file) return res.status(400).json({ error: 'No file' });
+        const outDir = path.join(MEDIA_DIR, '_rendered');
+        if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+        const outPath = path.join(outDir, `${projectName}_${Date.now()}.mp4`);
+        fs.renameSync(req.file.path, outPath);
+        console.log(`[Render] Done: ${outPath}`);
+        res.json({ ok: true, path: outPath });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/capcut-render-status', (req, res) => {
+    const { postId, status, message } = req.body;
+    console.log(`[Render] Post ${postId}: ${status} - ${message}`);
+    res.json({ ok: true });
+});
+// ===== end CapCut =====
 
 app.listen(PORT, () => console.log(`🚀 http://localhost:${PORT}`));

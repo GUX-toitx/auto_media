@@ -42,7 +42,7 @@ function getNextProfilePath(keyword) {
 }
 
 async function downloadMedia(url, targetDir, ext, keyword) {
-    const savePath = claimNextStockPath(targetDir, ext);
+    const savePath = claimNextStockPath(targetDir, ext, url);
     let success = false;
 
     try {

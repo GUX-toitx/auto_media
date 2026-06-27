@@ -57,7 +57,7 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
         return false;
     }
 
-    const savePath = claimNextStockPath(targetDir, ext);
+    const savePath = claimNextStockPath(targetDir, ext, url);
     let success = false;
 
     if (ext === 'mp4' && url.includes('.m3u8')) {
