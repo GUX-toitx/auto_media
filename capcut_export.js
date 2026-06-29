@@ -212,9 +212,12 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     if (!post) throw new Error(`Post ${postId} not found`);
 
     const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
-    // contentType override: 'content_vi' | 'content' | null (auto dari voice_content_type)
+    // contentType override: 'content_vi' | 'content' | 'both' | null (auto dari voice_content_type)
     const resolvedType = contentType || post.voice_content_type || 'content_vi';
+    const bothLangs = resolvedType === 'both';
     const isVi = resolvedType === 'content_vi';
+    // Khi xuất cả 2: track chính (có tiếng, định độ dài timeline) = ngôn ngữ đích; track phụ (mute) = tiếng Việt.
+    const primaryUseVi = bothLangs ? false : isVi;
 
     console.log(`[CapCut] Export post ${postId} (${post.project_id}) contentType=${resolvedType}`);
 
@@ -250,60 +253,104 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     let totalDuration = 0;
     const videoSegments = [];
     const audioSegments = [];
+    const audioSegments2 = []; // track audio thứ 2 (ngôn ngữ còn lại, mute) khi xuất cả 2
     const allExtraMaterials = { speeds: [], canvases: [], vocal_separations: [], placeholder_infos: [], beats: [], material_colors: [], sound_channel_mappings: [] };
 
-    for (const para of paragraphs) {
-        // Lấy audio — gom tất cả ParagraphDetail audio thành 1 file ghép
-        const audioField = isVi ? 'content_vi_audio' : 'content_audio';
-        const altField   = isVi ? 'content_audio' : 'content_vi_audio';
-        // Ưu tiên field theo contentType, fallback sang field còn lại nếu rỗng
-        const paraAudioUrl = para[audioField] || para[altField] || para['audio'];
-        // Lấy từ ParagraphDetail nếu para không có audio trực tiếp
+    // Tải + ghép audio của 1 paragraph theo ngôn ngữ (useVi). allowFallback: dùng field còn lại nếu rỗng.
+    // Trả về { audioMatId, audioDuration } và đẩy audio material vào content.materials.audios.
+    async function buildParaAudio(para, useVi, allowFallback) {
+        const audioField = useVi ? 'content_vi_audio' : 'content_audio';
+        const altField   = useVi ? 'content_audio' : 'content_vi_audio';
+        const paraAudioUrl = para[audioField] || (allowFallback ? para[altField] : null) || para['audio'];
         const paraDetails = await db.all(
             `SELECT ${audioField}, ${altField} FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"`,
             [para.id]
         );
-        const detailAudioUrls = paraDetails.map(d => d[audioField] || d[altField]).filter(Boolean);
+        const detailAudioUrls = paraDetails.map(d => d[audioField] || (allowFallback ? d[altField] : null)).filter(Boolean);
         const audioUrls = paraAudioUrl ? [paraAudioUrl] : detailAudioUrls;
-
-        let audioDuration = 5_000_000;
-        let audioMatId = null;
-
-        if (audioUrls.length > 0) {
-            try {
-                const bunnyBase = process.env.BUNNYCDN_BASE_URL || '';
-                const bunnyKey = process.env.BUNNYCDN_ACCESS_KEY || '';
-                // Download từng file rồi concat
-                const tmpFiles = [];
-                for (let ai = 0; ai < audioUrls.length; ai++) {
-                    const url = audioUrls[ai].startsWith('http') ? audioUrls[ai] : `${bunnyBase}/${audioUrls[ai]}`;
-                    const tmpPath = path.join(assetsDir, `_tmp_audio_${fileIndex}_${ai}.mp3`);
-                    execSync(`curl -sL -H "AccessKey: ${bunnyKey}" "${url}" -o "${tmpPath}"`, { timeout: 15000 });
-                    if (fs.existsSync(tmpPath) && fs.statSync(tmpPath).size > 1000) tmpFiles.push(tmpPath);
-                }
-                if (tmpFiles.length > 0) {
-                    const audioFileName = `audio_${fileIndex++}.mp3`;
-                    const audioLocalPath = path.join(assetsDir, audioFileName);
-                    if (tmpFiles.length === 1) {
-                        fs.renameSync(tmpFiles[0], audioLocalPath);
-                    } else {
-                        // Concat bằng ffmpeg
-                        const listFile = path.join(assetsDir, `_list_${fileIndex}.txt`);
-                        fs.writeFileSync(listFile, tmpFiles.map(f => `file '${f}'`).join('\n'));
-                        execSync(`ffmpeg -f concat -safe 0 -i "${listFile}" -c copy -y "${audioLocalPath}"`, { timeout: 30000 });
-                        tmpFiles.forEach(f => { try { fs.unlinkSync(f); } catch(_) {} });
-                        fs.unlinkSync(listFile);
-                    }
-                    if (fs.existsSync(audioLocalPath) && fs.statSync(audioLocalPath).size > 1000) {
-                        audioDuration = getMediaDuration(audioLocalPath);
-                        audioMatId = uuid();
-                        const winAudioPath = `${WIN_DRAFT_ROOT}/${draftId}/assets/${audioFileName}`;
-                        const audioMat = buildAudioMaterial(audioMatId, winAudioPath, audioDuration, audioFileName);
-                        content.materials.audios.push(audioMat);
-                    }
-                }
-            } catch (e) { console.error(`[CapCut] Audio error para ${para.order}: ${e.message}`); }
+        if (!audioUrls.length) return { audioMatId: null, audioDuration: 0 };
+        try {
+            const bunnyBase = process.env.BUNNYCDN_BASE_URL || '';
+            const bunnyKey = process.env.BUNNYCDN_ACCESS_KEY || '';
+            const tmpFiles = [];
+            for (let ai = 0; ai < audioUrls.length; ai++) {
+                const url = audioUrls[ai].startsWith('http') ? audioUrls[ai] : `${bunnyBase}/${audioUrls[ai]}`;
+                const tmpPath = path.join(assetsDir, `_tmp_audio_${fileIndex}_${ai}.mp3`);
+                execSync(`curl -sL -H "AccessKey: ${bunnyKey}" "${url}" -o "${tmpPath}"`, { timeout: 15000 });
+                if (fs.existsSync(tmpPath) && fs.statSync(tmpPath).size > 1000) tmpFiles.push(tmpPath);
+            }
+            if (!tmpFiles.length) return { audioMatId: null, audioDuration: 0 };
+            const audioFileName = `audio_${fileIndex++}.mp3`;
+            const audioLocalPath = path.join(assetsDir, audioFileName);
+            if (tmpFiles.length === 1) {
+                fs.renameSync(tmpFiles[0], audioLocalPath);
+            } else {
+                const listFile = path.join(assetsDir, `_list_${fileIndex}.txt`);
+                fs.writeFileSync(listFile, tmpFiles.map(f => `file '${f}'`).join('\n'));
+                execSync(`ffmpeg -f concat -safe 0 -i "${listFile}" -c copy -y "${audioLocalPath}"`, { timeout: 30000 });
+                tmpFiles.forEach(f => { try { fs.unlinkSync(f); } catch(_) {} });
+                fs.unlinkSync(listFile);
+            }
+            if (!(fs.existsSync(audioLocalPath) && fs.statSync(audioLocalPath).size > 1000)) return { audioMatId: null, audioDuration: 0 };
+            const audioDuration = getMediaDuration(audioLocalPath);
+            const audioMatId = uuid();
+            const winAudioPath = `${WIN_DRAFT_ROOT}/${draftId}/assets/${audioFileName}`;
+            content.materials.audios.push(buildAudioMaterial(audioMatId, winAudioPath, audioDuration, audioFileName));
+            return { audioMatId, audioDuration };
+        } catch (e) {
+            console.error(`[CapCut] Audio error para ${para.order}: ${e.message}`);
+            return { audioMatId: null, audioDuration: 0 };
         }
+    }
+
+    // Tạo audio segment + extra materials, đẩy vào track chỉ định. mute=true -> volume 0 (track tham chiếu).
+    function pushAudioSegment(audioMatId, segStart, audioDuration, targetArr, mute) {
+        const { segment, extraMaterials } = buildAudioSegment(audioMatId, segStart, audioDuration, []);
+        if (mute) { segment.volume = 0.0; segment.last_nonzero_volume = 0.0; }
+        targetArr.push(segment);
+        content.materials.speeds.push({ ...JSON.parse(JSON.stringify(templateContent.materials.speeds[0])), id: extraMaterials.speedId });
+        content.materials.placeholder_infos.push({ ...JSON.parse(JSON.stringify(templateContent.materials.placeholder_infos[0])), id: extraMaterials.placeholderId });
+        content.materials.beats.push({ ...JSON.parse(JSON.stringify(templateContent.materials.beats[0])), id: extraMaterials.beatsId });
+        content.materials.vocal_separations.push({ ...JSON.parse(JSON.stringify(templateContent.materials.vocal_separations[0])), id: extraMaterials.vocalId });
+        content.materials.sound_channel_mappings.push({ ...JSON.parse(JSON.stringify(templateContent.materials.sound_channel_mappings[0])), id: extraMaterials.soundChannelId });
+    }
+
+    // Thêm 1 video nguyên vẹn (intro/outro) vào track video tại startTime, phát đúng độ dài thực + giữ audio gốc.
+    // Không sinh audio narration, không đụng đến các đoạn -> chỉ chèn ở đầu/cuối.
+    function addBoundaryVideo(absPath, startTime, label) {
+        if (!absPath || !fs.existsSync(absPath)) {
+            if (absPath) console.error(`[CapCut] ${label} không tồn tại: ${absPath}`);
+            return 0;
+        }
+        const ext = path.extname(absPath).toLowerCase();
+        const isVideo = ['.mp4', '.mov', '.avi'].includes(ext);
+        const fileName = `${label}_${fileIndex++}${ext}`;
+        const destPath = path.join(assetsDir, fileName);
+        fs.copyFileSync(absPath, destPath);
+        const mediaInfo = isVideo ? getMediaInfo(destPath) : { width: 1920, height: 1080 };
+        const dur = isVideo ? getMediaDuration(destPath) : 5_000_000;
+        const matId = uuid();
+        content.materials.videos.push(buildVideoMaterial(matId, destPath, dur, fileName, isVideo, draftId));
+        const { segment, extraMaterials } = buildVideoSegment(matId, startTime, dur, dur, videoIndex++, mediaInfo.width, mediaInfo.height, isVideo);
+        videoSegments.push(segment);
+        content.materials.speeds.push({ ...JSON.parse(JSON.stringify(templateContent.materials.speeds[0])), id: extraMaterials.speedId });
+        content.materials.canvases.push({ ...JSON.parse(JSON.stringify(templateContent.materials.canvases[0])), id: extraMaterials.canvasId });
+        content.materials.material_colors.push({ ...JSON.parse(JSON.stringify(templateContent.materials.material_colors[0])), id: extraMaterials.colorId });
+        content.materials.vocal_separations.push({ ...JSON.parse(JSON.stringify(templateContent.materials.vocal_separations[0])), id: extraMaterials.vocalId });
+        content.materials.placeholder_infos.push({ ...JSON.parse(JSON.stringify(templateContent.materials.placeholder_infos[0])), id: extraMaterials.placeholderId });
+        content.materials.sound_channel_mappings.push({ ...JSON.parse(JSON.stringify(templateContent.materials.sound_channel_mappings[0])), id: extraMaterials.soundChannelId });
+        console.log(`[CapCut] ${label}: ${fileName} (${(dur/1e6).toFixed(1)}s) @ ${(startTime/1e6).toFixed(1)}s`);
+        return dur;
+    }
+
+    // INTRO: chèn ở đầu (start = 0), đẩy toàn bộ đoạn ra sau.
+    if (post.intro_path) totalDuration += addBoundaryVideo(path.join(MEDIA_DIR, post.intro_path), totalDuration, 'intro');
+
+    for (const para of paragraphs) {
+        // Audio track chính (có tiếng, định độ dài timeline). Single-mode cho phép fallback sang ngôn ngữ còn lại.
+        const primaryAudio = await buildParaAudio(para, primaryUseVi, !bothLangs);
+        const audioMatId = primaryAudio.audioMatId;
+        const audioDuration = primaryAudio.audioMatId ? primaryAudio.audioDuration : 5_000_000;
 
         // Lấy assets selected
         const assets = await db.all(
@@ -337,13 +384,18 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
         if (allAssets.length === 0) {
             totalDuration += audioDuration;
         } else {
-            // Chia đều audioDuration thành N slice; slice cuối gánh phần dư để Σ slice = audioDuration.
-            // totalDuration tiến theo slice (không theo độ dài video đã cắt) → audio luôn liền mạch, không dồn.
+            // Chia audioDuration theo TRỌNG SỐ = thời lượng đặt cho từng asset (video: độ dài thật; ảnh: số giây người dùng đặt).
+            // slice cuối gánh phần dư để Σ slice = audioDuration → audio luôn khớp, không lệch tiếng.
+            // Asset chưa có duration -> dùng trung bình các asset đã có (nếu không có cái nào -> chia đều như cũ).
             const N = allAssets.length;
+            const knownDurs = allAssets.map(a => (a.duration > 0 ? a.duration : 0)).filter(d => d > 0);
+            const fbWeight = knownDurs.length ? (knownDurs.reduce((s, d) => s + d, 0) / knownDurs.length) : 1;
+            const weights = allAssets.map(a => (a.duration > 0 ? a.duration : fbWeight));
+            const totalW = weights.reduce((s, w) => s + w, 0) || N;
             let sliceAcc = 0;
             for (let ai = 0; ai < N; ai++) {
                 const asset = allAssets[ai];
-                const slotDur = (ai === N - 1) ? (audioDuration - sliceAcc) : Math.round(audioDuration / N);
+                const slotDur = (ai === N - 1) ? (audioDuration - sliceAcc) : Math.round(audioDuration * weights[ai] / totalW);
                 sliceAcc += slotDur;
                 const srcPath = path.join(MEDIA_DIR, asset.file_path);
                 if (!fs.existsSync(srcPath)) { totalDuration += slotDur; continue; }
@@ -378,24 +430,21 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
             }
         }
 
-        // Audio segment
-        if (audioMatId) {
-            const { segment, extraMaterials } = buildAudioSegment(audioMatId, segStart, audioDuration, []);
-            audioSegments.push(segment);
-            const speedMat = { ...JSON.parse(JSON.stringify(templateContent.materials.speeds[0])), id: extraMaterials.speedId };
-            const phMat = { ...JSON.parse(JSON.stringify(templateContent.materials.placeholder_infos[0])), id: extraMaterials.placeholderId };
-            const beatsMat = { ...JSON.parse(JSON.stringify(templateContent.materials.beats[0])), id: extraMaterials.beatsId };
-            const vocalMat = { ...JSON.parse(JSON.stringify(templateContent.materials.vocal_separations[0])), id: extraMaterials.vocalId };
-            const scMat = { ...JSON.parse(JSON.stringify(templateContent.materials.sound_channel_mappings[0])), id: extraMaterials.soundChannelId };
-            content.materials.speeds.push(speedMat);
-            content.materials.placeholder_infos.push(phMat);
-            content.materials.beats.push(beatsMat);
-            content.materials.vocal_separations.push(vocalMat);
-            content.materials.sound_channel_mappings.push(scMat);
+        // Audio track 1 (ngôn ngữ chính, có tiếng)
+        if (audioMatId) pushAudioSegment(audioMatId, segStart, audioDuration, audioSegments, false);
+
+        // Audio track 2 (ngôn ngữ còn lại = tiếng Việt) khi xuất cả 2. KHÔNG mute -> chạy cả 2, editor tự mute.
+        // Bắt đầu cùng segStart với track chính để khớp theo từng đoạn (độ dài có thể lệch nhẹ).
+        if (bothLangs) {
+            const secAudio = await buildParaAudio(para, !primaryUseVi, false);
+            if (secAudio.audioMatId) pushAudioSegment(secAudio.audioMatId, segStart, secAudio.audioDuration, audioSegments2, false);
         }
     }
 
     await db.close();
+
+    // OUTRO: chèn ở cuối (sau toàn bộ đoạn).
+    if (post.outro_path) totalDuration += addBoundaryVideo(path.join(MEDIA_DIR, post.outro_path), totalDuration, 'outro');
 
     content.duration = totalDuration;
 
@@ -409,6 +458,13 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     if (audioSegments.length) {
         content.tracks.push({
             id: uuid(), type: 'audio', segments: audioSegments,
+            flag: 0, attribute: 0, name: '', is_default_name: true
+        });
+    }
+    // Track audio thứ 2 (tiếng Việt) khi xuất cả 2 ngôn ngữ
+    if (audioSegments2.length) {
+        content.tracks.push({
+            id: uuid(), type: 'audio', segments: audioSegments2,
             flag: 0, attribute: 0, name: '', is_default_name: true
         });
     }
@@ -503,7 +559,7 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
         fs.mkdirSync(path.join(draftDir, d), { recursive: true });
     }
 
-    console.log(`[CapCut] Draft: ${draftDir} | Videos: ${videoSegments.length} | Audios: ${audioSegments.length} | Duration: ${(totalDuration/1e6).toFixed(1)}s`);
+    console.log(`[CapCut] Draft: ${draftDir} | Videos: ${videoSegments.length} | Audios: ${audioSegments.length}${audioSegments2.length ? `+${audioSegments2.length}(vi)` : ''} | Duration: ${(totalDuration/1e6).toFixed(1)}s`);
 
     // Zip
     const zipPath = path.join(outputDir, `${post.project_id}_${Date.now()}_capcut.zip`);

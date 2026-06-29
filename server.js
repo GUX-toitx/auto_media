@@ -44,7 +44,7 @@ app.get('/api/posts', async (req, res) => {
 app.get('/api/posts/:postId', async (req, res) => {
     try {
         const db = await getDb();
-        const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, summary, summary_vi, summary_audio, summary_vi_audio, summary_target, summary_target_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio FROM Post WHERE id = ?', [req.params.postId]);
+        const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, summary, summary_vi, summary_audio, summary_vi_audio, summary_target, summary_target_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio, intro_path, outro_path FROM Post WHERE id = ?', [req.params.postId]);
         if (!post) return res.status(404).json({ error: 'Post not found' });
 
         // HookDetail
@@ -149,10 +149,10 @@ app.get('/api/posts/:postId', async (req, res) => {
             );
             para.videos = assets
                 .filter(a => a.type === 'video' && (a.paragraph_id || a.sentence_id))
-                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: a.file_path.startsWith('http') ? a.file_path : `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0 }));
+                .map(a => ({ id: a.id, type: 'video', name: path.basename(a.file_path), url: a.file_path.startsWith('http') ? a.file_path : `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0 }));
             para.images = assets
                 .filter(a => a.type === 'image' && (a.paragraph_id || a.sentence_id))
-                .map(a => ({ id: a.id, name: path.basename(a.file_path), url: a.file_path.startsWith('http') ? a.file_path : `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0 }));
+                .map(a => ({ id: a.id, type: 'image', name: path.basename(a.file_path), url: a.file_path.startsWith('http') ? a.file_path : `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0 }));
 
             // Audios & generated videos từ thư mục output
             para.audios = {};
@@ -996,6 +996,19 @@ app.post('/api/toggle', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Sắp xếp lại thứ tự asset đã chọn (video + ảnh chung 1 dãy order) trong 1 luận điểm
+app.post('/api/reorder-assets', async (req, res) => {
+    const { items } = req.body; // [{ relativePath, order }]
+    try {
+        const db = await getDb();
+        for (const it of (items || [])) {
+            await db.run('UPDATE Asset SET "order" = ? WHERE file_path = ?', [it.order, it.relativePath]);
+        }
+        await db.close();
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 const upload = multer({ dest: path.join(MEDIA_DIR, '_tmp_uploads') });
 // API: Tạo mới dự án từ nội dung
 app.post('/api/create-naze-srt', upload.fields([{ name: 'srt', maxCount: 1 }, { name: 'srtTarget', maxCount: 1 }]), async (req, res) => {
@@ -1119,6 +1132,50 @@ app.post('/api/upload', upload.array('files'), async (req, res) => {
         }
         await db.close();
         res.json({ success: true, count: req.files.length });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Upload intro/outro video — chèn vào đầu/cuối khi export CapCut, KHÔNG ảnh hưởng các đoạn
+app.post('/api/upload-intro-outro', upload.single('file'), async (req, res) => {
+    try {
+        const { postId, kind } = req.body; // kind: 'intro' | 'outro'
+        if (!req.file) return res.status(400).json({ error: 'No file' });
+        if (!['intro', 'outro'].includes(kind)) return res.status(400).json({ error: 'kind phải là intro hoặc outro' });
+        const db = await getDb();
+        const post = await db.get('SELECT id, project_id, intro_path, outro_path FROM Post WHERE id = ?', [postId]);
+        if (!post) { await db.close(); try { fs.unlinkSync(req.file.path); } catch(_) {} return res.status(404).json({ error: 'Post not found' }); }
+        const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
+        const dir = path.join(MEDIA_DIR, projectId, 'intro_outro');
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        const ext = (path.extname(req.file.originalname) || '.mp4').toLowerCase();
+        const destPath = path.join(dir, `${kind}${ext}`);
+        // Xoá file cũ (kể cả khác đuôi) trước khi ghi mới
+        const oldRel = kind === 'intro' ? post.intro_path : post.outro_path;
+        if (oldRel) { try { fs.unlinkSync(path.join(MEDIA_DIR, oldRel)); } catch(_) {} }
+        fs.renameSync(req.file.path, destPath);
+        const relPath = path.relative(MEDIA_DIR, destPath);
+        const col = kind === 'intro' ? 'intro_path' : 'outro_path';
+        await db.run(`UPDATE Post SET ${col} = ? WHERE id = ?`, [relPath, postId]);
+        await db.close();
+        res.json({ success: true, kind, path: relPath });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Xoá intro/outro
+app.post('/api/remove-intro-outro', async (req, res) => {
+    try {
+        const { postId, kind } = req.body;
+        if (!['intro', 'outro'].includes(kind)) return res.status(400).json({ error: 'kind không hợp lệ' });
+        const db = await getDb();
+        const post = await db.get('SELECT intro_path, outro_path FROM Post WHERE id = ?', [postId]);
+        if (post) {
+            const rel = kind === 'intro' ? post.intro_path : post.outro_path;
+            if (rel) { try { fs.unlinkSync(path.join(MEDIA_DIR, rel)); } catch(_) {} }
+            const col = kind === 'intro' ? 'intro_path' : 'outro_path';
+            await db.run(`UPDATE Post SET ${col} = NULL WHERE id = ?`, [postId]);
+        }
+        await db.close();
+        res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

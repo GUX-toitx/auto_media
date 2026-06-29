@@ -52,35 +52,72 @@
                     </div>
                     <p v-if="activePost.title" class="text-gray-300 text-sm mt-1 font-medium">{{ activePost.title }}</p>
                 </div>
-                <div class="flex gap-3 items-center">
-                    <!-- Preview Mode Switch -->
-                    <label class="flex items-center gap-2 cursor-pointer select-none">
-                        <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">Preview</span>
-                        <div @click="previewMode = !previewMode" class="relative w-10 h-5 rounded-full transition-colors" :class="previewMode ? 'bg-blue-600' : 'bg-gray-700'">
-                            <div class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all" :class="previewMode ? 'left-5' : 'left-0.5'"></div>
-                        </div>
-                    </label>
-                    <button @click="createVoice" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
-                    <button @click="retryDownloadVoice" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔄 Refresh Voice</button>
-                    <button @click="openDownloadAudioModal" class="bg-yellow-600 hover:bg-yellow-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">⬇️ Chỉ Tải Voice</button>
-                    <button @click="openDownloadVoiceModal" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice & Media Selected</button>
-                    <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-600 hover:bg-orange-500 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
-                        <span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}
-                    </button>
-                    <div class="relative">
-                        <button @click.stop="showCapcutMenu = !showCapcutMenu" :disabled="capcutExporting" class="bg-pink-600 hover:bg-pink-500 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
-                            <span v-if="capcutExporting" class="animate-spin inline-block mr-1">⏳</span>{{ capcutExporting ? 'Exporting...' : '🎬 CapCut Export ▾' }}
-                        </button>
-                        <div v-if="showCapcutMenu" class="absolute top-full left-0 mt-1 flex flex-col gap-1 z-50 min-w-[160px]">
-                            <button @click.stop="capcutLang=''; showCapcutMenu=false; exportCapcut()" class="bg-pink-700 hover:bg-pink-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">Auto</button>
-                            <button @click.stop="capcutLang='content_vi'; showCapcutMenu=false; exportCapcut()" class="bg-pink-700 hover:bg-pink-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🇻🇳 Tiếng Việt</button>
-                            <button @click.stop="capcutLang='content'; showCapcutMenu=false; exportCapcut()" class="bg-pink-700 hover:bg-pink-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🌍 Target Lang</button>
+                <div class="flex gap-4 items-end">
+                    <!-- Preview -->
+                    <div class="flex flex-col gap-1.5">
+                        <span class="text-[8px] font-black uppercase tracking-widest text-gray-600 px-1">View</span>
+                        <label class="flex items-center gap-2 cursor-pointer select-none bg-gray-900/60 border border-gray-800 rounded-lg px-3 py-2.5">
+                            <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">Preview</span>
+                            <div @click="previewMode = !previewMode" class="relative w-10 h-5 rounded-full transition-colors" :class="previewMode ? 'bg-blue-600' : 'bg-gray-700'">
+                                <div class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all" :class="previewMode ? 'left-5' : 'left-0.5'"></div>
+                            </div>
+                        </label>
+                    </div>
+
+                    <!-- Group: Voice -->
+                    <div class="flex flex-col gap-1.5">
+                        <span class="text-[8px] font-black uppercase tracking-widest text-gray-600 px-1">Voice</span>
+                        <div class="flex gap-1.5 bg-gray-900/60 border border-gray-800 rounded-lg p-1.5">
+                            <button @click="createVoice" class="bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
+                            <button @click="retryDownloadVoice" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔄 Refresh</button>
                         </div>
                     </div>
-                    <button @click="renderCapcut" :disabled="capcutRendering" class="bg-rose-700 hover:bg-rose-600 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
-                        <span v-if="capcutRendering" class="animate-spin inline-block mr-1">⏳</span>{{ capcutRendering ? 'Rendering...' : '▶️ CapCut Render' }}
-                    </button>
-                    <div v-if="posts.find(p => p.id === activePostId)?.status === 'crawling'" class="flex items-center gap-2 text-blue-400 ml-2">
+
+                    <!-- Group: Tải về -->
+                    <div class="flex flex-col gap-1.5">
+                        <span class="text-[8px] font-black uppercase tracking-widest text-gray-600 px-1">Tải về</span>
+                        <div class="flex gap-1.5 bg-gray-900/60 border border-gray-800 rounded-lg p-1.5">
+                            <button @click="openDownloadAudioModal" class="bg-yellow-600 hover:bg-yellow-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">⬇️ Voice</button>
+                            <button @click="openDownloadVoiceModal" class="bg-green-600 hover:bg-green-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Voice & Media</button>
+                        </div>
+                    </div>
+
+                    <!-- Group: Media -->
+                    <div class="flex flex-col gap-1.5">
+                        <span class="text-[8px] font-black uppercase tracking-widest text-gray-600 px-1">Media</span>
+                        <div class="flex gap-1.5 bg-gray-900/60 border border-gray-800 rounded-lg p-1.5">
+                            <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-600 hover:bg-orange-500 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
+                                <span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl' }}
+                            </button>
+                            <button @click="openIntroOutroModal" class="bg-teal-600 hover:bg-teal-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
+                                🎞️ Intro/Outro
+                                <span v-if="activePost.intro_path || activePost.outro_path" class="ml-1 inline-block w-2 h-2 rounded-full bg-green-400 align-middle"></span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Group: CapCut -->
+                    <div class="flex flex-col gap-1.5">
+                        <span class="text-[8px] font-black uppercase tracking-widest text-gray-600 px-1">CapCut</span>
+                        <div class="flex gap-1.5 bg-gray-900/60 border border-gray-800 rounded-lg p-1.5">
+                            <div class="relative">
+                                <button @click.stop="showCapcutMenu = !showCapcutMenu" :disabled="capcutExporting" class="bg-pink-600 hover:bg-pink-500 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
+                                    <span v-if="capcutExporting" class="animate-spin inline-block mr-1">⏳</span>{{ capcutExporting ? 'Exporting...' : '🎬 Export ▾' }}
+                                </button>
+                                <div v-if="showCapcutMenu" class="absolute top-full left-0 mt-1 flex flex-col gap-1 z-50 min-w-[160px]">
+                                    <button @click.stop="capcutLang=''; showCapcutMenu=false; exportCapcut()" class="bg-pink-700 hover:bg-pink-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">Auto</button>
+                                    <button @click.stop="capcutLang='content_vi'; showCapcutMenu=false; exportCapcut()" class="bg-pink-700 hover:bg-pink-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🇻🇳 Tiếng Việt</button>
+                                    <button @click.stop="capcutLang='content'; showCapcutMenu=false; exportCapcut()" class="bg-pink-700 hover:bg-pink-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🌍 Target Lang</button>
+                                    <button @click.stop="capcutLang='both'; showCapcutMenu=false; exportCapcut()" class="bg-pink-700 hover:bg-pink-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🌍+🇻🇳 Cả 2 ngôn ngữ</button>
+                                </div>
+                            </div>
+                            <button @click="renderCapcut" :disabled="capcutRendering" class="bg-rose-700 hover:bg-rose-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
+                                <span v-if="capcutRendering" class="animate-spin inline-block mr-1">⏳</span>{{ capcutRendering ? 'Rendering...' : '▶️ Render' }}
+                            </button>
+                        </div>
+                    </div>
+
+                    <div v-if="posts.find(p => p.id === activePostId)?.status === 'crawling'" class="flex items-center gap-2 text-blue-400 ml-2 pb-2">
                         <span class="animate-spin text-2xl">⏳</span>
                         <span class="text-[13px] font-black uppercase tracking-widest">Crawling...</span>
                     </div>
@@ -560,43 +597,65 @@
                                     </div>
                                 </div>
                             </div>
-                            <!-- Assets selected cho luận điểm (sentenceId = null, selected) -->
-                            <div v-if="(para.videos || []).filter(v => v.selected && v.sentenceId === null).length" class="mt-1">
-                                <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="para._paraVideoOpen = !para._paraVideoOpen">
-                                    {{ para._paraVideoOpen ? '▼' : '▶' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos luận điểm ({{ (para.videos || []).filter(v => v.selected && v.sentenceId === null).length }})
-                                </div>
-                                <div v-if="para._paraVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
-                                    <div v-for="v in (para.videos || []).filter(v => v.selected && v.sentenceId === null).sort((a,b) => a.order - b.order)" :key="v.relativePath" 
-                                         class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
-                                         draggable="true"
-                                         @dragstart="handleParaAssetDragStart($event, v, 'video', para)">
-                                        <button @click="unselectAsset(v, para, 0, 'video')" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
-                                        <video muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v, 'video', para)" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
-                                        <div class="flex gap-1">
-                                            <button class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</button>
-                                            <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-green-600 uppercase">✓</button>
-                                            <button @click="openEdit(v, 'video', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                            <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
+                            <!-- 2 thanh coverage: dưới audio 🇻🇳 (trái) và audio đích 🌍 (phải) -->
+                            <div v-if="para._narrationViSec > 0 || para._narrationTargetSec > 0" class="mt-2 grid grid-cols-2 gap-2">
+                                <div class="space-y-1">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="text-[11px] shrink-0" title="Phủ tiếng Việt">🇻🇳</span>
+                                        <div class="flex-1 h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                                            <div class="h-full rounded-full transition-all duration-300"
+                                                 :class="para._narrationViSec && selectedTotalSec(para) + 0.05 >= para._narrationViSec ? 'bg-green-500' : 'bg-yellow-500'"
+                                                 :style="{ width: (para._narrationViSec ? Math.min(100, selectedTotalSec(para) / para._narrationViSec * 100) : 0) + '%' }"></div>
                                         </div>
+                                    </div>
+                                    <div class="text-[12px] font-mono tabular-nums font-black text-center">
+                                        <span :class="para._narrationViSec && selectedTotalSec(para) + 0.05 >= para._narrationViSec ? 'text-green-400' : 'text-yellow-400'">{{ selectedTotalSec(para).toFixed(1) }}/{{ (para._narrationViSec || 0).toFixed(1) }}s</span>
+                                        <span class="text-gray-600"> · </span>
+                                        <span :class="coverageHintClass(para, para._narrationViSec)">{{ coverageRemain(para, para._narrationViSec) }}</span>
+                                    </div>
+                                </div>
+                                <div class="space-y-1">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="text-[11px] shrink-0" title="Phủ ngôn ngữ đích">🌍</span>
+                                        <div class="flex-1 h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                                            <div class="h-full rounded-full transition-all duration-300"
+                                                 :class="para._narrationTargetSec && selectedTotalSec(para) + 0.05 >= para._narrationTargetSec ? 'bg-green-500' : 'bg-yellow-500'"
+                                                 :style="{ width: (para._narrationTargetSec ? Math.min(100, selectedTotalSec(para) / para._narrationTargetSec * 100) : 0) + '%' }"></div>
+                                        </div>
+                                    </div>
+                                    <div class="text-[12px] font-mono tabular-nums font-black text-center">
+                                        <span :class="para._narrationTargetSec && selectedTotalSec(para) + 0.05 >= para._narrationTargetSec ? 'text-green-400' : 'text-yellow-400'">{{ selectedTotalSec(para).toFixed(1) }}/{{ (para._narrationTargetSec || 0).toFixed(1) }}s</span>
+                                        <span class="text-gray-600"> · </span>
+                                        <span :class="coverageHintClass(para, para._narrationTargetSec)">{{ coverageRemain(para, para._narrationTargetSec) }}</span>
                                     </div>
                                 </div>
                             </div>
-                            <div v-if="(para.images || []).filter(img => img.selected && img.sentenceId === null).length" class="mt-1">
-                                <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="para._paraImageOpen = !para._paraImageOpen">
-                                    {{ para._paraImageOpen ? '▼' : '▶' }} <span class="w-1.5 h-1.5 bg-orange-500 rounded-full mx-1"></span> Images luận điểm ({{ (para.images || []).filter(img => img.selected && img.sentenceId === null).length }})
+                            <!-- Các video/ảnh đã chọn (gộp video + ảnh, kéo thả để sắp xếp thứ tự) -->
+                            <div v-if="selectedMedia(para).length" class="mt-1">
+                                <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="para._paraSelOpen = !para._paraSelOpen">
+                                    {{ para._paraSelOpen === false ? '▶' : '▼' }} <span class="w-1.5 h-1.5 bg-green-500 rounded-full mx-1"></span> Các video/ảnh đã chọn ({{ selectedMedia(para).length }}) <span class="ml-1 text-green-400 font-black">⏱ {{ selectedTotalSec(para).toFixed(1) }}s</span> <span class="ml-1 text-gray-600 font-normal normal-case">— kéo thả để sắp xếp</span>
                                 </div>
-                                <div v-if="para._paraImageOpen !== false" class="grid grid-cols-6 gap-1 mt-1">
-                                    <div v-for="img in (para.images || []).filter(img => img.selected && img.sentenceId === null).sort((a,b) => a.order - b.order)" :key="img.relativePath" 
-                                         class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
+                                <div v-if="para._paraSelOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
+                                    <div v-for="item in selectedMedia(para)" :key="item.relativePath"
+                                         class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative cursor-move"
                                          draggable="true"
-                                         @dragstart="handleParaAssetDragStart($event, img, 'image', para)">
-                                        <button @click="unselectAsset(img, para, 0, 'image')" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
-                                        <img :src="img.url" @click="openPreview(img, 'image', para)" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
-                                        <div class="flex gap-1">
-                                            <button class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</button>
-                                            <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-green-600 uppercase">✓</button>
-                                            <button @click="openEdit(img, 'image', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                            <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
+                                         @dragstart="onSelMediaDragStart($event, para, item)"
+                                         @dragover.prevent
+                                         @drop="onSelMediaDrop($event, para, item)">
+                                        <button @click="unselectAsset(item, para, 0, item.type)" class="absolute top-1 right-1 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full z-20 flex items-center justify-center">×</button>
+                                        <video v-if="item.type === 'video'" muted loop preload="metadata" :src="item.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(item, 'video', para)" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
+                                        <img v-else :src="item.url" @click="openPreview(item, 'image', para)" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer">
+                                        <div class="flex items-center gap-1 mb-0.5">
+                                            <span class="text-[9px] text-gray-500">⏱</span>
+                                            <input v-if="item.type === 'image'" type="number" min="0.1" step="0.1" :value="item.duration || ''" @change="setImageDuration(item, para, $event)" @click.stop placeholder="giây" class="w-12 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none focus:border-blue-500" title="Số giây ảnh hiển thị">
+                                            <span v-else class="text-[9px] text-gray-400 font-bold">{{ (item.duration || 0).toFixed(1) }}s</span>
+                                        </div>
+                                        <div class="flex gap-1 items-center">
+                                            <button class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ item.order }}</button>
+                                            <span class="text-[10px]" :title="item.type === 'video' ? 'Video' : 'Ảnh'">{{ item.type === 'video' ? '🎬' : '🖼️' }}</span>
+                                            <button @click="toggleSelect(item, para, item.type)" class="flex-1 text-[9px] font-black py-0.5 rounded bg-green-600 uppercase">✓</button>
+                                            <button @click="openEdit(item, item.type, para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                            <button @click="openMoveModal(item, item.type)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                         </div>
                                     </div>
                                 </div>
@@ -754,7 +813,7 @@
                                     <span v-if="v.selected" class="text-[9px] font-black py-1 px-2 rounded bg-blue-600 text-white min-w-[24px] text-center">#{{ v.order }}</span>
                                     <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-1 rounded uppercase transition-colors"
                                         :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-1 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
+                                    <button @click="openMoveModal(v,'video')" class="text-[9px] font-black py-1 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                     <button @click="openEdit(v, 'video', para)" :disabled="!v.selected"
                                         class="text-[9px] font-black py-1 px-2 rounded transition-colors"
                                         :class="v.selected ? 'bg-yellow-500 hover:bg-yellow-400 text-black' : 'bg-gray-800 text-gray-700 cursor-not-allowed'">Edit</button>
@@ -798,7 +857,7 @@
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white min-w-[20px] text-center">#{{ img.order }}</span>
                                     <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
                                         :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
+                                    <button @click="openMoveModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                     <button @click="openEdit(img, 'image', para)" :disabled="!img.selected"
                                         class="text-[9px] font-black py-0.5 px-1.5 rounded transition-colors"
                                         :class="img.selected ? 'bg-yellow-500 hover:bg-yellow-400 text-black' : 'bg-gray-800 text-gray-700 cursor-not-allowed'">Edit</button>
@@ -1234,6 +1293,47 @@
                     </div>
                 </div>
             </template>
+        </div>
+    </div>
+
+    <!-- INTRO/OUTRO MODAL -->
+    <div v-if="introOutroModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-8 w-[480px] space-y-6">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xl font-black text-white">🎞️ Intro / Outro</h3>
+                <button @click="introOutroModal.open=false" class="text-gray-500 hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+            <p class="text-[11px] text-gray-400 leading-relaxed">Video <b>intro</b> chèn vào đầu, <b>outro</b> chèn vào cuối khi export CapCut. Không ảnh hưởng nội dung/độ dài các đoạn. Giữ nguyên âm thanh gốc của video.</p>
+
+            <!-- Intro -->
+            <div class="space-y-2">
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Intro (đầu video)</label>
+                <div v-if="activePost.intro_path" class="flex items-center gap-2 bg-gray-800 rounded-lg px-3 py-2">
+                    <span class="text-green-400">✅</span>
+                    <span class="text-[11px] text-gray-300 truncate flex-1">{{ activePost.intro_path.split('/').pop() }}</span>
+                    <button @click="removeIntroOutro('intro')" class="text-red-400 hover:text-red-300 text-[10px] font-bold uppercase tracking-widest">Xoá</button>
+                </div>
+                <video v-if="activePost.intro_path" :src="'/' + activePost.intro_path + '?t=' + introOutroModal.cacheBust" controls preload="metadata" class="w-full rounded-lg bg-black max-h-48"></video>
+                <input type="file" accept="video/*" @change="uploadIntroOutro('intro', $event)" :disabled="introOutroModal.uploading" class="block w-full text-[11px] text-gray-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-teal-600 file:text-white file:font-bold file:cursor-pointer hover:file:bg-teal-500 disabled:opacity-40">
+            </div>
+
+            <!-- Outro -->
+            <div class="space-y-2">
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Outro (cuối video)</label>
+                <div v-if="activePost.outro_path" class="flex items-center gap-2 bg-gray-800 rounded-lg px-3 py-2">
+                    <span class="text-green-400">✅</span>
+                    <span class="text-[11px] text-gray-300 truncate flex-1">{{ activePost.outro_path.split('/').pop() }}</span>
+                    <button @click="removeIntroOutro('outro')" class="text-red-400 hover:text-red-300 text-[10px] font-bold uppercase tracking-widest">Xoá</button>
+                </div>
+                <video v-if="activePost.outro_path" :src="'/' + activePost.outro_path + '?t=' + introOutroModal.cacheBust" controls preload="metadata" class="w-full rounded-lg bg-black max-h-48"></video>
+                <input type="file" accept="video/*" @change="uploadIntroOutro('outro', $event)" :disabled="introOutroModal.uploading" class="block w-full text-[11px] text-gray-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-teal-600 file:text-white file:font-bold file:cursor-pointer hover:file:bg-teal-500 disabled:opacity-40">
+            </div>
+
+            <div v-if="introOutroModal.uploading" class="text-center text-teal-400 text-[11px] font-bold"><span class="animate-spin inline-block mr-1">⏳</span>Đang upload...</div>
+
+            <div class="flex justify-end pt-2">
+                <button @click="introOutroModal.open=false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-400">Đóng</button>
+            </div>
         </div>
     </div>
 
@@ -2102,6 +2202,36 @@ createApp({
                 data.sections[s]._imageOpen = false;
             }
             activePost.value = data;
+            // Tính độ dài giọng đọc từng cảnh (cho thanh coverage) — chạy nền, không chặn UI.
+            // Dùng activePost.value.paragraphs (proxy reactive) để khi gán _narrationViSec/_narrationTargetSec thì UI tự cập nhật.
+            activePost.value.paragraphs.forEach(p => computeNarration(p));
+        }
+
+        // Load duration (giây) của 1 file audio qua metadata
+        function loadAudioDuration(url) {
+            return new Promise((resolve) => {
+                const a = new Audio();
+                a.preload = 'metadata';
+                a.addEventListener('loadedmetadata', () => resolve(Number(a.duration) || 0), { once: true });
+                a.addEventListener('error', () => resolve(0), { once: true });
+                a.src = url;
+            });
+        }
+
+        // Tổng độ dài giọng đọc của 1 cảnh theo từng ngôn ngữ (ghép audio như capcut_export)
+        // -> para._narrationViSec (tiếng Việt) và para._narrationTargetSec (ngôn ngữ đích)
+        async function computeNarration(para) {
+            const urlsFor = (field) => para[field]
+                ? [para[field]]
+                : (para.details || []).map(d => d[field]).filter(Boolean);
+            const viUrls = urlsFor('content_vi_audio');
+            const tgUrls = urlsFor('content_audio');
+            const [viDurs, tgDurs] = await Promise.all([
+                Promise.all(viUrls.map(loadAudioDuration)),
+                Promise.all(tgUrls.map(loadAudioDuration)),
+            ]);
+            para._narrationViSec = viDurs.reduce((s, d) => s + d, 0);
+            para._narrationTargetSec = tgDurs.reduce((s, d) => s + d, 0);
         }
 
         async function deleteProject(post) {
@@ -2394,7 +2524,7 @@ createApp({
         async function exportCapcut() {
             if (!activePostId.value) return;
             capcutExporting.value = true;
-            const langLabel = capcutLang.value === 'content_vi' ? '🇻🇳 VI' : capcutLang.value === 'content' ? 'Target' : 'Auto';
+            const langLabel = capcutLang.value === 'content_vi' ? '🇻🇳 VI' : capcutLang.value === 'content' ? 'Target' : capcutLang.value === 'both' ? '🌍+🇻🇳 Cả 2' : 'Auto';
             showToast(`🎬 Đang xuất CapCut draft (${langLabel})...`, 10000);
             try {
                 const body = { postId: activePostId.value };
@@ -2483,6 +2613,76 @@ createApp({
                 para.videos = updated.videos || [];
                 para.images = updated.images || [];
             }
+        }
+
+        // Gộp video + ảnh đã chọn (cấp luận điểm) thành 1 danh sách, sắp theo order chung.
+        // type ('video'/'image') đã có sẵn từ API -> template biết render <video> hay <img>.
+        function selectedMedia(para) {
+            const vids = (para.videos || []).filter(v => v.selected && v.sentenceId === null);
+            const imgs = (para.images || []).filter(im => im.selected && im.sentenceId === null);
+            return [...vids, ...imgs].sort((a, b) => (a.order || 0) - (b.order || 0));
+        }
+
+        // Tổng thời lượng (giây) của các video/ảnh đã chọn trong 1 luận điểm
+        function selectedTotalSec(para) {
+            return selectedMedia(para).reduce((s, x) => s + (Number(x.duration) || 0), 0);
+        }
+
+        // Gợi ý còn bao nhiêu giây nữa để lấp đầy 1 thanh coverage (so với độ dài giọng đọc narrSec)
+        function coverageRemain(para, narrSec) {
+            if (!narrSec) return '';
+            const diff = narrSec - selectedTotalSec(para);
+            if (diff > 0.05) return `còn ${diff.toFixed(1)}s`;
+            if (diff < -0.05) return `thừa ${(-diff).toFixed(1)}s`;
+            return 'đủ ✓';
+        }
+
+        // Màu cho phần gợi ý (khác màu với tỉ lệ): còn -> cam, thừa -> đỏ, đủ -> xanh
+        function coverageHintClass(para, narrSec) {
+            if (!narrSec) return 'text-gray-500';
+            const diff = narrSec - selectedTotalSec(para);
+            if (diff > 0.05) return 'text-orange-400';
+            if (diff < -0.05) return 'text-red-400';
+            return 'text-green-400';
+        }
+
+        // Đặt số giây hiển thị cho 1 ảnh -> lưu vào Asset.duration
+        async function setImageDuration(item, para, e) {
+            const val = parseFloat(e.target.value);
+            if (!(val > 0)) return;
+            item.duration = val; // cập nhật ngay cho tổng số giây mượt
+            try {
+                await fetch('/api/save-duration', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: item.relativePath, duration: val }) });
+            } catch (err) { showToast('❌ ' + err.message); }
+            await reloadParaAssets(para);
+        }
+
+        const reorderDrag = ref(null); // { paraId, relativePath }
+
+        function onSelMediaDragStart(e, para, item) {
+            reorderDrag.value = { paraId: para.id, relativePath: item.relativePath };
+            // Giữ tương thích: vẫn cho phép kéo asset thả vào detail (handleDetailDrop đọc key 'asset')
+            e.dataTransfer.setData('asset', JSON.stringify({ assetId: item.id, type: item.type, paraId: para.id, source: 'paragraph' }));
+            e.dataTransfer.effectAllowed = 'move';
+        }
+
+        async function onSelMediaDrop(e, para, targetItem) {
+            const src = reorderDrag.value;
+            reorderDrag.value = null;
+            if (!src || src.paraId !== para.id) return;            // chỉ sắp xếp trong cùng cảnh
+            if (src.relativePath === targetItem.relativePath) return;
+            const list = selectedMedia(para);
+            const from = list.findIndex(x => x.relativePath === src.relativePath);
+            const to = list.findIndex(x => x.relativePath === targetItem.relativePath);
+            if (from < 0 || to < 0) return;
+            const [moved] = list.splice(from, 1);
+            list.splice(to, 0, moved);
+            // Gán order mới 1..n và lưu (cập nhật ngay tại chỗ cho mượt, rồi persist)
+            const items = list.map((x, i) => { x.order = i + 1; return { relativePath: x.relativePath, order: i + 1 }; });
+            try {
+                await fetch('/api/reorder-assets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
+            } catch (err) { showToast('❌ Lỗi sắp xếp: ' + err.message); }
+            await reloadParaAssets(para);
         }
 
         async function reloadSectionAssets(sectionName) {
@@ -3095,6 +3295,43 @@ createApp({
             pollingTimer.value = setInterval(poll, 3000);
         }
 
+        // ===== Intro / Outro =====
+        const introOutroModal = ref({ open: false, uploading: false, cacheBust: 0 });
+
+        function openIntroOutroModal() {
+            introOutroModal.value = { open: true, uploading: false, cacheBust: Date.now() };
+        }
+
+        async function uploadIntroOutro(kind, event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            introOutroModal.value.uploading = true;
+            try {
+                const fd = new FormData();
+                fd.append('file', file);
+                fd.append('postId', activePostId.value);
+                fd.append('kind', kind);
+                const res = await fetch('/api/upload-intro-outro', { method: 'POST', body: fd });
+                const r = await res.json();
+                if (r.success) {
+                    showToast(`✅ Đã upload ${kind}`);
+                    introOutroModal.value.cacheBust = Date.now(); // ép video preview tải lại file mới
+                    await selectPost({ id: activePostId.value }); // refresh intro_path/outro_path
+                } else { showToast('❌ ' + (r.error || 'Lỗi upload')); }
+            } catch (e) { showToast('❌ ' + e.message); }
+            finally { introOutroModal.value.uploading = false; event.target.value = ''; }
+        }
+
+        async function removeIntroOutro(kind) {
+            if (!confirm(`Xoá ${kind}?`)) return;
+            try {
+                const res = await fetch('/api/remove-intro-outro', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: activePostId.value, kind }) });
+                const r = await res.json();
+                if (r.success) { showToast(`🗑️ Đã xoá ${kind}`); await selectPost({ id: activePostId.value }); }
+                else showToast('❌ ' + (r.error || 'Lỗi'));
+            } catch (e) { showToast('❌ ' + e.message); }
+        }
+
         const downloadAudioModal = ref({ open: false, type: 'merged', silence: 0.5, contentType: 'content' });
 
         function openDownloadAudioModal() {
@@ -3523,6 +3760,10 @@ createApp({
             saveSentenceField,
             sentenceVoiceModal,
             submitRecreateSentenceVoice,
+            introOutroModal,
+            openIntroOutroModal,
+            uploadIntroOutro,
+            removeIntroOutro,
             downloadAudioModal,
             openDownloadAudioModal,
             openDownloadVoiceModal,
@@ -3550,6 +3791,13 @@ createApp({
             onDropProfileFile,
             loadSpeakersByLang,
             reloadParaAssets,
+            selectedMedia,
+            selectedTotalSec,
+            coverageRemain,
+            coverageHintClass,
+            setImageDuration,
+            onSelMediaDragStart,
+            onSelMediaDrop,
             uploadAsset,
             submitDownloadUrl,
             unselectAsset,
