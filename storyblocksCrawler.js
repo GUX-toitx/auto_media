@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { chromium } from 'playwright';
 import { claimNextStockPath } from './stockNaming.js';
+import { logCrawlError } from './crawlLogger.js';
 
 const SETTINGS_DIR = path.join(process.cwd(), 'setting');
 const COUNTER_FILE = path.join(SETTINGS_DIR, 'current_index_storyblocks.txt');
@@ -80,6 +81,7 @@ async function downloadMedia(url, targetDir, ext, keyword) {
     } catch (e) {
         if (e.name !== 'AbortError') {
             console.error(`      [${keyword}][Storyblocks Tải] ${e.message}`);
+            logCrawlError({ source: 'Storyblocks', keyword, url, reason: e.message });
         }
         return false;
     } finally {
@@ -202,6 +204,7 @@ export async function fetchFromStoryblocksBot(keyword, type, targetDir, neededCo
         }
     } catch (error) {
         console.error(`      [${keyword}][Storyblocks Lỗi Tổng] ${error.message}`);
+        logCrawlError({ source: 'Storyblocks/total', keyword, reason: error.message });
     } finally {
         if (context) await context.close().catch(() => {});
     }

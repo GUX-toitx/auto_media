@@ -296,16 +296,16 @@ app.post('/api/generate-media', (req, res) => {
             }
             await db.close();
             // Import và crawl trực tiếp
-            const { fetchFromGoogleImageBot } = await import('./googleImageCrawler.js').catch(() => ({}));
-            if (!fetchFromGoogleImageBot) {
-                console.error('[generate-media section] Không import được fetchFromGoogleImageBot');
+            const { crawlKeywordImageRotate } = await import('./imageCrawlRotate.js').catch(() => ({}));
+            if (!crawlKeywordImageRotate) {
+                console.error('[generate-media section] Không import được imageCrawlRotate');
                 return;
             }
             const iFolder = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', section);
             if (!fs.existsSync(iFolder)) fs.mkdirSync(iFolder, { recursive: true });
             const kwTexts = (Array.isArray(keywords) ? keywords : [keywords]).map(k => typeof k === 'object' ? k.content : k);
-            for (const kw of kwTexts) {
-                await fetchFromGoogleImageBot(kw, 'image', iFolder, 8).catch(() => {});
+            for (const [i, kw] of kwTexts.entries()) {
+                await crawlKeywordImageRotate(kw, iFolder, i).catch(() => {});
             }
             // Sync vào DB
             const db2 = await getDb();
@@ -331,8 +331,8 @@ app.post('/api/generate-media', (req, res) => {
     console.log(`[HỆ THỐNG] Từ khóa: ${kwTexts.join(', ')}`);
 
     (async () => {
-        const { fetchFromGoogleImageBot } = await import('./googleImageCrawler.js').catch(() => ({}));
-        if (!fetchFromGoogleImageBot) return;
+        const { crawlKeywordImageRotate } = await import('./imageCrawlRotate.js').catch(() => ({}));
+        if (!crawlKeywordImageRotate) return;
         const db = await getDb();
         for (const kw of kwTexts) {
             const ex = await db.get('SELECT id FROM Keyword WHERE paragraph_id = ? AND content = ?', [groupId, kw]);
@@ -340,9 +340,9 @@ app.post('/api/generate-media', (req, res) => {
         }
         const iFolder = path.join(MEDIA_DIR, videoId, 'assets', '_raw_images', String(groupId));
         if (!fs.existsSync(iFolder)) fs.mkdirSync(iFolder, { recursive: true });
-        for (const kw of kwTexts) {
+        for (const [i, kw] of kwTexts.entries()) {
             console.log(`[generate-media] Crawl image: ${kw}`);
-            const got = await fetchFromGoogleImageBot(kw, 'image', iFolder, 8).catch(e => { console.error('[generate-media]', e.message); return 0; });
+            const got = await crawlKeywordImageRotate(kw, iFolder, i).catch(e => { console.error('[generate-media]', e.message); return 0; });
             console.log(`[generate-media] ${kw}: ${got} images`);
             // Sync ngay sau mỗi keyword
             const exts = ['.jpg','.jpeg','.png','.webp'];
@@ -692,8 +692,8 @@ app.post('/api/crawl-all', async (req, res) => {
     const { postId } = req.body;
     res.json({ success: true, message: 'Đang crawl...' });
     (async () => {
-        const { fetchFromGoogleImageBot } = await import('./googleImageCrawler.js').catch(() => ({}));
-        if (!fetchFromGoogleImageBot) return;
+        const { crawlKeywordImageRotate } = await import('./imageCrawlRotate.js').catch(() => ({}));
+        if (!crawlKeywordImageRotate) return;
         const db = await getDb();
         const post = await db.get('SELECT id, project_id FROM Post WHERE id = ?', [postId]);
         if (!post) { await db.close(); return; }
@@ -717,8 +717,8 @@ app.post('/api/crawl-all', async (req, res) => {
             if (!kws.length) continue;
             const iF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', section);
             if (!fs.existsSync(iF)) fs.mkdirSync(iF, { recursive: true });
-            for (const { content: kw } of kws) {
-                await fetchFromGoogleImageBot(kw, 'image', iF, 8).catch(() => {});
+            for (const [i, { content: kw }] of kws.entries()) {
+                await crawlKeywordImageRotate(kw, iF, i).catch(() => {});
             }
             await syncDir(iF, 'image', (rel, t) => db.run('INSERT INTO Asset (post_id, section, type, file_path) VALUES (?, ?, ?, ?)', [postId, section, t, rel]));
         }
@@ -731,8 +731,8 @@ app.post('/api/crawl-all', async (req, res) => {
             if (!kws.length) continue;
             const iF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', gid);
             if (!fs.existsSync(iF)) fs.mkdirSync(iF, { recursive: true });
-            for (const { content: kw } of kws) {
-                await fetchFromGoogleImageBot(kw, 'image', iF, 8).catch(() => {});
+            for (const [i, { content: kw }] of kws.entries()) {
+                await crawlKeywordImageRotate(kw, iF, i).catch(() => {});
             }
             await syncDir(iF, 'image', (rel, t) => db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [para.id, t, rel]));
         }

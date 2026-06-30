@@ -4,7 +4,7 @@ import path from 'path';
 import https from 'https';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
-import { fetchFromGoogleImageBot } from './googleImageCrawler.js';
+import { crawlKeywordImageRotate } from './imageCrawlRotate.js';
 
 const OPENAI_KEY = process.env.OPENAI_KEY;
 const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
@@ -98,10 +98,10 @@ async function main() {
         fs.mkdirSync(imgDir, { recursive: true });
 
         const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(0), ms))]);
-        await Promise.all(keywords.map(kw => {
+        await Promise.all(keywords.map((kw, i) => {
             console.log(`    -> Crawl: "${kw}"`);
             return withTimeout(
-                fetchFromGoogleImageBot(kw, 'image', imgDir, IMAGES_PER_KEYWORD)
+                crawlKeywordImageRotate(kw, imgDir, i, IMAGES_PER_KEYWORD)
                     .then(got => console.log(`    -> ${got} ảnh (${kw})`))
                     .catch(e => console.error(`    -> Lỗi: ${e.message}`)),
                 60000

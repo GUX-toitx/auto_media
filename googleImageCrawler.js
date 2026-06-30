@@ -5,9 +5,24 @@ import fs from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
 import { claimNextStockPath } from './stockNaming.js';
+import { logCrawlError } from './crawlLogger.js';
+import { getRandomProxy } from './proxyPool.js';
 
 const require = createRequire(import.meta.url);
 const { GOOGLE_IMG_SCRAP } = require('google-img-scrap');
+const { Impit } = require('impit');
+
+// Khi không có ảnh, gọi lại Google (bằng impit như library) để biết mã lỗi thật (vd 429)
+async function probeGoogleStatus(keyword, proxyUri) {
+    try {
+        const url = `https://www.google.com/search?tbm=isch&udm=2&q=${encodeURIComponent(keyword)}`;
+        const impit = new Impit({ browser: 'chrome', proxyUrl: proxyUri || undefined, ignoreTlsErrors: true, followRedirects: true, timeout: 20000, maxRedirects: 5 });
+        const res = await impit.fetch(url);
+        const body = await res.text().catch(() => '');
+        const blocked = /unusual traffic|recaptcha|\/sorry\//i.test(body);
+        return { status: res.status, blocked };
+    } catch (e) { return { status: null, blocked: false, err: e.message }; }
+}
 
 const blockDomains = [
     'alamy.com', 'gettyimages.com', 'shutterstock.com', 'istockphoto.com',
@@ -21,6 +36,17 @@ const blockDomains = [
     'easydrawforkids', 'howtodrawforkids', 'paintingvalley', 'clipartmag',
     'clipartkey', 'ac-illust.com', 'illustmint.com',
     'blogspot.com', 'hatena.com',
+    // Du lịch / khách sạn / đặt phòng / hàng không -> hay ra ảnh phong cảnh, không liên quan
+    'tripadvisor', 'tripcdn', 'trip.com', 'ctrip', 'c-ctrip',
+    'booking.com', 'bstatic.com', 'agoda', 'expedia',
+    'hotels.com', 'cdn-hotels', 'hotelscombined', 'hotelscdn',
+    'kayak', 'skyscanner', 'trivago', 'airbnb', 'hostelworld', 'ostrovok', 'makemytrip',
+    'klook', 'kkday', 'veltra', 'asoview', 'getyourguide',
+    'skyticket', 'jalan.net', 'rurubu', 'ikyu.com', 'jtb', 'his-j.com',
+    'hankyu-travel', 'nta.co.jp', 'rakutentravel', 'travel.rakuten',
+    'navitime', 'jorudan', 'tabikobo', 'tour.ne.jp', 'yokoso',
+    'gltjp.com', 'japan-web-magazine', 'simpleviewinc', 'tourism', 'travel.',
+    'airport.or.jp', 'kansai-airport', 'narita-airport', 'haneda-airport', 'centrair',
 ];
 
 async function downloadMedia(url, targetDir, keyword = '') {
@@ -45,7 +71,7 @@ async function downloadMedia(url, targetDir, keyword = '') {
             return true;
         }
     } catch (e) {
-        if (e.name !== 'AbortError') console.error(`      [${keyword}][Lỗi Tải] ${url} - ${e.message}`);
+        if (e.name !== 'AbortError') { console.error(`      [${keyword}][Lỗi Tải] ${url} - ${e.message}`); logCrawlError({ source: 'Google Image', keyword, url, reason: e.message }); }
     } finally {
         if (!success) { try { fs.unlinkSync(savePath); } catch (_) {} }
     }
@@ -59,10 +85,24 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
     let downloaded = 0;
     console.log(`      [${keyword}][Google IMG Scrap] Đang tìm: "${keyword}"`);
 
+    const proxy = getRandomProxy();
     try {
-        const result = await GOOGLE_IMG_SCRAP({ search: keyword, limit: neededCount * 3 });
+        const result = await GOOGLE_IMG_SCRAP({ search: keyword, limit: neededCount * 3, proxy: proxy?.uri });
         const images = result.result || [];
         console.log(`      [${keyword}] Tìm được ${images.length} ảnh, đang tải...`);
+
+        // 0 ảnh -> probe để biết mã lỗi thật (vd 429 do Google chặn) và log tường minh
+        if (images.length === 0) {
+            const probe = await probeGoogleStatus(keyword, proxy?.uri);
+            const via = proxy ? ` via ${proxy.server}` : '';
+            const reason = probe.status === 429
+                ? `HTTP 429 (Google chặn - unusual traffic)${via}`
+                : probe.blocked
+                    ? `bị chặn (captcha/unusual traffic), HTTP ${probe.status}${via}`
+                    : `0 ảnh, HTTP ${probe.status ?? 'N/A'}${probe.err ? ' - ' + probe.err : ''}${via}`;
+            console.error(`      [${keyword}][Google IMG] ${reason}`);
+            logCrawlError({ source: 'Google Image', keyword, reason });
+        }
 
         for (const img of images) {
             if (downloaded >= neededCount) break;
@@ -75,6 +115,7 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
         }
     } catch (e) {
         console.error(`      [${keyword}][Google IMG Scrap Lỗi] ${e.message}`);
+        logCrawlError({ source: 'Google Image/scrape', keyword, reason: e.message });
     }
 
     return downloaded;

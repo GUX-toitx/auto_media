@@ -10,6 +10,7 @@ import * as cheerio from 'cheerio';
 // Import trình quản lý Proxy xoay vòng
 import { getOldestProxy } from './proxyManager.js';
 import { claimNextStockPath } from './stockNaming.js';
+import { logCrawlError } from './crawlLogger.js';
 
 const SETTINGS_DIR = path.join(process.cwd(), 'setting');
 const COUNTER_FILE = path.join(SETTINGS_DIR, 'current_index.txt');
@@ -124,6 +125,7 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword) {
         } else {
              console.error(`      [${keyword}][Dvids Lỗi Tải File] URL: ${url} - ${e.message}`);
         }
+        logCrawlError({ source: 'DVIDS', keyword, url, reason: e.name === 'AbortError' ? 'timeout (mạng chậm)' : e.message });
     } finally {
         if (!success) {
             try { fs.unlinkSync(savePath); } catch (_) {}
@@ -316,6 +318,7 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
         }
     } catch (error) {
         console.error(`      [${keyword}][DVIDS Lỗi Tổng] ${error.message}`);
+        logCrawlError({ source: 'DVIDS/total', keyword, reason: error.message });
     } finally {
         await browser.close();
     }

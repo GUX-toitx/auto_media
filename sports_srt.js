@@ -4,7 +4,7 @@ import path from 'path';
 import https from 'https';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
-import { fetchFromGoogleImageBot } from './googleImageCrawler.js';
+import { crawlKeywordImageRotate } from './imageCrawlRotate.js';
 
 const OPENAI_KEY = process.env.OPENAI_KEY;
 const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
@@ -299,11 +299,11 @@ async function main() {
         };
 
         const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(0), ms))]);
-        // Chạy tuần tự, sync vào DB ngay sau mỗi keyword
-        for (const kw of keywords) {
+        // Chạy tuần tự, sync vào DB ngay sau mỗi keyword. Xoay vòng Bing/Google + log theo dự án.
+        for (const [i, kw] of keywords.entries()) {
             console.log(`    -> Crawl ảnh: "${kw}"`);
             await withTimeout(
-                fetchFromGoogleImageBot(kw, 'image', imgDir, IMAGES_PER_KEYWORD)
+                crawlKeywordImageRotate(kw, imgDir, i, IMAGES_PER_KEYWORD)
                     .then(got => console.log(`    -> Tải được: ${got} ảnh (${kw})`))
                     .catch(e => console.error(`    -> Lỗi crawl: ${e.message}`)),
                 60000

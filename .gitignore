@@ -9,6 +9,8 @@ chrome_profile_dvids/
 *.json
 !package.json
 .env*
+setting/
+scrape_profile/
 
 # Test
 test/
@@ -32,3 +34,4 @@ Thumbs.db
 .vscode/
 .idea/
 chrome*
+logs/

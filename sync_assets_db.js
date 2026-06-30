@@ -13,7 +13,9 @@ import { fetchFromBellingcatBot } from './bellingcatCrawler.js';
 import { fetchFromApnewsBot } from './apnewsCrawler.js';
 import { fetchFromAlJazeeraBot } from './aljazeeraCrawler.js';
 import { fetchFromGoogleImageBot } from './googleImageCrawler.js';
+import { fetchFromBingImageBot } from './bingImageCrawler.js';
 import { claimNextStockPath } from './stockNaming.js';
+import { logCrawlError, setLogProjectFromDir } from './crawlLogger.js';
 
 const MEDIA_DIR = process.env.MEDIA_DIR;
 const DB_PATH = path.join(process.env.DB_DIR, 'media_system.sqlite');
@@ -45,7 +47,8 @@ async function downloadFileHelper(url, targetDir, ext) {
             success = true;
             return true;
         }
-    } catch (e) {}
+        logCrawlError({ source: 'download', url, reason: `HTTP ${res.status}` });
+    } catch (e) { logCrawlError({ source: 'download', url, reason: e.message }); }
     finally { if (!success) { try { fs.unlinkSync(savePath); } catch (_) {} } }
     return false;
 }
@@ -80,11 +83,12 @@ async function fetchFromPexels(keyword, type, targetDir, neededCount) {
                 try {
                     const res = await fetch(downloadUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
                     if (res.ok) { fs.writeFileSync(savePath, Buffer.from(await res.arrayBuffer())); downloaded++; ok = true; }
-                } catch (e) {}
+                    else logCrawlError({ source: 'Pexels', keyword, url: downloadUrl, reason: `HTTP ${res.status}` });
+                } catch (e) { logCrawlError({ source: 'Pexels', keyword, url: downloadUrl, reason: e.message }); }
                 if (!ok) { try { fs.unlinkSync(savePath); } catch (_) {} }
             }
         }
-    } catch (e) { console.log('Lỗi Pexels:', e.message); }
+    } catch (e) { console.log('Lỗi Pexels:', e.message); logCrawlError({ source: 'Pexels', keyword, url, reason: e.message }); }
     return downloaded;
 }
 
@@ -102,7 +106,7 @@ async function fetchFromPixabay(keyword, type, targetDir, neededCount) {
             let downloadUrl = type === 'video' && item.videos ? (item.videos.large.url || item.videos.medium.url) : item.largeImageURL;
             if (downloadUrl && await downloadFileHelper(downloadUrl, targetDir, type === 'video' ? 'mp4' : 'jpg')) downloaded++;
         }
-    } catch (e) { console.log('Lỗi Pixabay:', e.message); }
+    } catch (e) { console.log('Lỗi Pixabay:', e.message); logCrawlError({ source: 'Pixabay', keyword, url, reason: e.message }); }
     return downloaded;
 }
 
@@ -130,6 +134,7 @@ async function runConcurrently(tasks, limit) {
 
 export async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = VIDEOS_PER_SOURCE) {
     if (!keyword) return 0;
+    setLogProjectFromDir(targetDir); // log tách theo dự án
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
     const providers = [
@@ -140,6 +145,7 @@ export async function fetchAndDownloadStock(keyword, type, targetDir, countPerSo
         { name: 'AP News (Bot)', fetcher: fetchFromApnewsBot },
         { name: 'Al Jazeera (Bot)', fetcher: fetchFromAlJazeeraBot },
         { name: 'Google Image (Bot)', fetcher: fetchFromGoogleImageBot },
+        { name: 'Bing Image (Bot)', fetcher: fetchFromBingImageBot },
     ];
 
     console.log(`   -> [${type.toUpperCase()}] Tìm "${keyword}" | Mỗi nguồn: ${countPerSource}`);
@@ -149,7 +155,7 @@ export async function fetchAndDownloadStock(keyword, type, targetDir, countPerSo
             const got = await withTimeout(p.fetcher(keyword, type, targetDir, countPerSource), 300000, p.name);
             if (got > 0) console.log(`      [${p.name}] Tải được: ${got}/${countPerSource} ${type}`);
             return typeof got === 'number' ? got : 0;
-        } catch (e) { console.log(`      [${p.name}] Lỗi: ${e.message}`); return 0; }
+        } catch (e) { console.log(`      [${p.name}] Lỗi: ${e.message}`); logCrawlError({ source: p.name, keyword, reason: e.message }); return 0; }
     });
 
     const results = await runConcurrently(tasks, 10);
@@ -157,6 +163,19 @@ export async function fetchAndDownloadStock(keyword, type, targetDir, countPerSo
     for (const r of results) if (r.status === 'fulfilled') total += (r.value || 0);
     console.log(`   -> [${type.toUpperCase()}] "${keyword}" xong: ${total} ${type}`);
     return total;
+}
+
+// Xoay vòng nguồn ảnh theo thứ tự keyword: keyword chẵn (0,2,4...) -> Bing, lẻ (1,3,5...) -> Google.
+// Nếu nguồn chính trả 0 ảnh thì thử nốt nguồn còn lại để cảnh không bị trống.
+async function crawlImageRotate(kw, folder, idx) {
+    setLogProjectFromDir(folder); // log tách theo dự án
+    const bing = () => fetchFromBingImageBot(kw, 'image', folder, IMAGES_PER_SOURCE)
+        .catch(e => { console.error(`[sync-assets][Bing] ${e.message}`); logCrawlError({ source: 'Bing Image (Bot)', keyword: kw, reason: e.message }); return 0; });
+    const google = () => fetchFromGoogleImageBot(kw, 'image', folder, IMAGES_PER_SOURCE)
+        .catch(e => { console.error(`[sync-assets][Google] ${e.message}`); logCrawlError({ source: 'Google Image (Bot)', keyword: kw, reason: e.message }); return 0; });
+    const [primary, secondary] = idx % 2 === 0 ? [bing, google] : [google, bing];
+    const got = await primary();
+    if (!got) await secondary();
 }
 
 // ==========================================
@@ -221,8 +240,8 @@ async function main() {
                 const iFolder = path.join(MEDIA_DIR, para.project_id, 'assets', '_raw_images', gid);
                 if (!fs.existsSync(iFolder)) fs.mkdirSync(iFolder, { recursive: true });
                 console.log(`[sync-assets] Para ${para.id} "${kws[0].content.slice(0,40)}..."`);
-                for (const { content: kw } of kws) {
-                    await fetchFromGoogleImageBot(kw, 'image', iFolder, IMAGES_PER_SOURCE).catch(e => console.error(`[sync-assets] ${e.message}`));
+                for (const [idx, { content: kw }] of kws.entries()) {
+                    await crawlImageRotate(kw, iFolder, idx);
                 }
                 await syncAssetsToDB(db, iFolder, 'image', para.id, null, para.project_id, gid);
             }
@@ -244,8 +263,8 @@ async function main() {
                 const iFolder = path.join(MEDIA_DIR, project_id, 'assets', '_raw_images', section);
                 if (!fs.existsSync(iFolder)) fs.mkdirSync(iFolder, { recursive: true });
                 console.log(`[sync-assets] Section ${section} post ${post_id}`);
-                for (const { content: kw } of kws) {
-                    await fetchFromGoogleImageBot(kw, 'image', iFolder, IMAGES_PER_SOURCE).catch(e => console.error(`[sync-assets] ${e.message}`));
+                for (const [idx, { content: kw }] of kws.entries()) {
+                    await crawlImageRotate(kw, iFolder, idx);
                 }
                 await syncAssetsToDB(db, iFolder, 'image', null, null, project_id, section, post_id, section);
             }
@@ -259,6 +278,7 @@ async function main() {
             }
         } catch (e) {
             console.error('[sync-assets] Lỗi:', e.message);
+            logCrawlError({ source: 'sync-assets/main', reason: e.message });
             await sleep(10000);
         }
     }

@@ -10,6 +10,7 @@ import { getOldestProxy } from './proxyManager.js';
 import { exec } from 'child_process';
 import util from 'util';
 import { claimNextStockPath } from './stockNaming.js';
+import { logCrawlError } from './crawlLogger.js';
 
 const execPromise = util.promisify(exec);
 puppeteer.use(StealthPlugin());
@@ -46,6 +47,7 @@ async function downloadHlsStream(m3u8Url, savePath, keyword) {
         }
     } catch (e) {
         console.error(`      [${keyword}] [Lỗi FFmpeg] Không thể tải Stream HLS: ${e.message}`);
+        logCrawlError({ source: 'APNews/HLS', keyword, url: m3u8Url, reason: e.message });
         if (fs.existsSync(savePath)) fs.unlinkSync(savePath);
     }
     return false;
@@ -106,7 +108,7 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
             return true;
         }
     } catch (e) {
-        // Bỏ qua lỗi ngầm
+        if (e.name !== 'AbortError') logCrawlError({ source: 'APNews', keyword, url, reason: e.message });
     } finally {
         if (!success) {
             try { fs.unlinkSync(savePath); } catch (_) {}
@@ -301,6 +303,7 @@ export async function fetchFromApnewsBot(keyword, type, targetDir, neededCount) 
         }
     } catch (error) {
         console.error(`      [${keyword}] [APNews Lỗi Tổng] ${error.message}`);
+        logCrawlError({ source: 'APNews/total', keyword, reason: error.message });
     } finally {
         await browser.close();
     }

@@ -10,6 +10,7 @@ import * as cheerio from 'cheerio';
 // Import trình quản lý Proxy xoay vòng
 import { getOldestProxy } from './proxyManager.js';
 import { claimNextStockPath } from './stockNaming.js';
+import { logCrawlError } from './crawlLogger.js';
 
 puppeteer.use(StealthPlugin());
 
@@ -59,6 +60,7 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
         if (e.name !== 'AbortError') {
              console.error(`      [${keyword}][Aljazeera Lỗi Tải File] URL: ${url} - ${e.message}`);
         }
+        logCrawlError({ source: 'AlJazeera', keyword, url, reason: e.name === 'AbortError' ? 'timeout' : e.message });
     } finally {
         if (!success) {
             try { fs.unlinkSync(savePath); } catch (_) {}
@@ -233,6 +235,7 @@ export async function fetchFromAlJazeeraBot(keyword, type, targetDir, neededCoun
         }
     } catch (error) {
         console.error(`      [${keyword}][AlJazeera Lỗi Tổng] ${error.message}`);
+        logCrawlError({ source: 'AlJazeera/total', keyword, reason: error.message });
     } finally {
         await browser.close();
     }
