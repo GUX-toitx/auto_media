@@ -432,16 +432,10 @@
                         <div class="flex-1 space-y-1">
                             <!-- Paragraph content: 2 input tiếng Việt và ngôn ngữ đích -->
                             <div v-if="para.content_vi || para.content" class="space-y-1">
-                                <!-- Title row -->
-                                <div v-if="para.title || para.title_vi" class="space-y-1">
-                                    <div class="grid grid-cols-2 gap-2">
-                                        <div contenteditable="true" @blur="saveParaField(para, 'title_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-400 leading-relaxed min-h-[32px] outline-none focus:border-yellow-500">{{ para.title_vi }}</div>
-                                        <div contenteditable="true" @blur="saveParaField(para, 'title', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-300 leading-relaxed min-h-[32px] outline-none focus:border-yellow-500">{{ para.title }}</div>
-                                    </div>
-                                    <div class="grid grid-cols-2 gap-2">
-                                        <div><audio v-if="para.title_vi_audio" controls :src="para.title_vi_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
-                                        <div><audio v-if="para.title_audio" controls :src="para.title_audio" class="w-full h-7" preload="metadata"></audio><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
-                                    </div>
+                                <!-- Title row (tên nhân vật) - giữ title, bỏ audio -->
+                                <div v-if="para.title || para.title_vi" class="grid grid-cols-2 gap-2">
+                                    <div contenteditable="true" @blur="saveParaField(para, 'title_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-400 leading-relaxed min-h-[32px] outline-none focus:border-yellow-500">{{ para.title_vi }}</div>
+                                    <div contenteditable="true" @blur="saveParaField(para, 'title', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-300 leading-relaxed min-h-[32px] outline-none focus:border-yellow-500">{{ para.title }}</div>
                                 </div>
                                 <!-- Content row -->
                                 <div class="space-y-1">

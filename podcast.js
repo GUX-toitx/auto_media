@@ -3,6 +3,7 @@ import path from 'path';
 import https from 'https';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
+import { parseScript } from './parseScript.js';
 
 const OPENAI_KEY = process.env.OPENAI_KEY;
 const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
@@ -23,7 +24,22 @@ function httpsPost(url, headers, body) {
     });
 }
 
-// Parse kịch bản thủ công thành segments bằng GPT
+// Parse kịch bản tag-sẵn bằng regex xác định (free, lossless, deterministic).
+// Giữ cue âm thanh nền thành segment type:'sfx'. Mỗi segment có preset = tông giọng.
+// castOverrides: map tên nhân vật -> preset, vd { "Huy":"gruff", "Phụ xe":"urgent" }.
+function parseScriptDeterministic(rawScript, title, targetLang, castOverrides = {}) {
+  const segs = parseScript(rawScript, { castOverrides }).map(s =>
+    s.type === 'sfx'
+      ? { type: 'sfx', order: s.order, cue: s.cue }
+      : { type: 'speech', order: s.order, speaker: s.character + (s.inner ? ' - Nội tâm' : ''),
+          preset: s.preset, emotion: s.emotion, text: s.text, text_vi: s.text }
+  );
+  const speech = segs.filter(s => s.type === 'speech').length;
+  console.log(`[podcast] Regex parsed ${segs.length} segment (${speech} thoại + ${segs.length - speech} SFX)`);
+  return { title, segments: segs, lang: targetLang, speechCount: speech };
+}
+
+// Parse kịch bản thủ công thành segments bằng GPT (fallback khi regex không nhận diện được tag)
 async function parseScriptWithGPT(rawScript, title, targetLang) {
     const schema = {
         type: 'object',
@@ -170,7 +186,12 @@ async function main() {
         const lang = args[4] || 'vi';
         console.log(`[podcast] Script mode: parsing "${title}"...`);
         const { readFileSync } = await import('fs');
-        result = await parseScriptWithGPT(readFileSync(scriptPath, 'utf8'), title, lang);
+        const raw = readFileSync(scriptPath, 'utf8');
+        result = parseScriptDeterministic(raw, title, lang);
+        if (result.speechCount === 0) {
+            console.warn('[podcast] Regex không thấy tag [Voice ...] -> fallback GPT parse');
+            result = await parseScriptWithGPT(raw, title, lang);
+        }
     } else {
         const style = args[2] || 'dialog';
         const lang = args[3] || 'vi';
@@ -178,6 +199,12 @@ async function main() {
         console.log(`[podcast] Topic mode: "${topic}"`);
         result = await generateScript(topic, style, lang);
     }
+    // Đảm bảo các cột podcast tồn tại (self-healing nếu migrate.js chưa chạy)
+    await db.run("ALTER TABLE Paragraph ADD COLUMN seg_type TEXT DEFAULT 'speech'").catch(() => {});
+    await db.run('ALTER TABLE Paragraph ADD COLUMN preset TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Paragraph ADD COLUMN sfx_cue TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN audio_uuids TEXT DEFAULT NULL').catch(() => {});
+
     // Lưu vào DB như sports_srt - dùng Post + Paragraph + ParagraphDetail
     await db.run('INSERT OR IGNORE INTO Post (project_id, title, status, voice_content_type, target_lang) VALUES (?, ?, ?, ?, ?)',
         [projectId, result.title || projectId, 'crawling', result.lang === 'vi' ? 'content_vi' : 'content', result.lang || 'vi']);
@@ -189,12 +216,26 @@ async function main() {
     const lang = result.lang || 'vi';
     for (let i = 0; i < result.segments.length; i++) {
         const seg = result.segments[i];
+        const order = seg.order || (i + 1);
+
+        // Cue âm thanh nền: lưu Paragraph type 'sfx', không tạo ParagraphDetail (không TTS)
+        // KHÔNG set title_vi -> tránh bị luồng voice đọc thành audio.
+        if (seg.type === 'sfx') {
+            await db.run(
+                'INSERT INTO Paragraph (post_id, seg_type, sfx_cue, "order") VALUES (?, ?, ?, ?)',
+                [postId, 'sfx', seg.cue, order]
+            );
+            continue;
+        }
+
         const text = lang === 'vi' ? seg.text_vi : seg.text;
         const textVi = seg.text_vi;
+        const preset = seg.preset || 'narrate';
 
+        // Tên nhân vật lưu ở title_vi để HIỂN THỊ. Luồng voice podcast không đọc title -> không sinh audio.
         const paraRes = await db.run(
-            'INSERT INTO Paragraph (post_id, content, content_vi, title_vi, "order") VALUES (?, ?, ?, ?, ?)',
-            [postId, text, textVi, seg.speaker, i + 1]
+            'INSERT INTO Paragraph (post_id, content, content_vi, title_vi, seg_type, preset, "order") VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [postId, text, textVi, seg.speaker, 'speech', preset, order]
         );
         const paragraphId = paraRes.lastID;
         await db.run(

@@ -103,6 +103,12 @@ export async function initDB() {
     await db.run('ALTER TABLE Paragraph ADD COLUMN content_vi_audio TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Paragraph ADD COLUMN title_audio TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Paragraph ADD COLUMN title_vi_audio TEXT DEFAULT NULL').catch(() => {});
+    // Podcast: mỗi Paragraph = 1 segment. seg_type 'speech'|'sfx', preset = tông giọng, sfx_cue = mô tả âm thanh nền.
+    await db.run("ALTER TABLE Paragraph ADD COLUMN seg_type TEXT DEFAULT 'speech'").catch(() => {});
+    await db.run('ALTER TABLE Paragraph ADD COLUMN preset TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Paragraph ADD COLUMN sfx_cue TEXT DEFAULT NULL').catch(() => {});
+    // Post: lưu nhiều batch uuid (bucket theo preset) dạng JSON array.
+    await db.run('ALTER TABLE Post ADD COLUMN audio_uuids TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Keyword ADD COLUMN type TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Keyword ADD COLUMN post_id INTEGER DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Keyword ADD COLUMN section TEXT DEFAULT NULL').catch(() => {});

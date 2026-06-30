@@ -11,7 +11,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import multer from 'multer';
 
-import { getLanguages, getReferenceSpeakers, getDictionary, getMe, sendToQueue, getSentenceStatus, updateSentence, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio, getAllAudioUrls } from './handle_voice/audio_service.js';
+import { getLanguages, getReferenceSpeakers, getDictionary, getMe, sendToQueue, getSentenceStatus, updateSentence, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio, getAllAudioUrls, generatePodcastAudios, getPodcastMergedAudio } from './handle_voice/audio_service.js';
 import { generateFlowImage } from './browser.js';
 import archiver from 'archiver';
 import { downloadWithYtDlp } from './ytDlpDownloader.js'; // Nhúng con Bot vừa viết
@@ -684,6 +684,31 @@ app.post('/api/create-voice', async (req, res) => {
         console.log('[create-voice] Batch activated:', result.batch_uuid);
 
         res.json({ batch_uuid: result.batch_uuid, folderNames: result.folderNames, paragraphIds: result.paragraphIds });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Podcast: tạo voice 1 giọng đổi tông — gom batch theo preset rồi kích hoạt từng batch
+app.post('/api/create-podcast-voice', express.json(), async (req, res) => {
+    try {
+        const { videoId, postId, lang, speakerUuid, dictionaryUuids } = req.body;
+        const projectDir = path.join(MEDIA_DIR, videoId || String(postId));
+        const result = await generatePodcastAudios(projectDir, postId, lang, speakerUuid, dictionaryUuids || []);
+        for (const bu of result.batch_uuids) await updateBatchStatus(bu); // kích hoạt TTS từng batch
+        console.log('[create-podcast-voice] batches:', result.batch_uuids.join(', '));
+        res.json(result);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Podcast: tải file đã ghép (202 nếu còn đang xử lý). ?silence=giây ?sfx=giây-lặng-cho-cue
+app.get('/api/podcast-merged/:postId', async (req, res) => {
+    try {
+        const postId = req.params.postId;
+        const tmpDir = path.join(MEDIA_DIR, `tmp_podcast_${postId}`);
+        const silence = req.query.silence != null ? Number(req.query.silence) : undefined;
+        const sfxSeconds = req.query.sfx != null ? Number(req.query.sfx) : undefined;
+        const r = await getPodcastMergedAudio(postId, silence, tmpDir, { sfxSeconds });
+        if (!r) return res.status(202).json({ processing: true });
+        res.download(r.outputFile, r.filename);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

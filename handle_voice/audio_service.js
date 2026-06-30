@@ -3,6 +3,7 @@ import path from 'path';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import { downloadIndividual, downloadMerged } from './downloadAudio.js';
+import { PRESETS } from '../parseScript.js';
 
 const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
 const DB_DIR = process.env.DB_DIR || '/usr/gux/media-team/db';
@@ -28,20 +29,27 @@ async function api(endpoint, options = {}) {
     return res;
 }
 
-async function createBatch(batchName, sentences, lang, speakerUuid, dictionaryUuids = []) {
+// params: override tông giọng ở MỨC BATCH (API ttsmin chỉ cho per-batch, không per-sentence).
+// Mặc định = giá trị cũ -> luồng sports không đổi hành vi.
+async function createBatch(batchName, sentences, lang, speakerUuid, dictionaryUuids = [], params = {}) {
+    const p = {
+        pitch: 1, speed: 1, volume: 1, silence_duration: 1,
+        exaggeration: 0.5, cfg_weight: 0.5, temperature: 0.8,
+        top_p: 1, repetition_penalty: 2, crossfade_ms: 50, ...params,
+    };
     const form = new FormData();
     form.append('batch_name', batchName);
     form.append('language', lang || 'en');
-    form.append('pitch', 1);
-    form.append('speed', 1);
-    form.append('volume', 1);
-    form.append('silence_duration', 1);
-    form.append('exaggeration', 0.5);
-    form.append('cfg_weight', 0.5);
-    form.append('temperature', 0.8);
-    form.append('top_p', 1);
-    form.append('repetition_penalty', 2);
-    form.append('crossfade_ms', 50);
+    form.append('pitch', p.pitch);
+    form.append('speed', p.speed);
+    form.append('volume', p.volume);
+    form.append('silence_duration', p.silence_duration);
+    form.append('exaggeration', p.exaggeration);
+    form.append('cfg_weight', p.cfg_weight);
+    form.append('temperature', p.temperature);
+    form.append('top_p', p.top_p);
+    form.append('repetition_penalty', p.repetition_penalty);
+    form.append('crossfade_ms', p.crossfade_ms);
     form.append('upload_type', 'sentence');
     form.append('source', 'API');
     form.append('split_chars', JSON.stringify(["\n", ".", "?", "!"]));
@@ -178,6 +186,91 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid, cont
         console.error(`[generateAudios] LỖI createBatch:`, err.message);
         throw err;
     }
+}
+
+// ===================== PODCAST: 1 giọng, đổi tông theo preset =====================
+// Mỗi Paragraph = 1 segment (seg_type 'speech'|'sfx', preset = tông). Vì API chỉ cho
+// đổi tông ở mức batch, ta GOM segment cùng preset thành 1 batch (cùng speakerUuid),
+// rồi ghép lại theo cột "order" khi merge. SFX không TTS, chèn khi merge.
+export async function generatePodcastAudios(projectDir, postId, lang, speakerUuid, dictionaryUuids = []) {
+    const projectName = path.basename(projectDir);
+    const db = await getDb();
+
+    // Lấy các segment thoại theo thứ tự, kèm preset + nội dung từ ParagraphDetail
+    const rows = await db.all(
+        `SELECT p.id AS paragraph_id, p.preset AS preset, p."order" AS ord,
+                d.id AS detail_id, COALESCE(d.content_vi, d.content) AS text
+         FROM Paragraph p
+         JOIN ParagraphDetail d ON d.paragraph_id = p.id
+         WHERE p.post_id = ? AND COALESCE(p.seg_type, 'speech') = 'speech'
+         ORDER BY p."order"`,
+        [postId]
+    );
+    const speech = rows.filter(r => (r.text || '').trim());
+    if (!speech.length) { await db.close(); throw new Error(`Podcast post ${postId}: không có segment thoại`); }
+
+    // Gom theo preset
+    const groups = {};
+    for (const r of speech) (groups[r.preset || 'narrate'] ||= []).push(r);
+
+    const batchUuids = [];
+    for (const [preset, items] of Object.entries(groups)) {
+        const params = PRESETS[preset] || PRESETS.narrate;
+        const texts = items.map(r => r.text.trim());
+        const createRes = await createBatch(`${projectName}_${preset}`, texts, lang, speakerUuid, dictionaryUuids, params);
+        const batchUuid = createRes.data?.uuid || createRes.uuid;
+        const batchSentences = createRes.data?.sentences || [];
+        batchUuids.push(batchUuid);
+
+        // Map sentence_uuid trả về <-> ParagraphDetail theo đúng thứ tự gửi
+        for (let i = 0; i < items.length; i++) {
+            const su = batchSentences[i]?.uuid;
+            if (su) await db.run('UPDATE ParagraphDetail SET sentence_uuid = ? WHERE id = ?', [su, items[i].detail_id]);
+        }
+        console.log(`[podcast-voice] preset=${preset}: ${items.length} câu -> batch ${batchUuid}`);
+    }
+
+    await db.run('UPDATE Post SET audio_uuids = ?, silence_duration = ? WHERE id = ?',
+        [JSON.stringify(batchUuids), 1, postId]);
+    await db.close();
+    return { batch_uuids: batchUuids, presets: Object.keys(groups), total: speech.length };
+}
+
+// Thu audio của tất cả batch + ghép theo "order" gốc, chèn SFX. Trả null nếu còn batch chưa xong.
+// -> [{ order, audio|null, sfx?, cue? }] dùng cho downloadMerged.
+export async function getPodcastAudios(postId) {
+    const db = await getDb();
+    const post = await db.get('SELECT audio_uuids FROM Post WHERE id = ?', [postId]);
+    const batchUuids = JSON.parse(post?.audio_uuids || '[]');
+    if (!batchUuids.length) { await db.close(); throw new Error(`Post ${postId}: chưa có audio_uuids (chạy generatePodcastAudios trước)`); }
+
+    // Gom audio mọi batch -> map sentence_uuid -> audio_url
+    const uuidToAudio = {};
+    for (const bu of batchUuids) {
+        const batchData = await api(`/user/batch/${bu}`).then(r => r.json());
+        const status = batchData.data?.status || batchData.status;
+        if (status !== 'OK') { await db.close(); return null; } // còn đang xử lý
+
+        const condition = JSON.stringify({ where: { batch_uuid: bu }, orderBy: { index: 'asc' } });
+        const sd = await api(`/user/sentence?page=0&limit=-1&condition=${encodeURIComponent(condition)}`).then(r => r.json());
+        for (const s of (sd.data || [])) uuidToAudio[s.uuid] = s.audio_url;
+    }
+
+    // Duyệt segment theo order: speech -> audio theo sentence_uuid; sfx -> cue
+    const segs = await db.all(
+        `SELECT p.id, p."order" AS ord, COALESCE(p.seg_type,'speech') AS seg_type, p.sfx_cue AS cue,
+                (SELECT sentence_uuid FROM ParagraphDetail WHERE paragraph_id = p.id ORDER BY "order" LIMIT 1) AS sentence_uuid
+         FROM Paragraph p WHERE p.post_id = ? ORDER BY p."order"`,
+        [postId]
+    );
+    await db.close();
+
+    const refs = [];
+    for (const s of segs) {
+        if (s.seg_type === 'sfx') refs.push({ order: s.ord, sfx: true, cue: s.cue });
+        else if (s.sentence_uuid && uuidToAudio[s.sentence_uuid]) refs.push({ order: s.ord, audio: uuidToAudio[s.sentence_uuid] });
+    }
+    return refs;
 }
 
 export async function updateBatchStatus(batchUuid) {
@@ -346,4 +439,16 @@ export async function getMergedAudio(postId, silenceDuration, tmpDir, contentTyp
     const outputFile = await downloadMerged(audioList, silence, tmpDir);
     const suffix2 = ct === 'content_vi' ? '_vi' : '_target';
     return { outputFile, filename: `${post.project_id}${suffix2}_merged.mp3` };
+}
+
+// Podcast: ghép audio nhiều batch theo "order" + chèn SFX. Trả null nếu còn batch đang xử lý.
+export async function getPodcastMergedAudio(postId, silenceDuration, tmpDir, opts = {}) {
+    const db = await getDb();
+    const post = await db.get('SELECT project_id, silence_duration FROM Post WHERE id = ?', [postId]);
+    await db.close();
+    const refs = await getPodcastAudios(postId);
+    if (!refs) return null;
+    const silence = silenceDuration ?? post.silence_duration ?? 1;
+    const outputFile = await downloadMerged(refs, silence, tmpDir, opts);
+    return { outputFile, filename: `${post.project_id}_podcast_merged.mp3` };
 }
