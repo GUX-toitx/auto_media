@@ -257,19 +257,48 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     const audioSegments = [];
     const allExtraMaterials = { speeds: [], canvases: [], vocal_separations: [], placeholder_infos: [], beats: [], material_colors: [], sound_channel_mappings: [] };
 
+    const audioField = isVi ? 'content_vi_audio' : 'content_audio';
+    const altField   = isVi ? 'content_audio' : 'content_vi_audio';
+
+    // ===== Dựng danh sách UNIT để xuất: mở bài -> tóm tắt -> [luận điểm] -> kết bài =====
+    // Mỗi unit: { label, audioUrls, selected[], videoPool[], imagePool[] }
+    const units = [];
+    // Section (mở bài/tóm tắt/kết bài): audio ghép từ *Detail; media = pool đã chọn + media gán theo detail
+    async function buildSectionUnit(key, detailTable, detailIdCol) {
+        const details = await db.all(`SELECT id, ${audioField}, ${altField} FROM ${detailTable} WHERE post_id = ? ORDER BY "order"`, [postId]);
+        if (!details.length) return null;
+        const audioUrls = details.map(d => d[audioField] || d[altField]).filter(Boolean);
+        const detailIds = details.map(d => d.id);
+        const inClause = detailIds.length ? `(${detailIds.map(() => '?').join(',')})` : '(NULL)';
+        const poolSelected = await db.all(`SELECT * FROM Asset WHERE post_id = ? AND section = ? AND selected = 1 ORDER BY "order"`, [postId, key]);
+        const detailMedia = detailIds.length ? await db.all(`SELECT * FROM Asset WHERE ${detailIdCol} IN ${inClause} ORDER BY id`, detailIds) : [];
+        const selected = [...poolSelected, ...detailMedia];
+        const poolVideos = await db.all(`SELECT * FROM Asset WHERE post_id = ? AND section = ? AND type = 'video' ORDER BY id`, [postId, key]);
+        const imagePool = await db.all(`SELECT * FROM Asset WHERE post_id = ? AND section = ? ORDER BY id LIMIT 3`, [postId, key]);
+        return { label: `section ${key}`, audioUrls, selected, videoPool: [...poolVideos, ...detailMedia.filter(a => a.type === 'video')], imagePool };
+    }
+    const hookU = await buildSectionUnit('hook', 'HookDetail', 'hook_detail_id');
+    if (hookU) units.push(hookU);
+    const summaryU = await buildSectionUnit('summary', 'SummaryDetail', 'summary_detail_id');
+    if (summaryU) units.push(summaryU);
     for (const para of paragraphs) {
-        // Lấy audio — gom tất cả ParagraphDetail audio thành 1 file ghép
-        const audioField = isVi ? 'content_vi_audio' : 'content_audio';
-        const altField   = isVi ? 'content_audio' : 'content_vi_audio';
-        // Ưu tiên field theo ngôn ngữ, fallback sang field còn lại nếu rỗng
         const paraAudioUrl = para[audioField] || para[altField] || para['audio'];
-        // Lấy từ ParagraphDetail nếu para không có audio trực tiếp
-        const paraDetails = await db.all(
-            `SELECT ${audioField}, ${altField} FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"`,
-            [para.id]
-        );
-        const detailAudioUrls = paraDetails.map(d => d[audioField] || d[altField]).filter(Boolean);
-        const audioUrls = paraAudioUrl ? [paraAudioUrl] : detailAudioUrls;
+        const pd = await db.all(`SELECT ${audioField}, ${altField} FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"`, [para.id]);
+        const detailAudioUrls = pd.map(d => d[audioField] || d[altField]).filter(Boolean);
+        units.push({
+            label: `para ${para.order}`,
+            audioUrls: paraAudioUrl ? [paraAudioUrl] : detailAudioUrls,
+            selected: await db.all(`SELECT * FROM Asset WHERE paragraph_id = ? AND selected = 1 ORDER BY "order"`, [para.id]),
+            videoPool: await db.all(`SELECT * FROM Asset WHERE paragraph_id = ? AND type = 'video' ORDER BY id`, [para.id]),
+            imagePool: await db.all(`SELECT * FROM Asset WHERE paragraph_id = ? ORDER BY id LIMIT 3`, [para.id]),
+        });
+    }
+    const conclusionU = await buildSectionUnit('conclusion', 'ConclusionDetail', 'conclusion_detail_id');
+    if (conclusionU) units.push(conclusionU);
+
+    for (const unit of units) {
+        // Audio — gom các file audio của unit thành 1 file ghép
+        const audioUrls = unit.audioUrls;
 
         let audioDuration = 5_000_000;
         let audioMatId = null;
@@ -307,34 +336,21 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
                         content.materials.audios.push(audioMat);
                     }
                 }
-            } catch (e) { console.error(`[CapCut] Audio error para ${para.order}: ${e.message}`); }
+            } catch (e) { console.error(`[CapCut] Audio error ${unit.label}: ${e.message}`); }
         }
 
-        // Lấy assets selected
-        const assets = await db.all(
-            `SELECT * FROM Asset WHERE paragraph_id = ? AND selected = 1 ORDER BY "order"`,
-            [para.id]
-        );
-        let allAssets = assets;
+        // Media: đã chọn (pool selected + media gán theo detail với section). Chưa có -> tự chọn video phủ audio.
+        let allAssets = unit.selected;
         if (!allAssets.length) {
-            // Chưa chọn gì -> tự chọn video phù hợp: gom video đủ phủ độ dài audio đoạn này
-            const vids = await db.all(
-                `SELECT * FROM Asset WHERE paragraph_id = ? AND type = 'video' ORDER BY id`,
-                [para.id]
-            );
             const picked = [];
             let acc = 0;
-            for (const v of vids) {
+            for (const v of unit.videoPool) {
                 picked.push(v);
                 acc += v.duration ? v.duration * 1_000_000 : 5_000_000;
                 if (acc >= audioDuration) break; // đủ phủ audio thì dừng
             }
-            allAssets = picked.length ? picked : await db.all(
-                // Đoạn không có video -> dùng ảnh
-                `SELECT * FROM Asset WHERE paragraph_id = ? ORDER BY id LIMIT 3`,
-                [para.id]
-            );
-            if (allAssets.length) console.log(`[CapCut] Para ${para.order}: tự chọn ${allAssets.length} ${picked.length ? 'video' : 'ảnh'} (chưa có lựa chọn)`);
+            allAssets = picked.length ? picked : unit.imagePool; // không có video -> dùng ảnh
+            if (allAssets.length) console.log(`[CapCut] ${unit.label}: tự chọn ${allAssets.length} ${picked.length ? 'video' : 'ảnh'} (chưa có lựa chọn)`);
         }
 
         const segStart = totalDuration;
