@@ -14,6 +14,7 @@ import multer from 'multer';
 import { getLanguages, getReferenceSpeakers, getDictionary, getMe, sendToQueue, getSentenceStatus, updateSentence, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio, getAllAudioUrls } from './handle_voice/audio_service.js';
 import { processAll } from './video_service.js';
 import { generateFlowImage } from './browser.js';
+import { translateTitle } from './translateTitle.js';
 import archiver from 'archiver';
 import { downloadWithYtDlp } from './ytDlpDownloader.js'; // Nhúng con Bot vừa viết
 
@@ -44,7 +45,7 @@ app.get('/api/posts', async (req, res) => {
 app.get('/api/posts/:postId', async (req, res) => {
     try {
         const db = await getDb();
-        const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, summary, summary_vi, summary_audio, summary_vi_audio, summary_target, summary_target_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio FROM Post WHERE id = ?', [req.params.postId]);
+        const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, summary, summary_vi, summary_audio, summary_vi_audio, summary_target, summary_target_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio, intro_path, outro_path FROM Post WHERE id = ?', [req.params.postId]);
         if (!post) return res.status(404).json({ error: 'Post not found' });
 
         // HookDetail
@@ -1249,17 +1250,50 @@ app.post('/api/ai-generate', async (req, res) => {
 });
 
 // API: Lưu số giây hiển thị cho 1 asset (ảnh) -> tính vào tổng giây gợi ý coverage
-app.post('/api/save-duration', async (req, res) => {
-    const { relativePath, duration } = req.body;
+// Upload intro/outro video — chèn vào đầu/cuối khi export CapCut, KHÔNG ảnh hưởng các đoạn
+app.post('/api/upload-intro-outro', upload.single('file'), async (req, res) => {
     try {
+        const { postId, kind } = req.body; // kind: 'intro' | 'outro'
+        if (!req.file) return res.status(400).json({ error: 'No file' });
+        if (!['intro', 'outro'].includes(kind)) return res.status(400).json({ error: 'kind phải là intro hoặc outro' });
         const db = await getDb();
-        await db.run('UPDATE Asset SET duration = ? WHERE file_path = ?', [duration, relativePath]);
+        const post = await db.get('SELECT id, project_id, intro_path, outro_path FROM Post WHERE id = ?', [postId]);
+        if (!post) { await db.close(); try { fs.unlinkSync(req.file.path); } catch (_) {} return res.status(404).json({ error: 'Post not found' }); }
+        const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
+        const dir = path.join(MEDIA_DIR, projectId, 'intro_outro');
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        const ext = (path.extname(req.file.originalname) || '.mp4').toLowerCase();
+        const destPath = path.join(dir, `${kind}${ext}`);
+        const oldRel = kind === 'intro' ? post.intro_path : post.outro_path;
+        if (oldRel) { try { fs.unlinkSync(path.join(MEDIA_DIR, oldRel)); } catch (_) {} }
+        fs.renameSync(req.file.path, destPath);
+        const relPath = path.relative(MEDIA_DIR, destPath);
+        const col = kind === 'intro' ? 'intro_path' : 'outro_path';
+        await db.run(`UPDATE Post SET ${col} = ? WHERE id = ?`, [relPath, postId]);
+        await db.close();
+        res.json({ success: true, kind, path: relPath });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Xoá intro/outro
+app.post('/api/remove-intro-outro', async (req, res) => {
+    try {
+        const { postId, kind } = req.body;
+        if (!['intro', 'outro'].includes(kind)) return res.status(400).json({ error: 'kind không hợp lệ' });
+        const db = await getDb();
+        const post = await db.get('SELECT intro_path, outro_path FROM Post WHERE id = ?', [postId]);
+        if (post) {
+            const rel = kind === 'intro' ? post.intro_path : post.outro_path;
+            if (rel) { try { fs.unlinkSync(path.join(MEDIA_DIR, rel)); } catch (_) {} }
+            const col = kind === 'intro' ? 'intro_path' : 'outro_path';
+            await db.run(`UPDATE Post SET ${col} = NULL WHERE id = ?`, [postId]);
+        }
         await db.close();
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// API: Tạo thumbnail cho DỰ ÁN — đọc title + summary + hook rồi gọi Google Flow sinh ảnh 16:9
+// API: Tạo thumbnail cho DỰ ÁN — dùng Google Flow. Nội dung title = title dự án DỊCH sang ngôn ngữ đích.
 app.post('/api/create-thumbnail', async (req, res) => {
     const { videoId, postId, lang = 'en', count = 2, ratio = '16:9' } = req.body;
     if (!videoId || !postId) return res.status(400).json({ error: 'Thiếu videoId/postId' });
@@ -1269,44 +1303,44 @@ app.post('/api/create-thumbnail', async (req, res) => {
     const targetDir = path.join(MEDIA_DIR, videoId, 'assets', subDir, gid);
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
-    res.json({ success: true, message: 'Đang tạo thumbnail...' });
+    res.json({ success: true, message: 'Đang tạo thumbnail (Flow)...' });
 
     (async () => {
         const db = await getDb();
-        const post = await db.get('SELECT title, summary, summary_vi, summary_target, hook, hook_vi FROM Post WHERE id = ?', [postId]);
+        const post = await db.get('SELECT title FROM Post WHERE id = ?', [postId]);
+        // 1 đoạn content NGÔN NGỮ ĐÍCH làm mốc để dịch title đúng ngôn ngữ
+        const ref = await db.get(
+            `SELECT content FROM ParagraphDetail WHERE content IS NOT NULL AND TRIM(content) <> '' AND paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?) ORDER BY id LIMIT 1`,
+            [postId]
+        );
+        await db.close();
 
-        // Gom nội dung mô tả chủ đề dự án: tiêu đề + summary + hook
-        const parts = [];
-        if (post?.title) parts.push(post.title);
-        const summary = post?.summary_target || post?.summary || post?.summary_vi;
-        if (summary) parts.push(summary);
-        const hookD = await db.all('SELECT content, content_vi FROM HookDetail WHERE post_id = ? ORDER BY "order" LIMIT 3', [postId]);
-        const hookText = hookD.map(h => h.content || h.content_vi).filter(Boolean).join(' ');
-        if (hookText) parts.push(hookText);
-        else if (post?.hook || post?.hook_vi) parts.push(post.hook || post.hook_vi);
+        const rawTitle = (post?.title || '').trim();
+        if (!rawTitle) { console.error('[Thumbnail] Dự án chưa có title'); return; }
 
-        const content = parts.join('. ').replace(/\s+/g, ' ').trim().slice(0, 1200);
-        const keyword = (post?.title || '').slice(0, 120) || 'thumbnail';
+        // Dịch title dự án sang ngôn ngữ đích (theo content đích; fallback mã lang)
+        const titleTarget = await translateTitle(rawTitle, ref?.content || '', lang);
 
-        // Template prompt thumbnail: prompts/thumbnail/prompt_flow_<lang>.txt -> fallback prompts/image
+        // Prompt Flow: PHẢI nêu rõ là TẠO ẢNH THUMBNAIL (không thì Flow hiểu là chủ đề rồi chat).
+        // Ưu tiên file override dưới MEDIA_DIR nếu có, không thì dùng lệnh mặc định chi tiết dưới đây.
         const tFile = path.join(MEDIA_DIR, 'prompts', 'thumbnail', `prompt_flow_${lang}.txt`);
         const tFallback = path.join(MEDIA_DIR, 'prompts', 'thumbnail', 'prompt_flow.txt');
-        const iFallback = path.join(MEDIA_DIR, 'prompts', 'image', `prompt_flow_${lang}.txt`);
-        const tpl = fs.existsSync(tFile) ? fs.readFileSync(tFile, 'utf8')
-            : fs.existsSync(tFallback) ? fs.readFileSync(tFallback, 'utf8')
-            : fs.existsSync(iFallback) ? fs.readFileSync(iFallback, 'utf8') : '';
-        const customPrompt = tpl.trim().replace(/\n/g, ' ');
+        const fileTpl = fs.existsSync(tFile) ? fs.readFileSync(tFile, 'utf8')
+            : fs.existsSync(tFallback) ? fs.readFileSync(tFallback, 'utf8') : '';
+        const DEFAULT_TPL = 'Generate ONE image only: a bold, eye-catching 16:9 YouTube thumbnail. Do NOT chat, do NOT ask questions, do NOT write any script/plan/outline — output ONLY the image. Photorealistic, cinematic, dramatic lighting, high contrast, vivid colors, single strong focal subject. Build a scene fitting the headline below and render the headline text large, bold and readable on the image, kept fully inside the frame. Headline:';
+        const customPrompt = (fileTpl.trim() || DEFAULT_TPL).replace(/\n/g, ' ');
 
-        const saved = await generateFlowImage(keyword, targetDir, content, 'image', count, lang, customPrompt, ratio, 'Frames', 'Lite', []);
+        // content đưa vào Flow = title đã dịch
+        const saved = await generateFlowImage(titleTarget, targetDir, titleTarget, 'image', count, lang, customPrompt, ratio, 'Frames', 'Lite', []);
+
+        const db2 = await getDb();
         for (const fileName of saved) {
-            const relativePath = path.join(videoId, 'assets', subDir, gid, fileName);
-            const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
-            if (!exists) {
-                await db.run('INSERT INTO Asset (post_id, section, type, selected, "order", file_path) VALUES (?, ?, ?, 0, 0, ?)', [postId, 'thumbnail', 'image', relativePath]);
-            }
+            const rel = path.join(videoId, 'assets', subDir, gid, fileName);
+            const exists = await db2.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
+            if (!exists) await db2.run('INSERT INTO Asset (post_id, section, type, selected, "order", file_path) VALUES (?, ?, ?, 0, 0, ?)', [postId, 'thumbnail', 'image', rel]);
         }
-        await db.close();
-        console.log(`[Thumbnail] Done ${saved.length} ảnh cho post ${postId}`);
+        await db2.close();
+        console.log(`[Thumbnail] Flow xong ${saved.length} ảnh | title đích: ${titleTarget}`);
     })().catch(e => console.error('[Thumbnail] Error:', e.message));
 });
 
@@ -1650,5 +1684,15 @@ app.post('/api/capcut-render-status', (req, res) => {
     res.json({ ok: true });
 });
 // ===== end CapCut =====
+
+// Self-heal cột intro/outro (tránh vỡ posts/:id nếu DB chưa migrate)
+(async () => {
+    try {
+        const db = await getDb();
+        await db.run('ALTER TABLE Post ADD COLUMN intro_path TEXT DEFAULT NULL').catch(() => {});
+        await db.run('ALTER TABLE Post ADD COLUMN outro_path TEXT DEFAULT NULL').catch(() => {});
+        await db.close();
+    } catch (_) {}
+})();
 
 app.listen(PORT, () => console.log(`🚀 http://localhost:${PORT}`));

@@ -60,14 +60,25 @@
                             <div class="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all" :class="previewMode ? 'left-5' : 'left-0.5'"></div>
                         </div>
                     </label>
-                    <button @click="createVoice" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
-                    <button @click="createThumbnail" :disabled="thumbLoading" class="bg-teal-600 hover:bg-teal-500 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95"><span v-if="thumbLoading" class="animate-spin inline-block mr-1">⏳</span>🖼️ Tạo Thumbnail</button>
-                    <button @click="retryDownloadVoice" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔄 Refresh Voice</button>
-                    <button @click="openDownloadAudioModal" class="bg-yellow-600 hover:bg-yellow-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">⬇️ Chỉ Tải Voice</button>
-                    <button @click="openDownloadVoiceModal" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice & Media Selected</button>
-                    <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-600 hover:bg-orange-500 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">
-                        <span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}
-                    </button>
+                    <!-- Nhóm Voice -->
+                    <div class="relative">
+                        <button @click="showVoiceMenu = !showVoiceMenu" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Voice ▾</button>
+                        <div v-show="showVoiceMenu" class="absolute top-full left-0 mt-1 flex flex-col gap-1 z-50 min-w-[220px] bg-gray-900 border border-gray-700 rounded-xl p-1.5 shadow-xl">
+                            <button @click="createVoice" class="bg-purple-700 hover:bg-purple-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🎙️ Tạo Voice</button>
+                            <button @click="retryDownloadVoice" class="bg-indigo-700 hover:bg-indigo-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🔄 Refresh Voice</button>
+                            <button @click="openDownloadAudioModal" class="bg-yellow-700 hover:bg-yellow-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">⬇️ Chỉ Tải Voice</button>
+                            <button @click="openDownloadVoiceModal" class="bg-green-700 hover:bg-green-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🔊 Tải Voice & Media Selected</button>
+                        </div>
+                    </div>
+                    <!-- Nhóm Media -->
+                    <div class="relative">
+                        <button @click="showMediaMenu = !showMediaMenu" class="bg-teal-600 hover:bg-teal-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎨 Media ▾<span v-if="activePost.intro_path || activePost.outro_path" class="ml-1 inline-block w-2 h-2 rounded-full bg-green-400 align-middle"></span></button>
+                        <div v-show="showMediaMenu" class="absolute top-full left-0 mt-1 flex flex-col gap-1 z-50 min-w-[220px] bg-gray-900 border border-gray-700 rounded-xl p-1.5 shadow-xl">
+                            <button @click="createThumbnail" :disabled="thumbLoading" class="bg-teal-700 hover:bg-teal-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="thumbLoading" class="animate-spin inline-block mr-1">⏳</span>🖼️ Tạo Thumbnail</button>
+                            <button @click="openIntroOutroModal" class="bg-teal-800 hover:bg-teal-700 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🎞️ Intro/Outro<span v-if="activePost.intro_path || activePost.outro_path" class="ml-1 inline-block w-2 h-2 rounded-full bg-green-400 align-middle"></span></button>
+                            <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-700 hover:bg-orange-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}</button>
+                        </div>
+                    </div>
                     <div class="relative">
                         <button @click="showCapcutMenu = !showCapcutMenu" class="bg-pink-600 hover:bg-pink-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎬 CapCut ▾</button>
                         <div v-show="showCapcutMenu" class="absolute top-full left-0 mt-1 flex flex-col gap-1 z-50 min-w-[180px] bg-gray-900 border border-gray-700 rounded-xl p-1.5 shadow-xl">
@@ -1282,6 +1293,45 @@
         </div>
     </div>
 
+    <!-- INTRO/OUTRO MODAL -->
+    <div v-if="introOutroModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-8 w-[480px] space-y-6">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xl font-black text-white">🎞️ Intro / Outro</h3>
+                <button @click="introOutroModal.open=false" class="text-gray-500 hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+            <p class="text-[11px] text-gray-400 leading-relaxed">Video <b>intro</b> chèn vào đầu, <b>outro</b> chèn vào cuối khi export CapCut. Không ảnh hưởng nội dung/độ dài các đoạn. Giữ nguyên âm thanh gốc của video.</p>
+
+            <div class="space-y-2">
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Intro (đầu video)</label>
+                <div v-if="activePost.intro_path" class="flex items-center gap-2 bg-gray-800 rounded-lg px-3 py-2">
+                    <span class="text-green-400">✅</span>
+                    <span class="text-[11px] text-gray-300 truncate flex-1">{{ activePost.intro_path.split('/').pop() }}</span>
+                    <button @click="removeIntroOutro('intro')" class="text-red-400 hover:text-red-300 text-[10px] font-bold uppercase tracking-widest">Xoá</button>
+                </div>
+                <video v-if="activePost.intro_path" :src="'/' + activePost.intro_path + '?t=' + introOutroModal.cacheBust" controls preload="metadata" class="w-full rounded-lg bg-black max-h-48"></video>
+                <input type="file" accept="video/*" @change="uploadIntroOutro('intro', $event)" :disabled="introOutroModal.uploading" class="block w-full text-[11px] text-gray-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-teal-600 file:text-white file:font-bold file:cursor-pointer hover:file:bg-teal-500 disabled:opacity-40">
+            </div>
+
+            <div class="space-y-2">
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Outro (cuối video)</label>
+                <div v-if="activePost.outro_path" class="flex items-center gap-2 bg-gray-800 rounded-lg px-3 py-2">
+                    <span class="text-green-400">✅</span>
+                    <span class="text-[11px] text-gray-300 truncate flex-1">{{ activePost.outro_path.split('/').pop() }}</span>
+                    <button @click="removeIntroOutro('outro')" class="text-red-400 hover:text-red-300 text-[10px] font-bold uppercase tracking-widest">Xoá</button>
+                </div>
+                <video v-if="activePost.outro_path" :src="'/' + activePost.outro_path + '?t=' + introOutroModal.cacheBust" controls preload="metadata" class="w-full rounded-lg bg-black max-h-48"></video>
+                <input type="file" accept="video/*" @change="uploadIntroOutro('outro', $event)" :disabled="introOutroModal.uploading" class="block w-full text-[11px] text-gray-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-teal-600 file:text-white file:font-bold file:cursor-pointer hover:file:bg-teal-500 disabled:opacity-40">
+            </div>
+
+            <div v-if="introOutroModal.uploading" class="text-center text-teal-400 text-[11px] font-bold"><span class="animate-spin inline-block mr-1">⏳</span>Đang upload...</div>
+
+            <div class="flex justify-end pt-2">
+                <button @click="introOutroModal.open=false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-400">Đóng</button>
+            </div>
+        </div>
+    </div>
+
     <!-- VOICE MODAL -->
     <div v-if="voiceModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl p-8 w-[420px] space-y-6">
@@ -1983,6 +2033,8 @@ createApp({
         });
 
         const showCapcutMenu = ref(false);
+        const showVoiceMenu = ref(false);
+        const showMediaMenu = ref(false);
         async function exportCapcut(contentType = '') {
             if (typeof contentType !== 'string') contentType = ''; // phòng khi gọi từ @click (event)
             if (!activePostId.value) return showToast('⚠️ Chưa chọn post');
@@ -2472,6 +2524,40 @@ createApp({
 
         const crawling = ref(false);
         const thumbLoading = ref(false);
+
+        // ===== Intro / Outro =====
+        const introOutroModal = ref({ open: false, uploading: false, cacheBust: 0 });
+        function openIntroOutroModal() {
+            introOutroModal.value = { open: true, uploading: false, cacheBust: Date.now() };
+        }
+        async function uploadIntroOutro(kind, event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            introOutroModal.value.uploading = true;
+            try {
+                const fd = new FormData();
+                fd.append('file', file);
+                fd.append('postId', activePostId.value);
+                fd.append('kind', kind);
+                const res = await fetch('/api/upload-intro-outro', { method: 'POST', body: fd });
+                const r = await res.json();
+                if (r.success) {
+                    showToast(`✅ Đã upload ${kind}`);
+                    introOutroModal.value.cacheBust = Date.now();
+                    await selectPost({ id: activePostId.value });
+                } else { showToast('❌ ' + (r.error || 'Lỗi upload')); }
+            } catch (e) { showToast('❌ ' + e.message); }
+            finally { introOutroModal.value.uploading = false; event.target.value = ''; }
+        }
+        async function removeIntroOutro(kind) {
+            if (!confirm(`Xoá ${kind}?`)) return;
+            try {
+                const res = await fetch('/api/remove-intro-outro', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: activePostId.value, kind }) });
+                const r = await res.json();
+                if (r.success) { showToast(`🗑️ Đã xoá ${kind}`); await selectPost({ id: activePostId.value }); }
+                else showToast('❌ ' + (r.error || 'Lỗi'));
+            } catch (e) { showToast('❌ ' + e.message); }
+        }
 
         async function createThumbnail() {
             if (!activePost.value) return;
@@ -3687,6 +3773,10 @@ createApp({
             thumbLoading,
             createThumbnail,
             selectThumbnail,
+            introOutroModal,
+            openIntroOutroModal,
+            uploadIntroOutro,
+            removeIntroOutro,
             selectedTotalSec,
             coverageRemain,
             coverageHintClass,
@@ -3724,7 +3814,7 @@ createApp({
             togglePreviewSelect,
             newProjectModal,
             submitNewProject,
-            showCapcutMenu, exportCapcut, renderCapcut,
+            showCapcutMenu, showVoiceMenu, showMediaMenu, exportCapcut, renderCapcut,
         };
     }
 }).component('audio-bar', AudioBar).component('news-tag', NewsTag).mount('#app');

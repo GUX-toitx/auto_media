@@ -296,6 +296,36 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     const conclusionU = await buildSectionUnit('conclusion', 'ConclusionDetail', 'conclusion_detail_id');
     if (conclusionU) units.push(conclusionU);
 
+    // Thêm 1 video nguyên vẹn (intro/outro) vào track video tại startTime, giữ audio gốc, không đụng các đoạn.
+    function addBoundaryVideo(absPath, startTime, label) {
+        if (!absPath || !fs.existsSync(absPath)) {
+            if (absPath) console.error(`[CapCut] ${label} không tồn tại: ${absPath}`);
+            return 0;
+        }
+        const ext = path.extname(absPath).toLowerCase();
+        const isVideo = ['.mp4', '.mov', '.avi'].includes(ext);
+        const fileName = `${label}_${fileIndex++}${ext}`;
+        const destPath = path.join(assetsDir, fileName);
+        fs.copyFileSync(absPath, destPath);
+        const mediaInfo = isVideo ? getMediaInfo(destPath) : { width: 1920, height: 1080 };
+        const dur = isVideo ? getMediaDuration(destPath) : 5_000_000;
+        const matId = uuid();
+        content.materials.videos.push(buildVideoMaterial(matId, destPath, dur, fileName, isVideo, draftId));
+        const { segment, extraMaterials } = buildVideoSegment(matId, startTime, dur, dur, videoIndex++, mediaInfo.width, mediaInfo.height, isVideo);
+        videoSegments.push(segment);
+        content.materials.speeds.push({ ...JSON.parse(JSON.stringify(templateContent.materials.speeds[0])), id: extraMaterials.speedId });
+        content.materials.canvases.push({ ...JSON.parse(JSON.stringify(templateContent.materials.canvases[0])), id: extraMaterials.canvasId });
+        content.materials.material_colors.push({ ...JSON.parse(JSON.stringify(templateContent.materials.material_colors[0])), id: extraMaterials.colorId });
+        content.materials.vocal_separations.push({ ...JSON.parse(JSON.stringify(templateContent.materials.vocal_separations[0])), id: extraMaterials.vocalId });
+        content.materials.placeholder_infos.push({ ...JSON.parse(JSON.stringify(templateContent.materials.placeholder_infos[0])), id: extraMaterials.placeholderId });
+        content.materials.sound_channel_mappings.push({ ...JSON.parse(JSON.stringify(templateContent.materials.sound_channel_mappings[0])), id: extraMaterials.soundChannelId });
+        console.log(`[CapCut] ${label}: ${fileName} (${(dur / 1e6).toFixed(1)}s) @ ${(startTime / 1e6).toFixed(1)}s`);
+        return dur;
+    }
+
+    // INTRO: chèn ở đầu (đẩy toàn bộ đoạn ra sau)
+    if (post.intro_path) totalDuration += addBoundaryVideo(path.join(MEDIA_DIR, post.intro_path), totalDuration, 'intro');
+
     for (const unit of units) {
         // Audio — gom các file audio của unit thành 1 file ghép
         const audioUrls = unit.audioUrls;
@@ -415,6 +445,9 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
             content.materials.sound_channel_mappings.push(scMat);
         }
     }
+
+    // OUTRO: chèn ở cuối (sau toàn bộ đoạn)
+    if (post.outro_path) totalDuration += addBoundaryVideo(path.join(MEDIA_DIR, post.outro_path), totalDuration, 'outro');
 
     await db.close();
 

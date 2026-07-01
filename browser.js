@@ -305,32 +305,57 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
         await createBtn.click({ force: true });
         await page.waitForTimeout(3000);
 
-        // Flow có thể hỏi "chọn hướng" (các lựa chọn radio_button_unchecked) trước khi tạo.
-        // Tự chọn phương án ĐẦU TIÊN rồi gửi tiếp; lặp tối đa 3 lần phòng khi hỏi nhiều bước.
+        // Flow có thể hỏi "chọn hướng" (radio options) trước khi tạo. Chọn phương án ĐẦU TIÊN
+        // trong DOM — dù nó đang là radio_button_checked (chọn sẵn) hay radio_button_unchecked.
         for (let r = 0; r < 3; r++) {
-            const nOptions = await page.evaluate(() => {
+            const info = await page.evaluate(() => {
                 const icons = [...document.querySelectorAll('i.google-symbols, span')]
-                    .filter(e => (e.textContent || '').trim() === 'radio_button_unchecked');
-                if (!icons.length) return 0;
-                // Lần lên tổ tiên gần nhất bấm được để tag
-                let el = icons[0];
+                    .filter(e => { const t = (e.textContent || '').trim(); return t === 'radio_button_unchecked' || t === 'radio_button_checked'; });
+                if (!icons.length) return { n: 0 };
+                const first = icons[0]; // option đầu tiên theo thứ tự DOM
+                const alreadyChecked = (first.textContent || '').trim() === 'radio_button_checked';
+                let el = first;
                 for (let k = 0; k < 6 && el; k++) {
                     const role = el.getAttribute && el.getAttribute('role');
                     if (el.tagName === 'BUTTON' || role === 'radio' || role === 'option' || role === 'menuitemradio') break;
                     el = el.parentElement;
                 }
-                (el || icons[0]).setAttribute('data-flow-opt', '1');
-                return icons.length;
+                (el || first).setAttribute('data-flow-opt', '1');
+                return { n: icons.length, alreadyChecked };
             });
-            if (!nOptions) break;
-            console.log(`[Flow] Màn chọn hướng (${nOptions} lựa chọn) -> chọn phương án đầu tiên`);
-            await page.locator('[data-flow-opt="1"]').click({ force: true }).catch(() => {});
+            if (!info.n) break;
+            console.log(`[Flow] Màn chọn hướng (${info.n} lựa chọn) -> phương án ĐẦU TIÊN${info.alreadyChecked ? ' (đã chọn sẵn)' : ''}`);
+            if (!info.alreadyChecked) await page.locator('[data-flow-opt="1"]').click({ force: true }).catch(() => {});
             await page.evaluate(() => document.querySelector('[data-flow-opt="1"]')?.removeAttribute('data-flow-opt'));
-            await page.waitForTimeout(1500);
-            // Gửi/tiếp tục nếu có nút submit
+            await page.waitForTimeout(1200);
+            // Gửi/tiếp tục
             const sendBtn = page.locator('button:has(i.google-symbols)').filter({ hasText: /arrow_forward|send/ }).first();
             if (await sendBtn.count()) await sendBtn.click({ force: true }).catch(() => {});
             await page.waitForTimeout(3000);
+        }
+
+        // Nếu Flow chuyển sang hội thoại (viết script/hỏi ngược) mà chưa sinh ảnh -> gõ lệnh ÉP sinh ảnh ngay.
+        {
+            const alreadyMedia = await page.evaluate((tag) => {
+                for (const el of document.querySelectorAll(tag)) {
+                    const src = el.src || '';
+                    if ((tag === 'img' ? el.naturalWidth > 200 : true) && src.startsWith('http') && src.includes('media')) return true;
+                }
+                return false;
+            }, type === 'video' ? 'video' : 'img');
+            if (!alreadyMedia) {
+                const forceMsg = `Generate the image NOW. Output exactly ONE 16:9 thumbnail image only — do not ask questions, do not write any script/plan/text, just render the image. ${fullPrompt}`;
+                const box = page.locator('div[contenteditable=true][role=textbox], textarea').last();
+                if (await box.count()) {
+                    console.log('[Flow] Flow đang hội thoại -> gõ lệnh ép sinh ảnh');
+                    await box.click({ force: true }).catch(() => {});
+                    await page.keyboard.type(forceMsg, { delay: 12 });
+                    await page.waitForTimeout(400);
+                    const send2 = page.locator('button:has(i.google-symbols)').filter({ hasText: /arrow_forward|send/ }).first();
+                    if (await send2.count()) await send2.click({ force: true }).catch(() => {});
+                    await page.waitForTimeout(4000);
+                }
+            }
         }
 
         // Đếm media có sẵn trước khi gen
