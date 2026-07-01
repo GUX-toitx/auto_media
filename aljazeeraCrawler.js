@@ -10,6 +10,7 @@ import * as cheerio from 'cheerio';
 // Import trình quản lý Proxy xoay vòng
 import { getOldestProxy } from './proxyManager.js';
 import { claimNextStockPath } from './stockNaming.js';
+import { logCrawlError, logCrawlInfo } from './crawlLogger.js';
 
 puppeteer.use(StealthPlugin());
 
@@ -54,11 +55,14 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
             fs.writeFileSync(savePath, Buffer.from(buffer));
             success = true;
             return true;
+        } else {
+            logCrawlError({ source: 'Al Jazeera', keyword, url, reason: `HTTP ${res.status}` });
         }
     } catch (e) {
         if (e.name !== 'AbortError') {
              console.error(`      [${keyword}][Aljazeera Lỗi Tải File] URL: ${url} - ${e.message}`);
         }
+        logCrawlError({ source: 'Al Jazeera', keyword, url, reason: e.message });
     } finally {
         if (!success) {
             try { fs.unlinkSync(savePath); } catch (_) {}
@@ -93,6 +97,7 @@ export async function fetchFromAlJazeeraBot(keyword, type, targetDir, neededCoun
     const searchUrl = `https://www.aljazeera.com/search/${encodeURIComponent(keyword)}`;
 
     console.log(`      [${keyword}][AlJazeera Bot] Đang thâm nhập Hãng tin Trung Đông: ${searchUrl}`);
+    logCrawlInfo({ source: 'Al Jazeera', keyword, url: searchUrl, note: 'bắt đầu tìm' });
 
     const profilePath = path.join(process.cwd(), 'chrome_profile_aljazeera');
 
@@ -159,6 +164,7 @@ export async function fetchFromAlJazeeraBot(keyword, type, targetDir, neededCoun
             if (pageTitle.includes('Cloudflare') || pageTitle.includes('Attention')) {
                  console.log(`      [${keyword}][AlJazeera Bot] ⛔ Bị Cloudflare chặn! Sẽ vượt qua ở lượt IP proxy tiếp theo...`);
             }
+            logCrawlError({ source: 'Al Jazeera', keyword, url: searchUrl, reason: `không thấy bài báo (Page Title: "${pageTitle}")` });
             return 0;
         }
 
@@ -223,18 +229,25 @@ export async function fetchFromAlJazeeraBot(keyword, type, targetDir, neededCoun
                     
                     if (await downloadMedia(finalUrl, targetDir, ext, proxy, keyword)) {
                         downloaded++;
+                        logCrawlInfo({ source: 'Al Jazeera/ok', keyword, url: finalUrl });
                         console.log(`\x1b[33m      [${keyword}][AlJazeera Bot] 📥 ${type.toUpperCase()} bốc từ: ${link}\x1b[0m`);
                         console.log(`      [${keyword}][AlJazeera Bot] ---> Đã lấy tin thành công ${downloaded}/${neededCount} ${type}`);
                     }
                 }
             } catch (err) {
                 // Bỏ qua bài lỗi
+                logCrawlError({ source: 'Al Jazeera', keyword, url: link, reason: err.message });
             }
         }
     } catch (error) {
         console.error(`      [${keyword}][AlJazeera Lỗi Tổng] ${error.message}`);
+        logCrawlError({ source: 'Al Jazeera', keyword, url: searchUrl, reason: error.message });
     } finally {
         await browser.close();
+    }
+
+    if (downloaded === 0) {
+        logCrawlError({ source: 'Al Jazeera', keyword, url: searchUrl, reason: 'không tải được media nào (0 kết quả)' });
     }
 
     return downloaded;

@@ -219,6 +219,12 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
 
     const paragraphs = await db.all(`SELECT * FROM Paragraph WHERE post_id = ? ORDER BY "order"`, [postId]);
 
+    // Thumbnail đã chọn -> dùng làm ảnh bìa (draft_cover.jpg). Query khi db còn mở.
+    const coverAsset = await db.get(
+        `SELECT file_path FROM Asset WHERE post_id = ? AND COALESCE(section,'') = 'thumbnail' AND selected = 1 ORDER BY "order", id LIMIT 1`,
+        [postId]
+    );
+
     // Tạo thư mục draft
     const draftId = uuid();
     const draftDir = path.join(outputDir, draftId);
@@ -481,6 +487,20 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     meta.tm_duration = totalDuration;
     meta.draft_is_invisible = false;
     meta.draft_materials = [{ type: 0, value: [] }, { type: 1, value: [] }, { type: 2, value: [] }, { type: 3, value: [] }, { type: 6, value: [] }, { type: 7, value: [] }, { type: 8, value: [] }];
+
+    // Gắn thumbnail đã chọn làm ảnh bìa CapCut
+    if (coverAsset) {
+        const coverSrc = path.join(MEDIA_DIR, coverAsset.file_path);
+        if (fs.existsSync(coverSrc)) {
+            try {
+                fs.copyFileSync(coverSrc, path.join(draftDir, 'draft_cover.jpg'));
+                meta.draft_cover = 'draft_cover.jpg';
+                console.log('[CapCut] Đã gắn thumbnail bìa:', coverAsset.file_path);
+            } catch (e) { console.warn('[CapCut] Copy cover lỗi:', e.message); }
+        } else {
+            console.warn('[CapCut] File thumbnail bìa không tồn tại:', coverSrc);
+        }
+    }
     fs.writeFileSync(path.join(draftDir, 'draft_meta_info.json'), JSON.stringify(meta));
 
     // Tao project.json trong Timelines voi IDs moi

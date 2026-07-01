@@ -114,6 +114,8 @@ export async function initDB() {
     await db.run('ALTER TABLE Asset ADD COLUMN summary_detail_id INTEGER DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Asset ADD COLUMN paragraph_detail_id INTEGER DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Asset ADD COLUMN sentence_detail_id INTEGER DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE ChromeProfile ADD COLUMN proxy TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE ChromeProfile ADD COLUMN logged_out INTEGER DEFAULT 0').catch(() => {});
     await db.run(`CREATE TABLE IF NOT EXISTS SentenceDetail (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sentence_id INTEGER NOT NULL,

@@ -18,18 +18,112 @@ const DB_DIR = process.env.DB_DIR || '/usr/gux/media-team/db';
 const DB_PATH = path.join(DB_DIR, 'media_system.sqlite');
 const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 
-async function getNextProfile() {
+let _profileColChecked = false;
+async function ensureProfileCols(db) {
+    if (_profileColChecked) return;
+    await db.run('ALTER TABLE ChromeProfile ADD COLUMN proxy TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE ChromeProfile ADD COLUMN logged_out INTEGER DEFAULT 0').catch(() => {});
+    _profileColChecked = true;
+}
+
+// Danh sách profile theo thứ tự ưu tiên: chưa logout trước, dùng lâu nhất trước.
+async function getProfiles(limit = 6) {
     const db = await getDb();
-    const profile = await db.get('SELECT id, profile_dir, proxy FROM ChromeProfile ORDER BY updated_at ASC LIMIT 1');
+    await ensureProfileCols(db);
+    const rows = await db.all(
+        'SELECT id, profile_dir, proxy FROM ChromeProfile ORDER BY COALESCE(logged_out, 0) ASC, updated_at ASC LIMIT ?',
+        [limit]
+    );
     await db.close();
-    if (!profile) return null;
-    return { ...profile, profile_dir: path.join(SETTING_DIR, profile.profile_dir) };
+    return rows.map(p => ({ ...p, profile_dir: path.join(SETTING_DIR, p.profile_dir) }));
 }
 
 async function markProfileUsed(id) {
     const db = await getDb();
-    await db.run('UPDATE ChromeProfile SET updated_at = ? WHERE id = ?', [Date.now(), id]);
+    await ensureProfileCols(db);
+    await db.run('UPDATE ChromeProfile SET updated_at = ?, logged_out = 0 WHERE id = ?', [Date.now(), id]);
     await db.close();
+}
+
+// Đánh dấu profile bị logout -> lần sau bị đẩy xuống cuối hàng đợi
+async function markLoggedOut(id) {
+    const db = await getDb();
+    await ensureProfileCols(db);
+    await db.run('UPDATE ChromeProfile SET logged_out = 1, updated_at = ? WHERE id = ?', [Date.now(), id]);
+    await db.close();
+}
+
+// Mở Flow bằng page hiện tại, xử lý màn chọn account. Trả về true nếu ĐÃ đăng nhập,
+// false nếu bị kẹt ở accounts.google.com (profile logout / cần nhập mật khẩu).
+async function openFlowLoggedIn(page) {
+    await page.goto('https://labs.google/fx/tools/flow', { waitUntil: 'networkidle', timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(3000);
+    console.log('[Flow] Đã mở Flow | URL:', page.url());
+
+    if (page.url().includes('accounts.google.com')) {
+        console.log('[Flow] Bị đưa tới trang đăng nhập, thử chọn account đã lưu...');
+        const accountBtn = page.locator('li[data-authuser], div[data-email], [data-identifier]').first();
+        if (await accountBtn.count()) {
+            await accountBtn.click().catch(() => {});
+            console.log('[Flow] Đã click account');
+        }
+        // Chờ NGẮN (20s) để quay lại Flow; nếu vẫn ở accounts -> coi như logout
+        const back = await page.waitForURL(u => !u.toString().includes('accounts.google.com'), { timeout: 20000 })
+            .then(() => true).catch(() => false);
+        if (!back) { console.warn('[Flow] Vẫn kẹt ở accounts.google.com -> profile LOGOUT'); return false; }
+        await page.waitForTimeout(3000);
+        console.log('[Flow] Xác thực xong | URL:', page.url());
+    }
+    return true;
+}
+
+// Vào tận editor của Flow (đăng nhập + bấm Create + tạo project mới).
+// Trả false nếu bất kỳ lúc nào bị đẩy sang accounts.google.com (profile chưa đăng nhập Flow) -> nên xoay profile.
+async function enterFlowEditor(page) {
+    const authed = await openFlowLoggedIn(page);
+    if (!authed) return false;
+
+    const newBtn = page.locator('button:has(i.google-symbols)').filter({ hasText: /add_2/ }).first();
+    if (await newBtn.count()) {
+        // Đang ở trong tool -> tạo project mới
+        await newBtn.click();
+        await page.waitForTimeout(8000);
+        const createBtn = page.locator('button:has(i.google-symbols)').filter({ hasText: /add_2/ }).last();
+        if (await createBtn.count() > 1) { await createBtn.click(); await page.waitForTimeout(5000); }
+    } else {
+        // Trang landing: bấm "Create with Google Flow"
+        console.log('[Flow] Ở trang landing, bấm "Create with Google Flow"...');
+        const createFlowBtn = page.locator('button, a').filter({ hasText: /create with (google )?flow/i }).first();
+        if (await createFlowBtn.count()) {
+            await createFlowBtn.scrollIntoViewIfNeeded().catch(() => {});
+            await createFlowBtn.click({ force: true });
+            console.log('[Flow] Đã bấm "Create with Google Flow"');
+        } else {
+            console.warn('[Flow] Không thấy nút "Create with Google Flow" -> thử nút khả kiến đầu tiên');
+            await page.locator('button:visible').first().click({ force: true }).catch(() => {});
+        }
+        await page.waitForTimeout(6000);
+        // Bấm Create mà nhảy sang đăng nhập => profile CHƯA đăng nhập Flow
+        if (page.url().includes('accounts.google.com')) {
+            console.warn('[Flow] Bấm Create -> chuyển sang trang đăng nhập => profile logout');
+            return false;
+        }
+        console.log('[Flow] Đã vào tool từ landing | URL:', page.url());
+        await page.waitForSelector('button i.google-symbols', { timeout: 8000 }).catch(() => {});
+        await page.waitForTimeout(2000);
+        const newBtnAfter = page.locator('button:has(i.google-symbols)').filter({ hasText: /add_2/ }).first();
+        if (await newBtnAfter.count()) {
+            await newBtnAfter.click();
+            await page.waitForTimeout(8000);
+            console.log('[Flow] Đã bấm add_2 tạo project');
+        }
+    }
+
+    if (page.url().includes('accounts.google.com')) {
+        console.warn('[Flow] Sau tạo project vẫn ở accounts.google.com => logout');
+        return false;
+    }
+    return true;
 }
 
 function getRandomProxy() {
@@ -66,65 +160,37 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
     const fullPrompt = promptTemplate ? `${promptTemplate} ${content}` : content || keyword;
     if (!fs.existsSync(saveDirPath)) fs.mkdirSync(saveDirPath, { recursive: true });
 
-    // Lấy profile có updated_at cũ nhất từ DB
-    const profile = await getNextProfile();
-    const profileDir = profile?.profile_dir || path.join(SETTING_DIR, 'chrome-profile');
-    const profileId = profile?.id;
-
-    const ctx = await getBrowser(profileDir, profile?.proxy);
-    const page = ctx.pages()[0] || await ctx.newPage();
+    // Xoay vòng profile: thử lần lượt tới khi gặp profile CÒN đăng nhập.
+    // Profile logout -> đánh dấu logged_out + đóng + thử profile kế tiếp.
+    let ctx = null, page = null, activeProfileId = null;
+    const candidates = await getProfiles(6);
+    const list = candidates.length ? candidates : [null]; // fallback profile mặc định
+    for (const profile of list) {
+        const pDir = profile?.profile_dir || path.join(SETTING_DIR, 'chrome-profile');
+        const tryCtx = await getBrowser(pDir, profile?.proxy);
+        const tryPage = tryCtx.pages()[0] || await tryCtx.newPage();
+        const loggedIn = await enterFlowEditor(tryPage).catch((e) => { console.warn('[Flow] enterFlowEditor lỗi:', e.message); return false; });
+        if (loggedIn) {
+            ctx = tryCtx; page = tryPage; activeProfileId = profile?.id ?? null;
+            console.log(`[Flow] ✅ Dùng profile #${activeProfileId ?? 'default'} (đã vào editor)`);
+            break;
+        }
+        if (profile?.id) await markLoggedOut(profile.id);
+        console.warn(`[Flow] ⟳ Profile #${profile?.id ?? 'default'} logout -> xoay profile khác`);
+        await tryPage.close().catch(() => {});
+        await tryCtx.close().catch(() => {});
+    }
+    if (!ctx) {
+        console.error('[Flow] ❌ Không có profile nào đăng nhập được (tất cả logout). Hãy login lại profile.');
+        return [];
+    }
 
     try {
-        // Vào Flow
-        await page.goto('https://labs.google/fx/tools/flow', { waitUntil: 'networkidle', timeout: 30000 });
-        await page.waitForTimeout(3000);
-
-        // Nếu bị redirect về accounts.google.com (chọn account hoặc login)
-        if (page.url().includes('accounts.google.com')) {
-            console.log('[Flow] Đang xử lý xác thực Google...');
-
-            // Thử click vào account đã đăng nhập (trang chọn account)
-            const accountBtn = page.locator('li[data-authuser], div[data-email], [data-identifier]').first();
-            if (await accountBtn.count()) {
-                await accountBtn.click();
-                console.log('[Flow] Đã chọn account');
-            }
-
-            // Chờ cho đến khi thoát khỏi accounts.google.com
-            await page.waitForURL(url => !url.toString().includes('accounts.google.com'), { timeout: 120000 });
-            await page.waitForTimeout(3000);
-            console.log('[Flow] Xác thực xong, tiếp tục...');
-        }
-
-        // Nếu có nút add_2 thì click tạo project mới
-        const newBtn = page.locator('button:has(i.google-symbols)').filter({ hasText: /add_2/ }).first();
-        if (await newBtn.count()) {
-            await newBtn.click();
-            await page.waitForTimeout(8000);
-            // Nếu xuất hiện confirm dialog tạo mới, click tiếp
-            const createBtn = page.locator('button:has(i.google-symbols)').filter({ hasText: /add_2/ }).last();
-            if (await createBtn.count() > 1) {
-                await createBtn.click();
-                await page.waitForTimeout(5000);
-            }
-        } else {
-            // Landing page: click Create with Flow
-            await page.locator('button').nth(0).click();
-            await page.waitForURL(url => !url.toString().endsWith('/flow') && !url.toString().endsWith('/flow/'), { timeout: 5000 }).catch(() => {});
-            await page.waitForTimeout(5000);
-            console.log('[Flow] Đã vào tool từ landing page');
-            // Chờ add_2 xuất hiện rồi click
-            await page.waitForSelector('button i.google-symbols', { timeout: 5000 }).catch(() => {});
-            await page.waitForTimeout(2000);
-            const newBtnAfter = page.locator('button:has(i.google-symbols)').filter({ hasText: /add_2/ }).first();
-            if (await newBtnAfter.count()) {
-                await newBtnAfter.click();
-                await page.waitForTimeout(8000);
-            }
-        }
+        console.log('[Flow] Trong editor | URL:', page.url());
 
         // Mở modal settings (button chứa cả ratio và count, ví dụ: "Videocrop_16_9x2")
         const settingsBtn = page.locator('button:visible').filter({ hasText: /x[1-4]$/ });
+        console.log(`[Flow] Nút settings tìm thấy: ${await settingsBtn.count()}`);
         if (await settingsBtn.count()) {
             await settingsBtn.first().click();
             await page.waitForTimeout(1000);
@@ -194,7 +260,42 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
         }
 
         // Nhập prompt
-        const promptBox = page.locator('div[contenteditable=true][role=textbox]');
+        if (!fullPrompt.trim()) {
+            console.error('[Flow] ❌ Prompt rỗng -> dừng (kiểm tra content/template).');
+            return [];
+        }
+        // Chọn ĐÚNG ô prompt (tránh nhầm ô tìm kiếm). Liệt kê ứng viên rồi tag phần tử chọn được.
+        const pick = await page.evaluate(() => {
+            const cands = [...document.querySelectorAll('textarea, input[type=text], input:not([type]), [contenteditable=""], [contenteditable="true"]')];
+            const meta = cands.map((el, i) => {
+                const r = el.getBoundingClientRect();
+                const ph = (el.getAttribute('placeholder') || el.getAttribute('aria-label') || el.getAttribute('data-placeholder') || el.textContent || '').trim().slice(0, 60);
+                const editable = el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.getAttribute('contenteditable') !== null;
+                return { i, tag: el.tagName.toLowerCase(), ce: el.getAttribute('contenteditable') !== null, ph, w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top), visible: r.width > 3 && r.height > 3 && editable };
+            });
+            const isSearch = s => /search|tìm kiếm/i.test(s);
+            const isPrompt = s => /prompt|idea|describe|generat|animate|create|mô tả|ý tưởng|nhập/i.test(s);
+            const vis = meta.filter(x => x.visible && !isSearch(x.ph));
+            // Ưu tiên: có chữ prompt-ish -> contenteditable rộng nhất/thấp nhất -> ô rộng nhất/thấp nhất
+            let chosen = vis.find(x => isPrompt(x.ph))
+                || vis.filter(x => x.ce).sort((a, b) => b.w - a.w || b.top - a.top)[0]
+                || vis.sort((a, b) => b.w - a.w || b.top - a.top)[0];
+            if (chosen) cands[chosen.i].setAttribute('data-flow-prompt', '1');
+            return { meta, chosenIdx: chosen?.i ?? -1 };
+        });
+        console.log('[Flow] Ứng viên ô nhập:', JSON.stringify(pick.meta));
+        console.log('[Flow] Chọn ô prompt idx =', pick.chosenIdx);
+
+        const promptBox = pick.chosenIdx >= 0
+            ? page.locator('[data-flow-prompt="1"]')
+            : page.locator('div[contenteditable=true][role=textbox]').last();
+        try {
+            await promptBox.waitFor({ state: 'visible', timeout: 20000 });
+        } catch {
+            console.error('[Flow] ❌ Không thấy ô nhập prompt sau 20s. URL:', page.url());
+            return [];
+        }
+        console.log(`[Flow] Nhập ${fullPrompt.length} ký tự vào ô prompt...`);
         await promptBox.click({ force: true });
         await page.keyboard.type(fullPrompt, { delay: 20 });
         await page.waitForTimeout(500);
@@ -202,6 +303,35 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
         // Click nút submit (icon arrow_forward)
         const createBtn = page.locator('button:has(i.google-symbols)').filter({ hasText: /arrow_forward/ }).first();
         await createBtn.click({ force: true });
+        await page.waitForTimeout(3000);
+
+        // Flow có thể hỏi "chọn hướng" (các lựa chọn radio_button_unchecked) trước khi tạo.
+        // Tự chọn phương án ĐẦU TIÊN rồi gửi tiếp; lặp tối đa 3 lần phòng khi hỏi nhiều bước.
+        for (let r = 0; r < 3; r++) {
+            const nOptions = await page.evaluate(() => {
+                const icons = [...document.querySelectorAll('i.google-symbols, span')]
+                    .filter(e => (e.textContent || '').trim() === 'radio_button_unchecked');
+                if (!icons.length) return 0;
+                // Lần lên tổ tiên gần nhất bấm được để tag
+                let el = icons[0];
+                for (let k = 0; k < 6 && el; k++) {
+                    const role = el.getAttribute && el.getAttribute('role');
+                    if (el.tagName === 'BUTTON' || role === 'radio' || role === 'option' || role === 'menuitemradio') break;
+                    el = el.parentElement;
+                }
+                (el || icons[0]).setAttribute('data-flow-opt', '1');
+                return icons.length;
+            });
+            if (!nOptions) break;
+            console.log(`[Flow] Màn chọn hướng (${nOptions} lựa chọn) -> chọn phương án đầu tiên`);
+            await page.locator('[data-flow-opt="1"]').click({ force: true }).catch(() => {});
+            await page.evaluate(() => document.querySelector('[data-flow-opt="1"]')?.removeAttribute('data-flow-opt'));
+            await page.waitForTimeout(1500);
+            // Gửi/tiếp tục nếu có nút submit
+            const sendBtn = page.locator('button:has(i.google-symbols)').filter({ hasText: /arrow_forward|send/ }).first();
+            if (await sendBtn.count()) await sendBtn.click({ force: true }).catch(() => {});
+            await page.waitForTimeout(3000);
+        }
 
         // Đếm media có sẵn trước khi gen
         const mediaTag = type === 'video' ? 'video' : 'img';
@@ -311,7 +441,7 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
     } finally {
         await page.close().catch(() => {});
         try { await ctx.close(); } catch (_) {}
-        if (profileId) await markProfileUsed(profileId);
+        if (activeProfileId) await markProfileUsed(activeProfileId);
     }
 }
 

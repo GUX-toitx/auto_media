@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { chromium } from 'playwright';
 import { claimNextStockPath } from './stockNaming.js';
+import { logCrawlError, logCrawlInfo } from './crawlLogger.js';
 
 const SETTINGS_DIR = path.join(process.cwd(), 'setting');
 const COUNTER_FILE = path.join(SETTINGS_DIR, 'current_index_storyblocks.txt');
@@ -59,11 +60,20 @@ async function downloadMedia(url, targetDir, ext, keyword) {
         });
         clearTimeout(timeoutId);
 
-        if (!res.ok) return false;
+        if (!res.ok) {
+            logCrawlError({ source: 'Storyblocks', keyword, url, reason: `HTTP ${res.status}` });
+            return false;
+        }
 
         const contentType = (res.headers.get('content-type') || '').toLowerCase();
-        if (ext === 'mp4' && !contentType.includes('video')) return false;
-        if (ext === 'jpg' && !contentType.includes('image')) return false;
+        if (ext === 'mp4' && !contentType.includes('video')) {
+            logCrawlError({ source: 'Storyblocks', keyword, url, reason: `content-type không phải video: ${contentType}` });
+            return false;
+        }
+        if (ext === 'jpg' && !contentType.includes('image')) {
+            logCrawlError({ source: 'Storyblocks', keyword, url, reason: `content-type không phải image: ${contentType}` });
+            return false;
+        }
 
         const buffer = await res.arrayBuffer();
         if (ext === 'mp4') {
@@ -81,6 +91,7 @@ async function downloadMedia(url, targetDir, ext, keyword) {
         if (e.name !== 'AbortError') {
             console.error(`      [${keyword}][Storyblocks Tải] ${e.message}`);
         }
+        logCrawlError({ source: 'Storyblocks', keyword, url, reason: e.message });
         return false;
     } finally {
         if (!success) {
@@ -96,9 +107,13 @@ export async function fetchFromStoryblocksBot(keyword, type, targetDir, neededCo
     const searchUrl = `https://www.storyblocks.com/${searchPath}/search/${encodeURIComponent(keyword)}?search-origin=search_bar`;
 
     console.log(`      [${keyword}][Storyblocks Bot] 🌐 Cào: ${searchUrl}`);
+    logCrawlInfo({ source: 'Storyblocks', keyword, url: searchUrl, note: 'bắt đầu tìm' });
 
     const profilePath = getNextProfilePath(keyword);
-    if (!profilePath) return 0;
+    if (!profilePath) {
+        logCrawlError({ source: 'Storyblocks', keyword, url: searchUrl, reason: 'không có profile' });
+        return 0;
+    }
 
     let context;
     try {
@@ -143,6 +158,7 @@ export async function fetchFromStoryblocksBot(keyword, type, targetDir, neededCo
             await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
         } catch (e) {
             console.log(`      [${keyword}][Storyblocks Bot] ⛔ Lỗi mở trang: ${e.message}`);
+            logCrawlError({ source: 'Storyblocks', keyword, url: searchUrl, reason: e.message });
             return 0;
         }
 
@@ -193,17 +209,27 @@ export async function fetchFromStoryblocksBot(keyword, type, targetDir, neededCo
 
         console.log(`      [${keyword}][Storyblocks Bot] Bắt được ${list.length} preview URL`);
 
+        if (list.length === 0) {
+            logCrawlError({ source: 'Storyblocks', keyword, url: searchUrl, reason: '0 preview URL' });
+        }
+
         for (const u of list) {
             if (downloaded >= neededCount) break;
             if (await downloadMedia(u, targetDir, ext, keyword)) {
                 downloaded++;
+                logCrawlInfo({ source: 'Storyblocks/ok', keyword, url: u });
                 console.log(`\x1b[33m      [${keyword}][Storyblocks Bot] 📥 ${type.toUpperCase()} bốc từ: ${u}\x1b[0m`);
             }
         }
     } catch (error) {
         console.error(`      [${keyword}][Storyblocks Lỗi Tổng] ${error.message}`);
+        logCrawlError({ source: 'Storyblocks', keyword, url: searchUrl, reason: error.message });
     } finally {
         if (context) await context.close().catch(() => {});
+    }
+
+    if (downloaded === 0) {
+        logCrawlError({ source: 'Storyblocks', keyword, url: searchUrl, reason: '0 media tải được' });
     }
 
     return downloaded;

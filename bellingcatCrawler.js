@@ -10,6 +10,7 @@ import * as cheerio from 'cheerio';
 // Import trình quản lý Proxy xoay vòng
 import { getOldestProxy } from './proxyManager.js';
 import { claimNextStockPath } from './stockNaming.js';
+import { logCrawlError, logCrawlInfo } from './crawlLogger.js';
 
 puppeteer.use(StealthPlugin());
 
@@ -73,6 +74,7 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
         if (e.name !== 'AbortError') {
              console.error(`      [${keyword}][Bellingcat Lỗi Tải File] URL: ${url} - ${e.message}`);
         }
+        logCrawlError({ source: 'Bellingcat', keyword, url, reason: `download error: ${e.message}` });
     } finally {
         if (!success) {
             try { fs.unlinkSync(savePath); } catch (_) {}
@@ -89,6 +91,7 @@ export async function fetchFromBellingcatBot(keyword, type, targetDir, neededCou
     const searchUrl = `https://www.bellingcat.com/?s=${encodeURIComponent(keyword)}`;
 
     console.log(`      [${keyword}][Bellingcat Bot] Đang thâm nhập OSINT: ${searchUrl}`);
+    logCrawlInfo({ source: 'Bellingcat', keyword, url: searchUrl, note: 'bắt đầu tìm' });
 
     const profilePath = path.join(process.cwd(), 'chrome_profile_bellingcat');
 
@@ -153,8 +156,9 @@ export async function fetchFromBellingcatBot(keyword, type, targetDir, neededCou
             console.log(`      [${keyword}][Bellingcat Bot] ⚠️ Không có kết quả. (Page Title: "${pageTitle}")`);
             if (pageTitle.includes('Just a moment') || pageTitle.includes('Cloudflare')) {
                 console.log(`      [${keyword}][Bellingcat Bot] ⛔ Bị Cloudflare chặn! Sẽ vượt qua ở lượt IP proxy tiếp theo...`);
-                await delay(5000); 
+                await delay(5000);
             }
+            logCrawlError({ source: 'Bellingcat', keyword, url: searchUrl, reason: `không có kết quả (Page Title: "${pageTitle}")` });
             return 0;
         }
 
@@ -209,18 +213,25 @@ export async function fetchFromBellingcatBot(keyword, type, targetDir, neededCou
                     
                     if (await downloadMedia(finalUrl, targetDir, ext, proxy, keyword)) {
                         downloaded++;
+                        logCrawlInfo({ source: 'Bellingcat/ok', keyword, url: finalUrl });
                         console.log(`\x1b[33m      [${keyword}][Bellingcat Bot] 📥 ${type.toUpperCase()} bốc từ: ${link}\x1b[0m`);
                         console.log(`      [${keyword}][Bellingcat Bot] ---> Đã lấy OSINT thành công ${downloaded}/${neededCount} ${type}`);
                     }
                 }
             } catch (err) {
                 // Bỏ qua bài lỗi
+                logCrawlError({ source: 'Bellingcat', keyword, url: link, reason: `lỗi bóc bài: ${err.message}` });
             }
         }
     } catch (error) {
         console.error(`      [${keyword}][Bellingcat Lỗi Tổng] ${error.message}`);
+        logCrawlError({ source: 'Bellingcat', keyword, url: searchUrl, reason: `lỗi tổng: ${error.message}` });
     } finally {
         await browser.close();
+    }
+
+    if (downloaded === 0) {
+        logCrawlError({ source: 'Bellingcat', keyword, url: searchUrl, reason: 'tải về 0 kết quả' });
     }
 
     return downloaded;

@@ -6,6 +6,7 @@ import fs from 'fs';
 import proxyChain from 'proxy-chain';
 import { getOldestProxy } from './proxyManager.js';
 import { claimNextStockPath } from './stockNaming.js';
+import { logCrawlError, logCrawlInfo } from './crawlLogger.js';
 import googleImgScrap from 'google-img-scrap';
 const { GOOGLE_IMG_SCRAP } = googleImgScrap;
 
@@ -45,6 +46,7 @@ async function scrapImages(keyword, limit, maxAttempts = 3) {
             console.log(`      [${keyword}][GoogleImage] lần ${attempt} rỗng${proxyArg ? ' (proxy)' : ''}, thử lại...`);
         } catch (e) {
             console.error(`      [${keyword}][GoogleImage] lần ${attempt} lỗi: ${e.message}`);
+            logCrawlError({ source: 'Google Image/scrape', keyword, reason: `lần ${attempt}: ${e.message}` });
         } finally {
             if (anon) await proxyChain.closeAnonymizedProxy(anon, true).catch(() => {});
         }
@@ -55,6 +57,7 @@ async function scrapImages(keyword, limit, maxAttempts = 3) {
 
 async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '', source = '') {
     if (url.includes('onelink.me') || url.includes('app-store') || url.includes('play.google')) {
+        logCrawlError({ source: 'Google Image', keyword, url, reason: 'bỏ qua url app-store/onelink' });
         return false;
     }
 
@@ -108,6 +111,9 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '', so
     } catch (e) {
         if (e.name !== 'AbortError') {
              console.error(`      [${keyword}][Bing Lỗi Tải File] URL: ${url} - ${e.message}`);
+             logCrawlError({ source: 'Google Image/download', keyword, url, reason: e.message });
+        } else {
+             logCrawlError({ source: 'Google Image/download', keyword, url, reason: 'timeout 15s' });
         }
     } finally {
         if (!success) {
@@ -123,6 +129,7 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
 
     let downloaded = 0;
     const ext = 'jpg';
+    logCrawlInfo({ source: 'Google Image/search', keyword, note: `cần ${neededCount} ảnh` });
 
     let images = [];
     // lấy dư (x3) để bù ảnh tải lỗi; giữ originalUrl (trang nguồn) để gắn tag
@@ -137,6 +144,7 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
 
     if (!images.length) {
         console.log(`      [${keyword}][GoogleImage] ⚠️ Không thấy ảnh.`);
+        logCrawlError({ source: 'Google Image', keyword, reason: '0 ảnh (scrape rỗng - có thể Google chặn/429)' });
         return 0;
     }
     console.log(`      [${keyword}][GoogleImage] Tìm thấy ${images.length} ảnh. Đang tải...`);
@@ -145,6 +153,7 @@ export async function fetchFromGoogleImageBot(keyword, type, targetDir, neededCo
         if (downloaded >= neededCount) break;
         if (await downloadMedia(url, targetDir, ext, null, keyword, source)) {
             downloaded++;
+            logCrawlInfo({ source: 'Google Image/ok', keyword, url: source });
             console.log(`\x1b[33m      [${keyword}][GoogleImage] 📥 ${downloaded}/${neededCount} <- ${source.slice(0, 70)}\x1b[0m`);
         }
     }

@@ -10,6 +10,7 @@ import { getOldestProxy } from './proxyManager.js';
 import { exec } from 'child_process';
 import util from 'util';
 import { claimNextStockPath } from './stockNaming.js';
+import { logCrawlError, logCrawlInfo } from './crawlLogger.js';
 
 const execPromise = util.promisify(exec);
 puppeteer.use(StealthPlugin());
@@ -46,6 +47,7 @@ async function downloadHlsStream(m3u8Url, savePath, keyword) {
         }
     } catch (e) {
         console.error(`      [${keyword}] [Lỗi FFmpeg] Không thể tải Stream HLS: ${e.message}`);
+        logCrawlError({ source: 'AP News', keyword, url: m3u8Url, reason: `FFmpeg HLS: ${e.message}` });
         if (fs.existsSync(savePath)) fs.unlinkSync(savePath);
     }
     return false;
@@ -104,9 +106,12 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword = '') {
             fs.writeFileSync(savePath, Buffer.from(buffer));
             success = true;
             return true;
+        } else {
+            logCrawlError({ source: 'AP News', keyword, url, reason: `HTTP ${res.status}` });
         }
     } catch (e) {
         // Bỏ qua lỗi ngầm
+        logCrawlError({ source: 'AP News', keyword, url, reason: e.message });
     } finally {
         if (!success) {
             try { fs.unlinkSync(savePath); } catch (_) {}
@@ -138,6 +143,7 @@ export async function fetchFromApnewsBot(keyword, type, targetDir, neededCount) 
     
     const searchUrl = `https://apnews.com/search?q=${encodeURIComponent(keyword)}`;
     console.log(`      [${keyword}] [APNews Bot] Đang thâm nhập: ${searchUrl}`);
+    logCrawlInfo({ source: 'AP News', keyword, url: searchUrl, note: 'bắt đầu tìm' });
 
     const proxy = await getOldestProxy();
     const browserArgs = [
@@ -211,6 +217,7 @@ export async function fetchFromApnewsBot(keyword, type, targetDir, neededCount) 
 
         if (articleLinks.length === 0) {
             console.log(`      [${keyword}] [APNews Bot] ⚠️ Không thấy bài báo.`);
+            logCrawlError({ source: 'AP News', keyword, url: searchUrl, reason: 'không thấy bài báo (0 kết quả)' });
             return 0;
         }
 
@@ -291,18 +298,25 @@ export async function fetchFromApnewsBot(keyword, type, targetDir, neededCount) 
 
                     if (await downloadMedia(finalUrl, targetDir, ext, proxy, keyword)) {
                         downloaded++;
+                        logCrawlInfo({ source: 'AP News/ok', keyword, url: finalUrl });
                         console.log(`\x1b[33m      [${keyword}] [APNews Bot] 📥 ${type.toUpperCase()} này được bốc từ bài: ${link}\x1b[0m`);
                         console.log(`      [${keyword}] [APNews Bot] ---> Đã lấy tin thành công ${downloaded}/${neededCount} ${type}`);
                     }
                 }
             } catch (err) {
                 // Kế thừa lỗi trang con
+                logCrawlError({ source: 'AP News', keyword, url: link, reason: err.message });
             }
         }
     } catch (error) {
         console.error(`      [${keyword}] [APNews Lỗi Tổng] ${error.message}`);
+        logCrawlError({ source: 'AP News', keyword, url: searchUrl, reason: error.message });
     } finally {
         await browser.close();
+    }
+
+    if (downloaded === 0) {
+        logCrawlError({ source: 'AP News', keyword, url: searchUrl, reason: 'không tải được kết quả nào (0)' });
     }
 
     return downloaded;

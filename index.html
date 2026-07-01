@@ -61,6 +61,7 @@
                         </div>
                     </label>
                     <button @click="createVoice" class="bg-purple-600 hover:bg-purple-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
+                    <button @click="createThumbnail" :disabled="thumbLoading" class="bg-teal-600 hover:bg-teal-500 disabled:opacity-40 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95"><span v-if="thumbLoading" class="animate-spin inline-block mr-1">⏳</span>🖼️ Tạo Thumbnail</button>
                     <button @click="retryDownloadVoice" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔄 Refresh Voice</button>
                     <button @click="openDownloadAudioModal" class="bg-yellow-600 hover:bg-yellow-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">⬇️ Chỉ Tải Voice</button>
                     <button @click="openDownloadVoiceModal" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔊 Tải Voice & Media Selected</button>
@@ -84,6 +85,25 @@
             </header>
 
             <div class="space-y-4 mt-[180px]">
+                <!-- Thumbnail dự án -->
+                <div v-if="(activePost.sections?.thumbnail?.images || []).length" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="text-[11px] font-black uppercase tracking-widest text-teal-400">🖼️ Thumbnail</span>
+                        <span class="text-[10px] text-gray-500">{{ (activePost.sections.thumbnail.images || []).length }} ảnh</span>
+                        <span class="text-[10px] text-gray-500">— ảnh chọn (✓) sẽ làm bìa video khi export CapCut</span>
+                    </div>
+                    <div class="grid grid-cols-4 gap-2">
+                        <div v-for="img in activePost.sections.thumbnail.images" :key="img.id" class="relative group">
+                            <img :src="img.url" class="w-full aspect-video object-cover rounded-lg border-2 transition-colors" :class="img.selected ? 'border-teal-400' : 'border-gray-700'" loading="lazy">
+                            <span v-if="img.selected" class="absolute top-1 left-1 bg-teal-500 text-black text-[9px] font-black px-1.5 py-0.5 rounded z-10">BÌA ✓</span>
+                            <button @click="deleteSectionAsset(img, 'thumbnail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow opacity-0 group-hover:opacity-100 transition-opacity">×</button>
+                            <div class="absolute bottom-1 left-1 right-1 flex gap-1 z-10">
+                                <button @click="selectThumbnail(img)" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="img.selected ? 'bg-teal-500 text-black' : 'bg-gray-800/90 hover:bg-teal-600 text-white'">{{ img.selected ? '✓ Bìa' : 'Chọn' }}</button>
+                                <a :href="img.url" download class="bg-black/70 hover:bg-black text-white text-[10px] px-1.5 py-0.5 rounded flex items-center">⬇️</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <!-- Mở bài -->
                 <div v-if="activePost.hook_details?.length" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
                     <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Mở bài</p>
@@ -169,6 +189,20 @@
                     <div v-if="(activePost.sections?.hook?.videos||[]).some(a=>a.selected)">
                         <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="activePost.sections['hook']._selVideoOpen = activePost.sections['hook']._selVideoOpen === false ? true : false">
                             {{ activePost.sections['hook']._selVideoOpen === false ? '▶' : '▼' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos đã chọn ({{ (activePost.sections?.hook?.videos||[]).filter(a=>a.selected).length }})
+                        </div>
+                        <div v-if="activePost._secNarr?.hook && (activePost._secNarr.hook.vi > 0 || activePost._secNarr.hook.target > 0)" class="flex gap-3 mt-1 mb-1">
+                            <div v-if="activePost._secNarr.hook.vi > 0" class="flex-1 space-y-0.5">
+                                <div class="h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                                    <div class="h-full rounded-full transition-all duration-300" :class="sectionSelectedSec('hook') + 0.05 >= activePost._secNarr.hook.vi ? 'bg-green-500' : 'bg-yellow-500'" :style="{ width: Math.min(100, sectionSelectedSec('hook') / activePost._secNarr.hook.vi * 100) + '%' }"></div>
+                                </div>
+                                <div class="text-[11px] font-mono tabular-nums font-black text-center">🇻🇳 <span class="text-gray-300">{{ sectionSelectedSec('hook').toFixed(1) }}/{{ activePost._secNarr.hook.vi.toFixed(1) }}s</span> <span class="text-gray-600">·</span> <span :class="coverageClass(sectionSelectedSec('hook'), activePost._secNarr.hook.vi)">{{ coverageText(sectionSelectedSec('hook'), activePost._secNarr.hook.vi) }}</span></div>
+                            </div>
+                            <div v-if="activePost._secNarr.hook.target > 0" class="flex-1 space-y-0.5">
+                                <div class="h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                                    <div class="h-full rounded-full transition-all duration-300" :class="sectionSelectedSec('hook') + 0.05 >= activePost._secNarr.hook.target ? 'bg-green-500' : 'bg-yellow-500'" :style="{ width: Math.min(100, sectionSelectedSec('hook') / activePost._secNarr.hook.target * 100) + '%' }"></div>
+                                </div>
+                                <div class="text-[11px] font-mono tabular-nums font-black text-center">🌍 <span class="text-gray-300">{{ sectionSelectedSec('hook').toFixed(1) }}/{{ activePost._secNarr.hook.target.toFixed(1) }}s</span> <span class="text-gray-600">·</span> <span :class="coverageClass(sectionSelectedSec('hook'), activePost._secNarr.hook.target)">{{ coverageText(sectionSelectedSec('hook'), activePost._secNarr.hook.target) }}</span></div>
+                            </div>
                         </div>
                         <div v-if="activePost.sections['hook']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.hook?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" 
@@ -352,6 +386,20 @@
                     <div v-if="(activePost.sections?.summary?.videos||[]).some(a=>a.selected)">
                         <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="activePost.sections['summary']._selVideoOpen = activePost.sections['summary']._selVideoOpen === false ? true : false">
                             {{ activePost.sections['summary']._selVideoOpen === false ? '▶' : '▼' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos đã chọn ({{ (activePost.sections?.summary?.videos||[]).filter(a=>a.selected).length }})
+                        </div>
+                        <div v-if="activePost._secNarr?.summary && (activePost._secNarr.summary.vi > 0 || activePost._secNarr.summary.target > 0)" class="flex gap-3 mt-1 mb-1">
+                            <div v-if="activePost._secNarr.summary.vi > 0" class="flex-1 space-y-0.5">
+                                <div class="h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                                    <div class="h-full rounded-full transition-all duration-300" :class="sectionSelectedSec('summary') + 0.05 >= activePost._secNarr.summary.vi ? 'bg-green-500' : 'bg-yellow-500'" :style="{ width: Math.min(100, sectionSelectedSec('summary') / activePost._secNarr.summary.vi * 100) + '%' }"></div>
+                                </div>
+                                <div class="text-[11px] font-mono tabular-nums font-black text-center">🇻🇳 <span class="text-gray-300">{{ sectionSelectedSec('summary').toFixed(1) }}/{{ activePost._secNarr.summary.vi.toFixed(1) }}s</span> <span class="text-gray-600">·</span> <span :class="coverageClass(sectionSelectedSec('summary'), activePost._secNarr.summary.vi)">{{ coverageText(sectionSelectedSec('summary'), activePost._secNarr.summary.vi) }}</span></div>
+                            </div>
+                            <div v-if="activePost._secNarr.summary.target > 0" class="flex-1 space-y-0.5">
+                                <div class="h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                                    <div class="h-full rounded-full transition-all duration-300" :class="sectionSelectedSec('summary') + 0.05 >= activePost._secNarr.summary.target ? 'bg-green-500' : 'bg-yellow-500'" :style="{ width: Math.min(100, sectionSelectedSec('summary') / activePost._secNarr.summary.target * 100) + '%' }"></div>
+                                </div>
+                                <div class="text-[11px] font-mono tabular-nums font-black text-center">🌍 <span class="text-gray-300">{{ sectionSelectedSec('summary').toFixed(1) }}/{{ activePost._secNarr.summary.target.toFixed(1) }}s</span> <span class="text-gray-600">·</span> <span :class="coverageClass(sectionSelectedSec('summary'), activePost._secNarr.summary.target)">{{ coverageText(sectionSelectedSec('summary'), activePost._secNarr.summary.target) }}</span></div>
+                            </div>
                         </div>
                         <div v-if="activePost.sections['summary']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.summary?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" 
@@ -560,6 +608,39 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Gợi ý số giây media đã chọn vs độ dài giọng đọc (2 thanh: 🇻🇳 & 🌍) -->
+                            <div v-if="para._narrationViSec > 0 || para._narrationTargetSec > 0" class="mt-2 flex gap-2">
+                                <div v-if="para._narrationViSec > 0" class="flex-1 space-y-1">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="text-[11px] shrink-0" title="Phủ tiếng Việt">🇻🇳</span>
+                                        <div class="flex-1 h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                                            <div class="h-full rounded-full transition-all duration-300"
+                                                 :class="para._narrationViSec && selectedTotalSec(para) + 0.05 >= para._narrationViSec ? 'bg-green-500' : 'bg-yellow-500'"
+                                                 :style="{ width: (para._narrationViSec ? Math.min(100, selectedTotalSec(para) / para._narrationViSec * 100) : 0) + '%' }"></div>
+                                        </div>
+                                    </div>
+                                    <div class="text-[12px] font-mono tabular-nums font-black text-center">
+                                        <span :class="para._narrationViSec && selectedTotalSec(para) + 0.05 >= para._narrationViSec ? 'text-green-400' : 'text-yellow-400'">{{ selectedTotalSec(para).toFixed(1) }}/{{ (para._narrationViSec || 0).toFixed(1) }}s</span>
+                                        <span class="text-gray-600"> · </span>
+                                        <span :class="coverageHintClass(para, para._narrationViSec)">{{ coverageRemain(para, para._narrationViSec) }}</span>
+                                    </div>
+                                </div>
+                                <div v-if="para._narrationTargetSec > 0" class="flex-1 space-y-1">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="text-[11px] shrink-0" title="Phủ ngôn ngữ đích">🌍</span>
+                                        <div class="flex-1 h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                                            <div class="h-full rounded-full transition-all duration-300"
+                                                 :class="para._narrationTargetSec && selectedTotalSec(para) + 0.05 >= para._narrationTargetSec ? 'bg-green-500' : 'bg-yellow-500'"
+                                                 :style="{ width: (para._narrationTargetSec ? Math.min(100, selectedTotalSec(para) / para._narrationTargetSec * 100) : 0) + '%' }"></div>
+                                        </div>
+                                    </div>
+                                    <div class="text-[12px] font-mono tabular-nums font-black text-center">
+                                        <span :class="para._narrationTargetSec && selectedTotalSec(para) + 0.05 >= para._narrationTargetSec ? 'text-green-400' : 'text-yellow-400'">{{ selectedTotalSec(para).toFixed(1) }}/{{ (para._narrationTargetSec || 0).toFixed(1) }}s</span>
+                                        <span class="text-gray-600"> · </span>
+                                        <span :class="coverageHintClass(para, para._narrationTargetSec)">{{ coverageRemain(para, para._narrationTargetSec) }}</span>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- Assets selected cho luận điểm (sentenceId = null, selected) -->
                             <div v-if="(para.videos || []).filter(v => v.selected && v.sentenceId === null).length" class="mt-1">
                                 <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="para._paraVideoOpen = !para._paraVideoOpen">
@@ -594,6 +675,10 @@
                                         <news-tag :name="img.name" :link="img.sourceUrl"></news-tag>
                                         <button @click="unselectAsset(img, para, 0, 'image')" class="absolute top-0.5 right-0.5 bg-red-600/80 hover:bg-red-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center">×</button>
                                         <img :src="img.url" @click="openPreview(img, 'image', para)" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
+                                        <div class="flex items-center gap-1 mb-0.5">
+                                            <span class="text-[9px] text-gray-500">⏱</span>
+                                            <input type="number" min="0.1" step="0.1" :value="img.duration || ''" @change="setImageDuration(img, para, $event)" @click.stop placeholder="giây" class="w-full bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none focus:border-blue-500" title="Số giây ảnh hiển thị (tính vào tổng giây)">
+                                        </div>
                                         <div class="flex gap-1">
                                             <button class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</button>
                                             <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-green-600 uppercase">✓</button>
@@ -902,6 +987,20 @@
                     <div v-if="(activePost.sections?.conclusion?.videos||[]).some(a=>a.selected)">
                         <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="activePost.sections['conclusion']._selVideoOpen = activePost.sections['conclusion']._selVideoOpen === false ? true : false">
                             {{ activePost.sections['conclusion']._selVideoOpen === false ? '▶' : '▼' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos đã chọn ({{ (activePost.sections?.conclusion?.videos||[]).filter(a=>a.selected).length }})
+                        </div>
+                        <div v-if="activePost._secNarr?.conclusion && (activePost._secNarr.conclusion.vi > 0 || activePost._secNarr.conclusion.target > 0)" class="flex gap-3 mt-1 mb-1">
+                            <div v-if="activePost._secNarr.conclusion.vi > 0" class="flex-1 space-y-0.5">
+                                <div class="h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                                    <div class="h-full rounded-full transition-all duration-300" :class="sectionSelectedSec('conclusion') + 0.05 >= activePost._secNarr.conclusion.vi ? 'bg-green-500' : 'bg-yellow-500'" :style="{ width: Math.min(100, sectionSelectedSec('conclusion') / activePost._secNarr.conclusion.vi * 100) + '%' }"></div>
+                                </div>
+                                <div class="text-[11px] font-mono tabular-nums font-black text-center">🇻🇳 <span class="text-gray-300">{{ sectionSelectedSec('conclusion').toFixed(1) }}/{{ activePost._secNarr.conclusion.vi.toFixed(1) }}s</span> <span class="text-gray-600">·</span> <span :class="coverageClass(sectionSelectedSec('conclusion'), activePost._secNarr.conclusion.vi)">{{ coverageText(sectionSelectedSec('conclusion'), activePost._secNarr.conclusion.vi) }}</span></div>
+                            </div>
+                            <div v-if="activePost._secNarr.conclusion.target > 0" class="flex-1 space-y-0.5">
+                                <div class="h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                                    <div class="h-full rounded-full transition-all duration-300" :class="sectionSelectedSec('conclusion') + 0.05 >= activePost._secNarr.conclusion.target ? 'bg-green-500' : 'bg-yellow-500'" :style="{ width: Math.min(100, sectionSelectedSec('conclusion') / activePost._secNarr.conclusion.target * 100) + '%' }"></div>
+                                </div>
+                                <div class="text-[11px] font-mono tabular-nums font-black text-center">🌍 <span class="text-gray-300">{{ sectionSelectedSec('conclusion').toFixed(1) }}/{{ activePost._secNarr.conclusion.target.toFixed(1) }}s</span> <span class="text-gray-600">·</span> <span :class="coverageClass(sectionSelectedSec('conclusion'), activePost._secNarr.conclusion.target)">{{ coverageText(sectionSelectedSec('conclusion'), activePost._secNarr.conclusion.target) }}</span></div>
+                            </div>
                         </div>
                         <div v-if="activePost.sections['conclusion']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.conclusion?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" 
@@ -2064,6 +2163,8 @@ createApp({
                         p.videoOpen = pp.videoOpen; p.imageOpen = pp.imageOpen;
                         p.videoSelectedOpen = pp.videoSelectedOpen; p.imageSelectedOpen = pp.imageSelectedOpen;
                         p.sentencesOpen = pp.sentencesOpen;
+                        // Giữ độ dài giọng đọc đã tính -> bar không nhấp nháy khi reload
+                        p._narrationViSec = pp._narrationViSec; p._narrationTargetSec = pp._narrationTargetSec;
                     }
                 });
                 for (const s of ['hook', 'summary', 'conclusion']) {
@@ -2075,8 +2176,12 @@ createApp({
                         if (ps._selImageOpen !== undefined) data.sections[s]._selImageOpen = ps._selImageOpen;
                     }
                 }
+                data._secNarr = prevPost._secNarr; // giữ coverage section, tránh nhấp nháy
             }
             activePost.value = data;
+            // Tính độ dài giọng đọc từng cảnh + section (nền) -> hiện thanh gợi ý số giây đã chọn
+            (activePost.value.paragraphs || []).forEach(p => computeNarration(p));
+            ['hook', 'summary', 'conclusion'].forEach(k => computeSectionNarration(k));
             maybeStartCrawlPoll(post.id);
         }
 
@@ -2244,6 +2349,16 @@ createApp({
             }
         }
 
+        // Thumbnail: chỉ 1 ảnh làm bìa -> chọn ảnh này thì bỏ chọn các ảnh khác
+        async function selectThumbnail(img) {
+            const imgs = activePost.value.sections?.thumbnail?.images || [];
+            if (img.selected) { await toggleSectionAsset(img, 'thumbnail', 'image'); return; }
+            for (const other of imgs) {
+                if (other.selected && other.id !== img.id) await toggleSectionAsset(other, 'thumbnail', 'image');
+            }
+            await toggleSectionAsset(img, 'thumbnail', 'image');
+        }
+
         async function deleteSectionAsset(asset, section) {
             if (!confirm('Xóa file này?')) return;
             const res = await fetch('/api/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: asset.relativePath }) });
@@ -2356,6 +2471,27 @@ createApp({
         }
 
         const crawling = ref(false);
+        const thumbLoading = ref(false);
+
+        async function createThumbnail() {
+            if (!activePost.value) return;
+            const lang = activePost.value?.project_id?.match(/_([a-z]{2})$/)?.[1] || 'en';
+            thumbLoading.value = true;
+            showToast('🖼️ Đang đọc nội dung dự án & tạo thumbnail qua Google Flow...', 5000);
+            try {
+                const res = await fetch('/api/create-thumbnail', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoId: activeProjectId.value, postId: activePostId.value, lang, count: 2, ratio: '16:9' })
+                });
+                if (!res.ok) { const r = await res.json().catch(() => ({})); throw new Error(r.error || 'Lỗi tạo thumbnail'); }
+                showToast('✅ Đang tạo ngầm — reload sau vài phút để xem thumbnail!', 6000);
+            } catch (e) {
+                alert('❌ ' + e.message);
+            } finally {
+                thumbLoading.value = false;
+            }
+        }
 
         async function triggerCrawlAll() {
             if (!activePostId.value) return;
@@ -2902,6 +3038,93 @@ createApp({
             setTimeout(poll, 3000);
         }
 
+        // ===== Gợi ý số giây media đã chọn vs độ dài giọng đọc (port từ naze) =====
+        const _audioDurCache = new Map(); // URL -> giây (tránh load lại mỗi lần reload -> hết nhấp nháy)
+        function loadAudioDuration(url) {
+            if (_audioDurCache.has(url)) return Promise.resolve(_audioDurCache.get(url));
+            return new Promise((resolve) => {
+                const a = new Audio();
+                a.preload = 'metadata';
+                a.addEventListener('loadedmetadata', () => { const d = Number(a.duration) || 0; _audioDurCache.set(url, d); resolve(d); }, { once: true });
+                a.addEventListener('error', () => resolve(0), { once: true }); // lỗi -> không cache, cho phép thử lại lần sau
+                a.src = url;
+            });
+        }
+        // Tính độ dài giọng đọc từng cảnh (ghép audio của các ParagraphDetail) -> _narrationViSec / _narrationTargetSec
+        async function computeNarration(para) {
+            const urlsFor = (field) => para[field] ? [para[field]] : (para.details || []).map(d => d[field]).filter(Boolean);
+            const [viDurs, tgDurs] = await Promise.all([
+                Promise.all(urlsFor('content_vi_audio').map(loadAudioDuration)),
+                Promise.all(urlsFor('content_audio').map(loadAudioDuration)),
+            ]);
+            para._narrationViSec = viDurs.reduce((s, d) => s + d, 0);
+            para._narrationTargetSec = tgDurs.reduce((s, d) => s + d, 0);
+        }
+        function selectedMedia(para) {
+            const vids = (para.videos || []).filter(v => v.selected && v.sentenceId === null);
+            const imgs = (para.images || []).filter(im => im.selected && im.sentenceId === null);
+            return [...vids, ...imgs].sort((a, b) => (a.order || 0) - (b.order || 0));
+        }
+        function selectedTotalSec(para) {
+            return selectedMedia(para).reduce((s, x) => s + (Number(x.duration) || 0), 0);
+        }
+        function coverageRemain(para, narrSec) {
+            if (!narrSec) return '';
+            const diff = narrSec - selectedTotalSec(para);
+            if (diff > 0.05) return `còn ${diff.toFixed(1)}s`;
+            if (diff < -0.05) return `thừa ${(-diff).toFixed(1)}s`;
+            return 'đủ ✓';
+        }
+        function coverageHintClass(para, narrSec) {
+            if (!narrSec) return 'text-gray-500';
+            const diff = narrSec - selectedTotalSec(para);
+            if (diff > 0.05) return 'text-orange-400';
+            if (diff < -0.05) return 'text-red-400';
+            return 'text-green-400';
+        }
+        async function setImageDuration(item, para, e) {
+            const val = parseFloat(e.target.value);
+            if (!(val > 0)) return;
+            item.duration = val; // cập nhật ngay để tổng số giây mượt
+            try { await fetch('/api/save-duration', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ relativePath: item.relativePath, duration: val }) }); }
+            catch (err) { showToast('❌ ' + err.message); }
+        }
+
+        // ===== Coverage cho mở bài / tóm tắt / kết bài (section có *_details) =====
+        function coverageText(sel, narr) {
+            if (!narr) return '';
+            const d = narr - sel;
+            if (d > 0.05) return `còn ${d.toFixed(1)}s`;
+            if (d < -0.05) return `thừa ${(-d).toFixed(1)}s`;
+            return 'đủ ✓';
+        }
+        function coverageClass(sel, narr) {
+            if (!narr) return 'text-gray-500';
+            const d = narr - sel;
+            if (d > 0.05) return 'text-orange-400';
+            if (d < -0.05) return 'text-red-400';
+            return 'text-green-400';
+        }
+        // Tổng giây media của 1 section = pool đã chọn (sections[key]) + media gán theo từng detail
+        function sectionSelectedSec(key) {
+            const post = activePost.value; if (!post) return 0;
+            const sec = post.sections?.[key] || {};
+            const details = post[key + '_details'] || [];
+            const pool = [...(sec.videos || []), ...(sec.images || [])].filter(a => a.selected);
+            const detailMedia = details.flatMap(d => [...(d.videos || []), ...(d.images || [])]);
+            return [...pool, ...detailMedia].reduce((s, x) => s + (Number(x.duration) || 0), 0);
+        }
+        // Độ dài giọng đọc 1 section = tổng audio các detail -> activePost._secNarr[key] = {vi, target}
+        async function computeSectionNarration(key) {
+            const post = activePost.value; if (!post) return;
+            const details = post[key + '_details'] || [];
+            const [vi, tg] = await Promise.all([
+                Promise.all(details.map(d => d.content_vi_audio).filter(Boolean).map(loadAudioDuration)),
+                Promise.all(details.map(d => d.content_audio).filter(Boolean).map(loadAudioDuration)),
+            ]);
+            post._secNarr = { ...(post._secNarr || {}), [key]: { vi: vi.reduce((s, d) => s + d, 0), target: tg.reduce((s, d) => s + d, 0) } };
+        }
+
         async function createVoice() {
             voiceModal.value = {
                 open: true,
@@ -2917,15 +3140,29 @@ createApp({
             };
 
             const lang = voiceModal.value.lang;
-            const [lr, sr, dr] = await Promise.all([
-                fetch('/api/languages'),
-                fetch(`/api/reference-speakers?lang=${lang}`),
-                fetch('/api/dictionaries')
-            ]);
-
-            voiceModal.value.langs = await lr.json();
-            voiceModal.value.speakers = await sr.json();
-            voiceModal.value.dictionaries = await dr.json();
+            try {
+                const [lr, sr, dr] = await Promise.all([
+                    fetch('/api/languages'),
+                    fetch(`/api/reference-speakers?lang=${lang}`),
+                    fetch('/api/dictionaries')
+                ]);
+                const langs = await lr.json().catch(() => []);
+                let speakers = await sr.json().catch(() => []);
+                const dicts = await dr.json().catch(() => []);
+                if (!Array.isArray(speakers)) speakers = [];
+                // Fallback: ngôn ngữ này không có giọng -> lấy TẤT CẢ giọng
+                if (!speakers.length) {
+                    const all = await fetch('/api/reference-speakers').then(r => r.json()).catch(() => []);
+                    speakers = Array.isArray(all) ? all : [];
+                    if (speakers.length) showToast(`⚠️ Không có giọng cho "${lang}" — hiển thị tất cả ${speakers.length} giọng`, 4000);
+                }
+                voiceModal.value.langs = Array.isArray(langs) ? langs : [];
+                voiceModal.value.speakers = speakers;
+                voiceModal.value.dictionaries = Array.isArray(dicts) ? dicts : [];
+                if (!speakers.length) showToast('❌ Không lấy được giọng mẫu (API voice lỗi?). Kiểm tra pm2 logs.', 6000);
+            } catch (e) {
+                showToast('❌ Lỗi tải danh sách giọng: ' + e.message, 6000);
+            }
         }
 
         async function loadSpeakersByLang() {
@@ -3447,6 +3684,16 @@ createApp({
             pollingTimer,
             startPollingVoice,
             crawling,
+            thumbLoading,
+            createThumbnail,
+            selectThumbnail,
+            selectedTotalSec,
+            coverageRemain,
+            coverageHintClass,
+            setImageDuration,
+            coverageText,
+            coverageClass,
+            sectionSelectedSec,
             triggerCrawlAll,
             refetchMedia,
             aiGenerate,

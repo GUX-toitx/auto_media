@@ -10,6 +10,7 @@ import * as cheerio from 'cheerio';
 // Import trình quản lý Proxy xoay vòng
 import { getOldestProxy } from './proxyManager.js';
 import { claimNextStockPath } from './stockNaming.js';
+import { logCrawlError, logCrawlInfo } from './crawlLogger.js';
 
 const SETTINGS_DIR = path.join(process.cwd(), 'setting');
 const COUNTER_FILE = path.join(SETTINGS_DIR, 'current_index.txt');
@@ -116,13 +117,17 @@ async function downloadMedia(url, targetDir, ext, proxy = null, keyword) {
             fs.writeFileSync(savePath, Buffer.from(buffer));
             success = true;
             return true;
+        } else {
+            logCrawlError({ source: 'DVIDS', keyword, url, reason: `HTTP ${res.status} ${res.statusText || ''}`.trim() });
         }
     } catch (e) {
         // 🟢 CẢI TIẾN 3: Hiển thị cảnh báo nếu bị đứt mạng do tải quá lâu
         if (e.name === 'AbortError') {
              console.log(`      [Cảnh báo] Mạng quá chậm, file tải hơn ${ext==='mp4'?'3 phút':'15 giây'} nên bị hủy!`);
+             logCrawlError({ source: 'DVIDS', keyword, url, reason: `timeout tải file (${ext==='mp4'?'>3 phút':'>15 giây'})` });
         } else {
              console.error(`      [${keyword}][Dvids Lỗi Tải File] URL: ${url} - ${e.message}`);
+             logCrawlError({ source: 'DVIDS', keyword, url, reason: e.message });
         }
     } finally {
         if (!success) {
@@ -139,6 +144,7 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
     const searchUrl = `https://www.dvidshub.net/search?q=${encodeURIComponent(keyword)}&filter%5Btype%5D=${searchType}`;
 
     console.log(`      [${keyword}][DVIDS Bot] Đang bí mật cào: ${searchUrl}`);
+    logCrawlInfo({ source: 'DVIDS', keyword, url: searchUrl, note: 'bắt đầu tìm' });
 
     // Lấy Profile theo cơ chế xoay vòng
     const profilePath = getNextProfilePath(keyword);
@@ -200,6 +206,7 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
         } catch (e) {
             if (e.message.includes('ERR_INVALID_AUTH_CREDENTIALS') || e.message.includes('ERR_TUNNEL_CONNECTION_FAILED')) {
                 console.log(`      [${keyword}][DVIDS Bot] ⛔ Proxy ${proxy.server} bị lỗi xác thực hoặc đã chết. Đang bỏ qua luồng này!`);
+                logCrawlError({ source: 'DVIDS', keyword, url: searchUrl, reason: `proxy chết/lỗi xác thực: ${e.message}` });
                 return 0; // Proxy tạch thì trả về 0 cho hệ thống chạy tiếp, không crash tool
             }
             throw e; 
@@ -243,9 +250,10 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
             // Nếu bị dính Cloudflare Challenge
             if (pageTitle.includes('Just a moment') || pageTitle.includes('Cloudflare')) {
                 console.log(`      [${keyword}][DVIDS Bot] ⛔ Đã bị Cloudflare chặn!`);
-                await delay(5000); 
+                await delay(5000);
             }
-            return 0; 
+            logCrawlError({ source: 'DVIDS', keyword, url: searchUrl, reason: `không có kết quả (Page Title: "${pageTitle}")` });
+            return 0;
         }
 
         console.log(`      [${keyword}][DVIDS Bot] Đã moi được ${detailLinks.length} bài. Đang bóc file mp4/jpg...`);
@@ -293,6 +301,7 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
                                 }
                             } catch(e) {
                                 // Lỗi timeout trang embed thì bỏ qua
+                                logCrawlError({ source: 'DVIDS', keyword, url: embedLink, reason: `embed: ${e.message}` });
                             }
                         }
                     }
@@ -306,19 +315,25 @@ export async function fetchFromDvidsBot(keyword, type, targetDir, neededCount) {
                     const finalUrl = downloadUrl.startsWith('//') ? `https:${downloadUrl}` : downloadUrl;
                     if (await downloadMedia(finalUrl, targetDir, ext, proxy, keyword)) {
                         downloaded++;
+                        logCrawlInfo({ source: 'DVIDS/ok', keyword, url: finalUrl });
                         console.log(`\x1b[33m      [${keyword}][DVIDS Bot] 📥 ${type.toUpperCase()} bốc từ: ${finalUrl}\x1b[0m`);
                         console.log(`      [${keyword}][DVIDS Bot] ---> Đã bế thành công ${downloaded}/${neededCount} ${type}`);
                     }
                 }
             } catch (err) {
                 // Ignore lỗi timeout trang con
+                logCrawlError({ source: 'DVIDS', keyword, url: link, reason: err.message });
             }
         }
     } catch (error) {
         console.error(`      [${keyword}][DVIDS Lỗi Tổng] ${error.message}`);
+        logCrawlError({ source: 'DVIDS', keyword, url: searchUrl, reason: error.message });
     } finally {
         await browser.close();
     }
 
+    if (downloaded === 0) {
+        logCrawlError({ source: 'DVIDS', keyword, url: searchUrl, reason: 'kết thúc với 0 file tải được' });
+    }
     return downloaded;
 }

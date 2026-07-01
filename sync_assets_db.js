@@ -14,6 +14,7 @@ import { fetchFromApnewsBot } from './apnewsCrawler.js';
 import { fetchFromAlJazeeraBot } from './aljazeeraCrawler.js';
 import { fetchFromGoogleImageBot } from './googleImageCrawler.js';
 import { claimNextStockPath, readStockSource } from './stockNaming.js';
+import { logCrawlError, setLogProjectFromDir } from './crawlLogger.js';
 
 const MEDIA_DIR = process.env.MEDIA_DIR;
 const DB_PATH = path.join(process.env.DB_DIR, 'media_system.sqlite');
@@ -84,7 +85,7 @@ async function fetchFromPexels(keyword, type, targetDir, neededCount) {
                 if (!ok) { try { fs.unlinkSync(savePath); } catch (_) {} }
             }
         }
-    } catch (e) { console.log('Lỗi Pexels:', e.message); }
+    } catch (e) { console.log('Lỗi Pexels:', e.message); logCrawlError({ source: 'Pexels', keyword, url, reason: e.message }); }
     return downloaded;
 }
 
@@ -102,7 +103,7 @@ async function fetchFromPixabay(keyword, type, targetDir, neededCount) {
             let downloadUrl = type === 'video' && item.videos ? (item.videos.large.url || item.videos.medium.url) : item.largeImageURL;
             if (downloadUrl && await downloadFileHelper(downloadUrl, targetDir, type === 'video' ? 'mp4' : 'jpg')) downloaded++;
         }
-    } catch (e) { console.log('Lỗi Pixabay:', e.message); }
+    } catch (e) { console.log('Lỗi Pixabay:', e.message); logCrawlError({ source: 'Pixabay', keyword, url, reason: e.message }); }
     return downloaded;
 }
 
@@ -131,6 +132,7 @@ export async function runConcurrently(tasks, limit) {
 export async function fetchAndDownloadStock(keyword, type, targetDir, countPerSource = VIDEOS_PER_SOURCE) {
     if (!keyword) return 0;
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+    setLogProjectFromDir(targetDir); // log crawl tách theo dự án (suy ra từ đường dẫn thư mục)
 
     const providers = [
         { name: 'Storyblocks (Bot)', fetcher: fetchFromStoryblocksBot },
@@ -149,7 +151,7 @@ export async function fetchAndDownloadStock(keyword, type, targetDir, countPerSo
             const got = await withTimeout(p.fetcher(keyword, type, targetDir, countPerSource), 300000, p.name);
             if (got > 0) console.log(`      [${p.name}] Tải được: ${got}/${countPerSource} ${type}`);
             return typeof got === 'number' ? got : 0;
-        } catch (e) { console.log(`      [${p.name}] Lỗi: ${e.message}`); return 0; }
+        } catch (e) { console.log(`      [${p.name}] Lỗi: ${e.message}`); logCrawlError({ source: p.name, keyword, reason: e.message }); return 0; }
     });
 
     const results = await runConcurrently(tasks, 3);   // giới hạn provider chạy đồng thời -> tránh quá nhiều browser puppeteer/stealth cùng lúc (lỗi "main frame too early")

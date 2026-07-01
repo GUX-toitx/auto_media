@@ -84,7 +84,7 @@ app.get('/api/posts/:postId', async (req, res) => {
 
         // Lấy keywords và assets cho từng section của post
         const sections = {};
-        for (const section of ['hook', 'summary', 'conclusion']) {
+        for (const section of ['hook', 'summary', 'conclusion', 'thumbnail']) {
             const kws = await db.all('SELECT id, content, type FROM Keyword WHERE post_id = ? AND section = ? ORDER BY id', [post.id, section]);
             const assets = await db.all('SELECT id, type, selected, "order", file_path, duration, source_url FROM Asset WHERE post_id = ? AND section = ? AND hook_detail_id IS NULL AND summary_detail_id IS NULL AND conclusion_detail_id IS NULL ORDER BY selected DESC, COALESCE(source_id, id), id', [post.id, section]);
             const projectId = (post.project_id || '').replace(/_[a-z]{2}$/, '');
@@ -1246,6 +1246,68 @@ app.post('/api/ai-generate', async (req, res) => {
         await db.close();
         console.log(`[AI Generate] Done ${type} for paragraph ${paragraphId}`);
     })().catch(e => console.error('[AI Generate] Error:', e.message));
+});
+
+// API: Lưu số giây hiển thị cho 1 asset (ảnh) -> tính vào tổng giây gợi ý coverage
+app.post('/api/save-duration', async (req, res) => {
+    const { relativePath, duration } = req.body;
+    try {
+        const db = await getDb();
+        await db.run('UPDATE Asset SET duration = ? WHERE file_path = ?', [duration, relativePath]);
+        await db.close();
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API: Tạo thumbnail cho DỰ ÁN — đọc title + summary + hook rồi gọi Google Flow sinh ảnh 16:9
+app.post('/api/create-thumbnail', async (req, res) => {
+    const { videoId, postId, lang = 'en', count = 2, ratio = '16:9' } = req.body;
+    if (!videoId || !postId) return res.status(400).json({ error: 'Thiếu videoId/postId' });
+
+    const gid = 'thumbnail';
+    const subDir = '_thumbnail';
+    const targetDir = path.join(MEDIA_DIR, videoId, 'assets', subDir, gid);
+    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+    res.json({ success: true, message: 'Đang tạo thumbnail...' });
+
+    (async () => {
+        const db = await getDb();
+        const post = await db.get('SELECT title, summary, summary_vi, summary_target, hook, hook_vi FROM Post WHERE id = ?', [postId]);
+
+        // Gom nội dung mô tả chủ đề dự án: tiêu đề + summary + hook
+        const parts = [];
+        if (post?.title) parts.push(post.title);
+        const summary = post?.summary_target || post?.summary || post?.summary_vi;
+        if (summary) parts.push(summary);
+        const hookD = await db.all('SELECT content, content_vi FROM HookDetail WHERE post_id = ? ORDER BY "order" LIMIT 3', [postId]);
+        const hookText = hookD.map(h => h.content || h.content_vi).filter(Boolean).join(' ');
+        if (hookText) parts.push(hookText);
+        else if (post?.hook || post?.hook_vi) parts.push(post.hook || post.hook_vi);
+
+        const content = parts.join('. ').replace(/\s+/g, ' ').trim().slice(0, 1200);
+        const keyword = (post?.title || '').slice(0, 120) || 'thumbnail';
+
+        // Template prompt thumbnail: prompts/thumbnail/prompt_flow_<lang>.txt -> fallback prompts/image
+        const tFile = path.join(MEDIA_DIR, 'prompts', 'thumbnail', `prompt_flow_${lang}.txt`);
+        const tFallback = path.join(MEDIA_DIR, 'prompts', 'thumbnail', 'prompt_flow.txt');
+        const iFallback = path.join(MEDIA_DIR, 'prompts', 'image', `prompt_flow_${lang}.txt`);
+        const tpl = fs.existsSync(tFile) ? fs.readFileSync(tFile, 'utf8')
+            : fs.existsSync(tFallback) ? fs.readFileSync(tFallback, 'utf8')
+            : fs.existsSync(iFallback) ? fs.readFileSync(iFallback, 'utf8') : '';
+        const customPrompt = tpl.trim().replace(/\n/g, ' ');
+
+        const saved = await generateFlowImage(keyword, targetDir, content, 'image', count, lang, customPrompt, ratio, 'Frames', 'Lite', []);
+        for (const fileName of saved) {
+            const relativePath = path.join(videoId, 'assets', subDir, gid, fileName);
+            const exists = await db.get('SELECT id FROM Asset WHERE file_path = ?', [relativePath]);
+            if (!exists) {
+                await db.run('INSERT INTO Asset (post_id, section, type, selected, "order", file_path) VALUES (?, ?, ?, 0, 0, ?)', [postId, 'thumbnail', 'image', relativePath]);
+            }
+        }
+        await db.close();
+        console.log(`[Thumbnail] Done ${saved.length} ảnh cho post ${postId}`);
+    })().catch(e => console.error('[Thumbnail] Error:', e.message));
 });
 
 // API: Mở trình duyệt đăng nhập cho profile
