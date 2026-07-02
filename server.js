@@ -14,6 +14,7 @@ import multer from 'multer';
 import { getLanguages, getReferenceSpeakers, getDictionary, getMe, sendToQueue, getSentenceStatus, updateSentence, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio, getAllAudioUrls } from './handle_voice/audio_service.js';
 import { processAll } from './video_service.js';
 import { generateFlowImage } from './browser.js';
+import { translateTitle } from './translateTitle.js';
 import archiver from 'archiver';
 import { downloadWithYtDlp } from './ytDlpDownloader.js'; // Nhúng con Bot vừa viết
 
@@ -84,7 +85,7 @@ app.get('/api/posts/:postId', async (req, res) => {
 
         // Lấy keywords và assets cho từng section của post
         const sections = {};
-        for (const section of ['hook', 'summary', 'conclusion']) {
+        for (const section of ['hook', 'summary', 'conclusion', 'thumbnail']) {
             const kws = await db.all('SELECT id, content, type FROM Keyword WHERE post_id = ? AND section = ? ORDER BY id', [post.id, section]);
             const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE post_id = ? AND section = ? AND hook_detail_id IS NULL AND summary_detail_id IS NULL AND conclusion_detail_id IS NULL ORDER BY selected DESC, COALESCE(source_id, id), id', [post.id, section]);
             const projectId = (post.project_id || '').replace(/_[a-z]{2}$/, '');
@@ -1351,6 +1352,56 @@ app.post('/api/ai-generate', async (req, res) => {
         await db.close();
         console.log(`[AI Generate] Done ${type} for paragraph ${paragraphId}`);
     })().catch(e => console.error('[AI Generate] Error:', e.message));
+});
+
+// API: Tạo thumbnail cho DỰ ÁN — dùng Google Flow. Nội dung title = title dự án DỊCH sang ngôn ngữ đích.
+app.post('/api/create-thumbnail', async (req, res) => {
+    const { videoId, postId, lang = 'en', count = 2, ratio = '16:9' } = req.body;
+    if (!videoId || !postId) return res.status(400).json({ error: 'Thiếu videoId/postId' });
+
+    const gid = 'thumbnail';
+    const subDir = '_thumbnail';
+    const targetDir = path.join(MEDIA_DIR, videoId, 'assets', subDir, gid);
+    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+    res.json({ success: true, message: 'Đang tạo thumbnail (Flow)...' });
+
+    (async () => {
+        const db = await getDb();
+        const post = await db.get('SELECT title FROM Post WHERE id = ?', [postId]);
+        // 1 đoạn content NGÔN NGỮ ĐÍCH làm mốc để dịch title đúng ngôn ngữ
+        const ref = await db.get(
+            `SELECT content FROM ParagraphDetail WHERE content IS NOT NULL AND TRIM(content) <> '' AND paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?) ORDER BY id LIMIT 1`,
+            [postId]
+        );
+        await db.close();
+
+        const rawTitle = (post?.title || '').trim();
+        if (!rawTitle) { console.error('[Thumbnail] Dự án chưa có title'); return; }
+
+        // Dịch title dự án sang ngôn ngữ đích (theo content đích; fallback mã lang)
+        const titleTarget = await translateTitle(rawTitle, ref?.content || '', lang);
+
+        // Prompt Flow: PHẢI nêu rõ là TẠO ẢNH THUMBNAIL (không thì Flow hiểu là chủ đề rồi chat).
+        const tFile = path.join(MEDIA_DIR, 'prompts', 'thumbnail', `prompt_flow_${lang}.txt`);
+        const tFallback = path.join(MEDIA_DIR, 'prompts', 'thumbnail', 'prompt_flow.txt');
+        const fileTpl = fs.existsSync(tFile) ? fs.readFileSync(tFile, 'utf8')
+            : fs.existsSync(tFallback) ? fs.readFileSync(tFallback, 'utf8') : '';
+        const DEFAULT_TPL = 'Generate ONE image only: a bold, eye-catching 16:9 YouTube thumbnail. Do NOT chat, do NOT ask questions, do NOT write any script/plan/outline — output ONLY the image. Photorealistic, cinematic, dramatic lighting, high contrast, vivid colors, single strong focal subject. Build a scene fitting the headline below and render the headline text large, bold and readable on the image, kept fully inside the frame. Headline:';
+        const customPrompt = (fileTpl.trim() || DEFAULT_TPL).replace(/\n/g, ' ');
+
+        // content đưa vào Flow = title đã dịch
+        const saved = await generateFlowImage(titleTarget, targetDir, titleTarget, 'image', count, lang, customPrompt, ratio, 'Frames', 'Lite', []);
+
+        const db2 = await getDb();
+        for (const fileName of saved) {
+            const rel = path.join(videoId, 'assets', subDir, gid, fileName);
+            const exists = await db2.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
+            if (!exists) await db2.run('INSERT INTO Asset (post_id, section, type, selected, "order", file_path) VALUES (?, ?, ?, 0, 0, ?)', [postId, 'thumbnail', 'image', rel]);
+        }
+        await db2.close();
+        console.log(`[Thumbnail] Flow xong ${saved.length} ảnh | title đích: ${titleTarget}`);
+    })().catch(e => console.error('[Thumbnail] Error:', e.message));
 });
 
 // API: Mở trình duyệt đăng nhập cho profile
