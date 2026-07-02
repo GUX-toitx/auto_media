@@ -15,6 +15,7 @@ import { getLanguages, getReferenceSpeakers, getDictionary, getMe, sendToQueue, 
 import { processAll } from './video_service.js';
 import { generateFlowImage } from './browser.js';
 import { translateTitle } from './translateTitle.js';
+import { generateSeoTitle } from './seoTitle.js';
 import archiver from 'archiver';
 import { downloadWithYtDlp } from './ytDlpDownloader.js'; // Nhúng con Bot vừa viết
 
@@ -45,7 +46,7 @@ app.get('/api/posts', async (req, res) => {
 app.get('/api/posts/:postId', async (req, res) => {
     try {
         const db = await getDb();
-        const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, summary, summary_vi, summary_audio, summary_vi_audio, summary_target, summary_target_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio, intro_path, outro_path FROM Post WHERE id = ?', [req.params.postId]);
+        const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, summary, summary_vi, summary_audio, summary_vi_audio, summary_target, summary_target_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio, intro_path, outro_path, seo_title FROM Post WHERE id = ?', [req.params.postId]);
         if (!post) return res.status(404).json({ error: 'Post not found' });
 
         // HookDetail
@@ -1293,6 +1294,69 @@ app.post('/api/remove-intro-outro', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// API: Sinh TITLE (+ mô tả, tags) SEO theo prompts/seo/Nhiemvu.txt — nhúng nội dung sub dự án + tieudemau + thuatngu.
+// Phát hiện mã ngôn ngữ từ nội dung (chữ viết) — đáng tin hơn đuôi project_id
+function detectLang(text) {
+    const t = text || '';
+    if (/[぀-ゟ゠-ヿ]/.test(t)) return 'ja';   // kana -> Nhật
+    if (/[가-힯]/.test(t)) return 'ko';                 // hangul -> Hàn
+    if (/[฀-๿]/.test(t)) return 'th';                 // Thái
+    if (/[Ѐ-ӿ]/.test(t)) return 'ru';                 // Cyrillic -> Nga
+    if (/[؀-ۿ]/.test(t)) return 'ar';                 // Ả Rập
+    if (/[一-鿿]/.test(t)) return 'zh';                 // CJK (không kana) -> Trung
+    return null;
+}
+
+app.post('/api/generate-title', async (req, res) => {
+    const { postId } = req.body;
+    let { lang } = req.body;
+    if (!postId) return res.status(400).json({ error: 'Thiếu postId' });
+    try {
+        const db = await getDb();
+        const post0 = await db.get('SELECT project_id, target_lang FROM Post WHERE id = ?', [postId]);
+        const pick = (r) => (r.content || r.content_vi || '').trim();
+        const parts = [];
+        for (const tbl of ['HookDetail', 'SummaryDetail']) {
+            const rows = await db.all(`SELECT content, content_vi FROM ${tbl} WHERE post_id = ? ORDER BY "order"`, [postId]).catch(() => []);
+            rows.forEach(r => { const s = pick(r); if (s) parts.push(s); });
+        }
+        const paras = await db.all('SELECT id FROM Paragraph WHERE post_id = ? ORDER BY "order"', [postId]);
+        for (const p of paras) {
+            const ds = await db.all('SELECT content, content_vi FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"', [p.id]);
+            ds.forEach(r => { const s = pick(r); if (s) parts.push(s); });
+        }
+        const concl = await db.all(`SELECT content, content_vi FROM ConclusionDetail WHERE post_id = ? ORDER BY "order"`, [postId]).catch(() => []);
+        concl.forEach(r => { const s = pick(r); if (s) parts.push(s); });
+        await db.close();
+
+        const script = parts.join('\n');
+        if (!script.trim()) return res.status(400).json({ error: 'Dự án chưa có nội dung để sinh title' });
+
+        // Ngôn ngữ đích: ưu tiên target_lang lưu lúc tạo project -> phát hiện nội dung -> lang truyền -> đuôi project_id -> en
+        lang = post0?.target_lang || detectLang(script) || lang || (post0?.project_id || '').match(/_([a-z]{2})$/)?.[1] || 'en';
+        console.log(`[Title SEO] postId=${postId} lang=${lang} (target_lang=${post0?.target_lang || '-'})`);
+
+        const result = await generateSeoTitle(script, lang); // { target, vi }
+        // Lưu JSON để hiển thị lại 2 cột sau
+        const db2 = await getDb();
+        await db2.run('UPDATE Post SET seo_title = ? WHERE id = ?', [JSON.stringify(result), postId]);
+        await db2.close();
+        res.json({ success: true, result });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API: Lưu/sửa nội dung Title SEO thủ công
+app.post('/api/save-seo-title', async (req, res) => {
+    const { postId, value } = req.body;
+    if (!postId) return res.status(400).json({ error: 'Thiếu postId' });
+    try {
+        const db = await getDb();
+        await db.run('UPDATE Post SET seo_title = ? WHERE id = ?', [value ?? null, postId]);
+        await db.close();
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // API: Tạo thumbnail cho DỰ ÁN — dùng Google Flow. Nội dung title = title dự án DỊCH sang ngôn ngữ đích.
 app.post('/api/create-thumbnail', async (req, res) => {
     const { videoId, postId, lang = 'en', count = 2, ratio = '16:9' } = req.body;
@@ -1691,6 +1755,8 @@ app.post('/api/capcut-render-status', (req, res) => {
         const db = await getDb();
         await db.run('ALTER TABLE Post ADD COLUMN intro_path TEXT DEFAULT NULL').catch(() => {});
         await db.run('ALTER TABLE Post ADD COLUMN outro_path TEXT DEFAULT NULL').catch(() => {});
+        await db.run('ALTER TABLE Post ADD COLUMN seo_title TEXT DEFAULT NULL').catch(() => {});
+        await db.run('ALTER TABLE Post ADD COLUMN target_lang TEXT DEFAULT NULL').catch(() => {});
         await db.close();
     } catch (_) {}
 })();

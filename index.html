@@ -75,6 +75,7 @@
                         <button @click="showMediaMenu = !showMediaMenu" class="bg-teal-600 hover:bg-teal-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎨 Media ▾<span v-if="activePost.intro_path || activePost.outro_path" class="ml-1 inline-block w-2 h-2 rounded-full bg-green-400 align-middle"></span></button>
                         <div v-show="showMediaMenu" class="absolute top-full left-0 mt-1 flex flex-col gap-1 z-50 min-w-[220px] bg-gray-900 border border-gray-700 rounded-xl p-1.5 shadow-xl">
                             <button @click="createThumbnail" :disabled="thumbLoading" class="bg-teal-700 hover:bg-teal-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="thumbLoading" class="animate-spin inline-block mr-1">⏳</span>🖼️ Tạo Thumbnail</button>
+                            <button @click="generateTitleSeo" :disabled="titleModal.loading" class="bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="titleModal.loading" class="animate-spin inline-block mr-1">⏳</span>📝 Title SEO</button>
                             <button @click="openIntroOutroModal" class="bg-teal-800 hover:bg-teal-700 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🎞️ Intro/Outro<span v-if="activePost.intro_path || activePost.outro_path" class="ml-1 inline-block w-2 h-2 rounded-full bg-green-400 align-middle"></span></button>
                             <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-700 hover:bg-orange-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}</button>
                         </div>
@@ -96,6 +97,29 @@
             </header>
 
             <div class="space-y-4 mt-[180px]">
+                <!-- Title SEO (lưu DB, toggle đóng/mở, 2 cột VI | đích) -->
+                <div v-if="activePost.seo_title" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3">
+                    <div class="flex items-center gap-2 cursor-pointer select-none" @click="seoTitleOpen = !seoTitleOpen">
+                        <span class="text-[11px] font-black uppercase tracking-widest text-sky-400">📝 Title SEO</span>
+                        <span class="text-[10px] text-gray-500">{{ seoTitleOpen ? '▼ thu gọn' : '▶ mở (nội dung dài)' }}</span>
+                    </div>
+                    <div v-show="seoTitleOpen" class="grid grid-cols-2 gap-2 mt-2">
+                        <div class="space-y-1">
+                            <div class="flex items-center gap-2">
+                                <span class="text-[10px] font-bold text-gray-400">🇻🇳 Tiếng Việt (đối chiếu)</span>
+                                <button @click="copyText(seoParsed.vi)" class="ml-auto text-[9px] font-bold px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-white">📋</button>
+                            </div>
+                            <textarea readonly class="w-full h-72 bg-gray-950 border border-gray-800 rounded-lg p-3 text-[12px] text-gray-300 leading-relaxed font-mono resize-y outline-none">{{ seoParsed.vi }}</textarea>
+                        </div>
+                        <div class="space-y-1">
+                            <div class="flex items-center gap-2">
+                                <span class="text-[10px] font-bold text-gray-400">🌍 Ngôn ngữ đích (dùng để đăng)</span>
+                                <button @click="copyText(seoParsed.target)" class="ml-auto text-[9px] font-bold px-2 py-0.5 rounded bg-sky-700 hover:bg-sky-600 text-white">📋 Copy</button>
+                            </div>
+                            <textarea readonly class="w-full h-72 bg-gray-950 border border-sky-900/50 rounded-lg p-3 text-[12px] text-gray-200 leading-relaxed font-mono resize-y outline-none">{{ seoParsed.target }}</textarea>
+                        </div>
+                    </div>
+                </div>
                 <!-- Thumbnail dự án -->
                 <div v-if="(activePost.sections?.thumbnail?.images || []).length" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3">
                     <div class="flex items-center gap-2 mb-2">
@@ -1290,6 +1314,25 @@
                     {{ uploadModal.uploading ? 'Đang tải...' : `🚀 Tải lên (${uploadModal.files.length})` }}
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- TITLE SEO MODAL -->
+    <div v-if="titleModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50" @click.self="titleModal.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[720px] max-w-[92vw] space-y-4">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xl font-black text-white">📝 Title SEO (Nhiemvu.txt)</h3>
+                <button @click="titleModal.open = false" class="text-gray-500 hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+            <div v-if="titleModal.loading" class="text-center text-sky-400 text-sm font-bold py-10"><span class="animate-spin inline-block mr-2 text-2xl">⏳</span>Đang sinh title từ nội dung dự án + tài liệu SEO...</div>
+            <template v-else>
+                <textarea readonly class="w-full h-[52vh] bg-gray-950 border border-gray-800 rounded-lg p-3 text-[12px] text-gray-200 leading-relaxed font-mono resize-none outline-none">{{ titleModal.result }}</textarea>
+                <div class="flex justify-end gap-2">
+                    <button @click="copyTitleResult" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-sky-700 hover:bg-sky-600 text-white">📋 Copy</button>
+                    <button @click="generateTitleSeo" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-300">🔄 Tạo lại</button>
+                    <button @click="titleModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-400">Đóng</button>
+                </div>
+            </template>
         </div>
     </div>
 
@@ -2559,6 +2602,53 @@ createApp({
             } catch (e) { showToast('❌ ' + e.message); }
         }
 
+        // ===== Title SEO (Nhiemvu.txt + nội dung sub) — lưu DB + hiển thị collapsible =====
+        const titleModal = ref({ open: false, loading: false, result: '' });
+        const seoTitleOpen = ref(false);
+        // Parse seo_title (JSON {target, vi}) -> 2 cột; nếu là text cũ thì coi là target
+        const seoParsed = computed(() => {
+            const s = activePost.value?.seo_title;
+            if (!s) return { vi: '', target: '' };
+            try { const o = JSON.parse(s); if (o && typeof o === 'object' && ('target' in o || 'vi' in o)) return { vi: o.vi || '', target: o.target || '' }; } catch (_) { }
+            return { vi: '', target: s };
+        });
+        async function generateTitleSeo() {
+            if (!activePost.value) return;
+            titleModal.value = { open: true, loading: true, result: '' };
+            try {
+                const lang = activePost.value?.project_id?.match(/_([a-z]{2})$/)?.[1] || 'en';
+                const res = await fetch('/api/generate-title', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ postId: activePostId.value, lang })
+                });
+                const r = await res.json();
+                if (!res.ok || r.error) throw new Error(r.error || 'Lỗi sinh title');
+                // r.result = { target, vi } -> lưu JSON để khối 2 cột parse
+                activePost.value.seo_title = JSON.stringify(r.result || {});
+                seoTitleOpen.value = true;
+                titleModal.value.open = false;   // đóng modal, xem ở khối 2 cột trên màn hình
+                showToast('✅ Đã tạo Title SEO (VI + đích)');
+            } catch (e) {
+                titleModal.value.result = '❌ ' + e.message;
+                showToast('❌ ' + e.message, 6000);
+            } finally {
+                titleModal.value.loading = false;
+            }
+        }
+        function copyTitleResult() { copyText(titleModal.value.result); }
+        function copyText(text) {
+            navigator.clipboard?.writeText(text || '').then(() => showToast('📋 Đã copy'));
+        }
+        // Lưu chỉnh sửa Title SEO (textarea @blur)
+        async function saveSeoTitle(e) {
+            const value = e.target.value;
+            if (value === (activePost.value.seo_title || '')) return;
+            activePost.value.seo_title = value;
+            try {
+                await fetch('/api/save-seo-title', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: activePostId.value, value }) });
+            } catch (err) { showToast('❌ ' + err.message); }
+        }
+
         async function createThumbnail() {
             if (!activePost.value) return;
             const lang = activePost.value?.project_id?.match(/_([a-z]{2})$/)?.[1] || 'en';
@@ -3773,6 +3863,13 @@ createApp({
             thumbLoading,
             createThumbnail,
             selectThumbnail,
+            titleModal,
+            generateTitleSeo,
+            copyTitleResult,
+            seoTitleOpen,
+            seoParsed,
+            saveSeoTitle,
+            copyText,
             introOutroModal,
             openIntroOutroModal,
             uploadIntroOutro,

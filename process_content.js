@@ -741,9 +741,10 @@ async function saveToDb(projectId, result) {
     const conclusionVi = result.conclusion_sentences?.map(s => s.vi).filter(Boolean).join(' ') || '';
     const conclusionTarget = result.conclusion_sentences?.map(s => s.en).filter(Boolean).join(' ') || '';
     
+    await db.run('ALTER TABLE Post ADD COLUMN target_lang TEXT DEFAULT NULL').catch(() => {}); // self-heal
     await db.run(
-        'UPDATE Post SET title = ?, hook = ?, hook_vi = ?, summary_vi = ?, summary_target = ?, conclusion_vi = ?, conclusion_target = ? WHERE id = ?',
-        [stripLinks(result.title), stripLinks(hookTarget), stripLinks(hookVi),
+        'UPDATE Post SET title = ?, target_lang = ?, hook = ?, hook_vi = ?, summary_vi = ?, summary_target = ?, conclusion_vi = ?, conclusion_target = ? WHERE id = ?',
+        [stripLinks(result.title), targetLang, stripLinks(hookTarget), stripLinks(hookVi),
          stripLinks(summaryVi), stripLinks(summaryTarget),
          stripLinks(conclusionVi), stripLinks(conclusionTarget), postId]
     );
