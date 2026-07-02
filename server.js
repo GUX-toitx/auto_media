@@ -16,6 +16,7 @@ import { processAll } from './video_service.js';
 import { generateFlowImage } from './browser.js';
 import { translateTitle } from './translateTitle.js';
 import { generateSeoTitle } from './seoTitle.js';
+import { generateThumbnailFlowPrompt } from './thumbnailPrompt.js';
 import archiver from 'archiver';
 import { downloadWithYtDlp } from './ytDlpDownloader.js'; // Nhúng con Bot vừa viết
 
@@ -1358,44 +1359,64 @@ app.post('/api/save-seo-title', async (req, res) => {
 });
 
 // API: Tạo thumbnail cho DỰ ÁN — dùng Google Flow. Nội dung title = title dự án DỊCH sang ngôn ngữ đích.
-app.post('/api/create-thumbnail', async (req, res) => {
-    const { videoId, postId, lang = 'en', count = 2, ratio = '16:9' } = req.body;
-    if (!videoId || !postId) return res.status(400).json({ error: 'Thiếu videoId/postId' });
+app.post('/api/create-thumbnail', upload.single('refImage'), async (req, res) => {
+    const { videoId, postId, lang = 'en', ratio = '16:9' } = req.body;
+    const count = parseInt(req.body.count, 10) || 1; // multipart -> string
+    if (!videoId || !postId) { if (req.file) try { fs.unlinkSync(req.file.path); } catch (_) {} return res.status(400).json({ error: 'Thiếu videoId/postId' }); }
 
     const gid = 'thumbnail';
     const subDir = '_thumbnail';
     const targetDir = path.join(MEDIA_DIR, videoId, 'assets', subDir, gid);
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
+    // Ảnh mẫu tham chiếu (tùy chọn) -> lưu cạnh thumbnail, truyền vào Flow để tái tạo đúng nhân vật
+    let refImagePath = null;
+    if (req.file) {
+        const ext = (path.extname(req.file.originalname) || '.jpg').toLowerCase();
+        refImagePath = path.join(targetDir, `_ref_${Date.now()}${ext}`);
+        try { fs.renameSync(req.file.path, refImagePath); } catch (_) { try { fs.copyFileSync(req.file.path, refImagePath); fs.unlinkSync(req.file.path); } catch (__) { refImagePath = null; } }
+    }
+
     res.json({ success: true, message: 'Đang tạo thumbnail (Flow)...' });
 
     (async () => {
         const db = await getDb();
-        const post = await db.get('SELECT title FROM Post WHERE id = ?', [postId]);
-        // 1 đoạn content NGÔN NGỮ ĐÍCH làm mốc để dịch title đúng ngôn ngữ
-        const ref = await db.get(
-            `SELECT content FROM ParagraphDetail WHERE content IS NOT NULL AND TRIM(content) <> '' AND paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?) ORDER BY id LIMIT 1`,
-            [postId]
-        );
+        const post = await db.get('SELECT title, target_lang, project_id FROM Post WHERE id = ?', [postId]);
+        // Gom nội dung target (content) để (a) phát hiện ngôn ngữ, (b) cho GPT dựng cảnh khớp chủ đề
+        const pick = (r) => (r.content || r.content_vi || '').trim();
+        const parts = [];
+        const paras = await db.all('SELECT id FROM Paragraph WHERE post_id = ? ORDER BY "order"', [postId]);
+        for (const p of paras) {
+            const ds = await db.all('SELECT content, content_vi FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"', [p.id]);
+            ds.forEach(r => { const s = pick(r); if (s) parts.push(s); });
+        }
         await db.close();
+        const script = parts.join('\n');
 
         const rawTitle = (post?.title || '').trim();
-        if (!rawTitle) { console.error('[Thumbnail] Dự án chưa có title'); return; }
+        if (!rawTitle && !script.trim()) { console.error('[Thumbnail] Dự án chưa có title/nội dung'); return; }
 
-        // Dịch title dự án sang ngôn ngữ đích (theo content đích; fallback mã lang)
-        const titleTarget = await translateTitle(rawTitle, ref?.content || '', lang);
+        // Ngôn ngữ đích: target_lang -> phát hiện nội dung -> lang truyền -> đuôi project_id -> en
+        const tlang = post?.target_lang || detectLang(script) || lang || (post?.project_id || '').match(/_([a-z]{2})$/)?.[1] || 'en';
+        console.log(`[Thumbnail] postId=${postId} lang=${tlang}`);
 
-        // Prompt Flow: PHẢI nêu rõ là TẠO ẢNH THUMBNAIL (không thì Flow hiểu là chủ đề rồi chat).
-        // Ưu tiên file override dưới MEDIA_DIR nếu có, không thì dùng lệnh mặc định chi tiết dưới đây.
-        const tFile = path.join(MEDIA_DIR, 'prompts', 'thumbnail', `prompt_flow_${lang}.txt`);
-        const tFallback = path.join(MEDIA_DIR, 'prompts', 'thumbnail', 'prompt_flow.txt');
-        const fileTpl = fs.existsSync(tFile) ? fs.readFileSync(tFile, 'utf8')
-            : fs.existsSync(tFallback) ? fs.readFileSync(tFallback, 'utf8') : '';
-        const DEFAULT_TPL = 'Generate ONE image only: a bold, eye-catching 16:9 YouTube thumbnail. Do NOT chat, do NOT ask questions, do NOT write any script/plan/outline — output ONLY the image. Photorealistic, cinematic, dramatic lighting, high contrast, vivid colors, single strong focal subject. Build a scene fitting the headline below and render the headline text large, bold and readable on the image, kept fully inside the frame. Headline:';
-        const customPrompt = (fileTpl.trim() || DEFAULT_TPL).replace(/\n/g, ' ');
+        const hasReference = !!refImagePath;
+        if (hasReference) console.log(`[Thumbnail] Dùng ảnh mẫu: ${path.basename(refImagePath)}`);
 
-        // content đưa vào Flow = title đã dịch
-        const saved = await generateFlowImage(titleTarget, targetDir, titleTarget, 'image', count, lang, customPrompt, ratio, 'Frames', 'Lite', []);
+        // GPT phỏng theo MẪU style -> prompt Flow chi tiết (cảnh khớp chủ đề + 3 dòng tiêu đề màu)
+        let richPrompt;
+        try {
+            richPrompt = await generateThumbnailFlowPrompt({ title: rawTitle, script, lang: tlang, hasReference });
+        } catch (e) {
+            console.error('[Thumbnail] GPT prompt lỗi, fallback prompt cơ bản:', e.message);
+            const titleTarget = await translateTitle(rawTitle, script.slice(0, 500), tlang).catch(() => rawTitle);
+            richPrompt = `A bold, cinematic 16:9 YouTube thumbnail with dramatic lighting and high contrast${hasReference ? ', featuring the exact person from the uploaded reference photo (keep their face/likeness identical)' : ''}. Render this headline text large and bold on the image: "${titleTarget}".`;
+        }
+
+        // Ép rõ là TẠO ẢNH (chống Flow chuyển sang chat)
+        const customPrompt = 'Generate ONE image only: a 16:9 YouTube thumbnail. Do NOT chat, do NOT ask questions, do NOT write any script/plan — output ONLY the image.';
+        const refs = hasReference ? [refImagePath] : [];
+        const saved = await generateFlowImage('thumbnail', targetDir, richPrompt, 'image', count, tlang, customPrompt, ratio, 'Frames', 'Lite', refs);
 
         const db2 = await getDb();
         for (const fileName of saved) {
@@ -1404,8 +1425,9 @@ app.post('/api/create-thumbnail', async (req, res) => {
             if (!exists) await db2.run('INSERT INTO Asset (post_id, section, type, selected, "order", file_path) VALUES (?, ?, ?, 0, 0, ?)', [postId, 'thumbnail', 'image', rel]);
         }
         await db2.close();
-        console.log(`[Thumbnail] Flow xong ${saved.length} ảnh | title đích: ${titleTarget}`);
-    })().catch(e => console.error('[Thumbnail] Error:', e.message));
+        if (refImagePath) try { fs.unlinkSync(refImagePath); } catch (_) {} // dọn ảnh mẫu tạm
+        console.log(`[Thumbnail] Flow xong ${saved.length} ảnh (prompt style split-screen)`);
+    })().catch(e => { console.error('[Thumbnail] Error:', e.message); if (refImagePath) try { fs.unlinkSync(refImagePath); } catch (_) {} });
 });
 
 // API: Mở trình duyệt đăng nhập cho profile

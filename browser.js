@@ -137,6 +137,25 @@ function getRandomProxy() {
 
 export async function getBrowser(profileDir, proxy) {
     const userDataDir = profileDir || path.join(SETTING_DIR, 'chrome-profile');
+    // Dọn khoá Singleton CHỈ khi nó mồ côi (chromium đã bị kill để lại) -> tránh lỗi
+    // "Failed to create a ProcessSingleton ... SingletonLock: File exists".
+    // KHÔNG xoá nếu profile đang được 1 chromium SỐNG dùng thật (tránh hỏng profile).
+    try {
+        const lockPath = path.join(userDataDir, 'SingletonLock');
+        // SingletonLock là symlink dạng "hostname-PID"; PID chết -> mồ côi -> xoá được.
+        const target = fs.readlinkSync(lockPath); // ném nếu không tồn tại / không phải symlink
+        const pid = parseInt(target.split('-').pop(), 10);
+        let alive = false;
+        if (pid > 0) { try { process.kill(pid, 0); alive = true; } catch { alive = false; } }
+        if (!alive) {
+            for (const lock of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+                try { fs.rmSync(path.join(userDataDir, lock), { force: true }); } catch {}
+            }
+            console.log(`[Flow] Dọn SingletonLock mồ côi (pid=${pid}) ở ${path.basename(userDataDir)}`);
+        } else {
+            console.warn(`[Flow] ⚠ Profile ${path.basename(userDataDir)} đang được chromium sống (pid=${pid}) dùng — không dọn lock.`);
+        }
+    } catch {}
     const resolvedProxy = proxy || getRandomProxy();
     const options = {
         executablePath: CHROME_PATH,
@@ -157,7 +176,10 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
         const raw = fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf8') : fs.existsSync(fallbackFile) ? fs.readFileSync(fallbackFile, 'utf8') : '';
         promptTemplate = raw.trim().replace(/\n/g, ' ');
     }
-    const fullPrompt = promptTemplate ? `${promptTemplate} ${content}` : content || keyword;
+    // QUAN TRỌNG: ô nhập của Flow coi mỗi Enter (\n) là GỬI 1 lệnh -> phải gộp xuống dòng thành khoảng trắng,
+    // nếu không prompt nhiều dòng sẽ bị gửi từng dòng một (spam).
+    const fullPrompt = (promptTemplate ? `${promptTemplate} ${content}` : content || keyword)
+        .replace(/\s*\n\s*/g, ' ').replace(/[ \t]{2,}/g, ' ').trim();
     if (!fs.existsSync(saveDirPath)) fs.mkdirSync(saveDirPath, { recursive: true });
 
     // Xoay vòng profile: thử lần lượt tới khi gặp profile CÒN đăng nhập.
@@ -257,6 +279,31 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
             // Đóng modal bằng click ra ngoài
             await page.mouse.click(10, 10);
             await page.waitForTimeout(500);
+        }
+
+        // Image mode: upload ẢNH MẪU tham chiếu (nếu có) để AI tái tạo đúng nhân vật trong ảnh mẫu.
+        if (type === 'image' && selectedImages.length) {
+            const existing = selectedImages.filter(p => fs.existsSync(p));
+            if (existing.length) {
+                console.log(`[Flow] Upload ${existing.length} ảnh mẫu tham chiếu...`);
+                let fileInput = page.locator('input[type=file]');
+                if (!(await fileInput.count())) {
+                    // Chưa có input file -> click nút "thêm ảnh" để lộ ra
+                    const addBtn = page.locator('button:has(i.google-symbols)')
+                        .filter({ hasText: /add_photo_alternate|add_photo|image|add|attach/i }).first();
+                    if (await addBtn.count()) { await addBtn.click({ force: true }).catch(() => {}); await page.waitForTimeout(800); }
+                    fileInput = page.locator('input[type=file]');
+                }
+                if (await fileInput.count()) {
+                    await fileInput.first().setInputFiles(existing);
+                    const agreeBtn = page.locator('button', { hasText: 'I agree' });
+                    if (await agreeBtn.count()) await agreeBtn.first().click().catch(() => {});
+                    await page.waitForTimeout(4000);
+                    console.log(`[Flow] ✅ Đã upload ${existing.length} ảnh mẫu tham chiếu`);
+                } else {
+                    console.warn('[Flow] ⚠ Không tìm thấy input file để upload ảnh mẫu -> tạo không có ảnh mẫu');
+                }
+            }
         }
 
         // Nhập prompt

@@ -1,0 +1,10 @@
+TEXT & COMPOSITION STYLE (giữ nguyên cho mọi thumbnail — phần cảnh do nội dung quyết định):
+
+- Overall: a dramatic, high-contrast, cinematic 16:9 YouTube thumbnail. Moody, ominous lighting with dramatic light breaking through dark, stormy clouds.
+- Composition: a distinct SPLIT-SCREEN — on one side an extreme close-up portrait of the REAL leader/figure central to the topic; on the other side the scene/landscape, with the stacked title text overlaid on the clear side.
+- Title text: Large, bold, heavy, rugged, multi-layered text STACKED vertically, mirroring this exact structure, font style and color usage:
+  · Top line: Large, bold, rough YELLOW text with distressed texture.
+  · Middle line: Large, bold, rough BLOOD-RED text with distressed texture.
+  · Bottom line: WHITE text on a textured, dark-red banner background.
+- Example of the text block (structure only — REPLACE the words with lines derived from THIS video):
+  Top line (rough yellow, distressed): '米国が力尽きる' (America is Exhausted); Middle line (rough blood-red, distressed): 'エネルギーが消える' (Energy is Vanishing); Bottom line (white on dark-red banner): '隠された破滅' (Hidden Ruin).

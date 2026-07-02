@@ -74,7 +74,14 @@
                     <div class="relative">
                         <button @click="showMediaMenu = !showMediaMenu" class="bg-teal-600 hover:bg-teal-500 px-6 py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎨 Media ▾<span v-if="activePost.intro_path || activePost.outro_path" class="ml-1 inline-block w-2 h-2 rounded-full bg-green-400 align-middle"></span></button>
                         <div v-show="showMediaMenu" class="absolute top-full left-0 mt-1 flex flex-col gap-1 z-50 min-w-[220px] bg-gray-900 border border-gray-700 rounded-xl p-1.5 shadow-xl">
-                            <button @click="createThumbnail" :disabled="thumbLoading" class="bg-teal-700 hover:bg-teal-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="thumbLoading" class="animate-spin inline-block mr-1">⏳</span>🖼️ Tạo Thumbnail</button>
+                            <button @click="createThumbnail" :disabled="thumbLoading" class="bg-teal-700 hover:bg-teal-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="thumbLoading" class="animate-spin inline-block mr-1">⏳</span>🖼️ Tạo Thumbnail<span v-if="thumbRefFile" class="ml-1 text-[9px] normal-case text-teal-300">(theo ảnh mẫu)</span></button>
+                            <label class="px-4 py-1.5 rounded-lg text-[10px] font-bold text-gray-400 cursor-pointer hover:bg-gray-800 flex items-center gap-1">
+                                <span>🖼️ Ảnh mẫu (tùy chọn):</span>
+                                <input type="file" accept="image/*" @change="onThumbRefPick" class="hidden">
+                                <span v-if="!thumbRefFile" class="text-gray-500 underline">chọn ảnh</span>
+                                <span v-else class="text-teal-300 truncate max-w-[110px]">{{ thumbRefFile.name }}</span>
+                                <button v-if="thumbRefFile" @click.prevent.stop="clearThumbRef" class="text-red-400 hover:text-red-300 ml-auto">✕</button>
+                            </label>
                             <button @click="generateTitleSeo" :disabled="titleModal.loading" class="bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="titleModal.loading" class="animate-spin inline-block mr-1">⏳</span>📝 Title SEO</button>
                             <button @click="openIntroOutroModal" class="bg-teal-800 hover:bg-teal-700 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🎞️ Intro/Outro<span v-if="activePost.intro_path || activePost.outro_path" class="ml-1 inline-block w-2 h-2 rounded-full bg-green-400 align-middle"></span></button>
                             <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-700 hover:bg-orange-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}</button>
@@ -2649,19 +2656,31 @@ createApp({
             } catch (err) { showToast('❌ ' + err.message); }
         }
 
+        const thumbRefFile = ref(null); // ảnh mẫu tùy chọn để AI tái tạo đúng nhân vật
+        function onThumbRefPick(event) {
+            thumbRefFile.value = event.target.files?.[0] || null;
+        }
+        function clearThumbRef() {
+            thumbRefFile.value = null;
+        }
         async function createThumbnail() {
             if (!activePost.value) return;
             const lang = activePost.value?.project_id?.match(/_([a-z]{2})$/)?.[1] || 'en';
             thumbLoading.value = true;
-            showToast('🖼️ Đang đọc nội dung dự án & tạo thumbnail qua Google Flow...', 5000);
+            const hasRef = !!thumbRefFile.value;
+            showToast(hasRef ? '🖼️ Đang tạo thumbnail theo ẢNH MẪU qua Google Flow...' : '🖼️ Đang đọc nội dung dự án & tạo thumbnail qua Google Flow...', 5000);
             try {
-                const res = await fetch('/api/create-thumbnail', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoId: activeProjectId.value, postId: activePostId.value, lang, count: 2, ratio: '16:9' })
-                });
+                const fd = new FormData();
+                fd.append('videoId', activeProjectId.value);
+                fd.append('postId', activePostId.value);
+                fd.append('lang', lang);
+                fd.append('count', '1');
+                fd.append('ratio', '16:9');
+                if (hasRef) fd.append('refImage', thumbRefFile.value);
+                const res = await fetch('/api/create-thumbnail', { method: 'POST', body: fd });
                 if (!res.ok) { const r = await res.json().catch(() => ({})); throw new Error(r.error || 'Lỗi tạo thumbnail'); }
                 showToast('✅ Đang tạo ngầm — reload sau vài phút để xem thumbnail!', 6000);
+                clearThumbRef();
             } catch (e) {
                 alert('❌ ' + e.message);
             } finally {
@@ -3863,6 +3882,9 @@ createApp({
             thumbLoading,
             createThumbnail,
             selectThumbnail,
+            thumbRefFile,
+            onThumbRefPick,
+            clearThumbRef,
             titleModal,
             generateTitleSeo,
             copyTitleResult,
