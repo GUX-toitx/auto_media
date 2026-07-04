@@ -443,6 +443,15 @@ app.post('/api/download-voice', async (req, res) => {
             }
         }
 
+        // Lips sync outputs (nếu đã chạy) -> thư mục lips_sync/ trong zip
+        const lipsProjectId = post.project_id.replace(/_[a-z]{2}$/, '');
+        const lipsDir = path.join(MEDIA_DIR, lipsProjectId, 'lips_sync');
+        if (fs.existsSync(lipsDir)) {
+            for (const f of fs.readdirSync(lipsDir)) {
+                if (f.toLowerCase().endsWith('.mp4')) archive.file(path.join(lipsDir, f), { name: `lips_sync/${f}` });
+            }
+        }
+
         await db.close();
         await archive.finalize();
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1401,7 +1410,7 @@ app.post('/api/create-thumbnail', upload.single('refImage'), async (req, res) =>
         console.log(`[Thumbnail] postId=${postId} lang=${tlang}`);
 
         const hasReference = !!refImagePath;
-        if (hasReference) console.log(`[Thumbnail] Dùng ảnh mẫu: ${path.basename(refImagePath)}`);
+        if (hasReference) console.log(`[Thumbnail] Dùng ảnh mẫu (upload vào Flow): ${path.basename(refImagePath)}`);
 
         // GPT phỏng theo MẪU style -> prompt Flow chi tiết (cảnh khớp chủ đề + 3 dòng tiêu đề màu)
         let richPrompt;
@@ -1413,8 +1422,9 @@ app.post('/api/create-thumbnail', upload.single('refImage'), async (req, res) =>
             richPrompt = `A bold, cinematic 16:9 YouTube thumbnail with dramatic lighting and high contrast${hasReference ? ', featuring the exact person from the uploaded reference photo (keep their face/likeness identical)' : ''}. Render this headline text large and bold on the image: "${titleTarget}".`;
         }
 
-        // Ép rõ là TẠO ẢNH (chống Flow chuyển sang chat)
-        const customPrompt = 'Generate ONE image only: a 16:9 YouTube thumbnail. Do NOT chat, do NOT ask questions, do NOT write any script/plan — output ONLY the image.';
+        // Ép rõ là TẠO ẢNH (chống Flow chuyển sang chat). Khi có ảnh mẫu: nhấn mạnh CHỈ mượn khuôn mặt, dựng cảnh MỚI.
+        const customPrompt = 'Generate ONE image only: a 16:9 YouTube thumbnail. Do NOT chat, do NOT ask questions, do NOT write any script/plan — output ONLY the image.'
+            + (hasReference ? ' IMPORTANT: the uploaded image is a FACE REFERENCE only — take just the person\'s facial identity from it and build a BRAND-NEW scene as described. Do NOT return, copy, or lightly edit the uploaded photo; the background, composition and title text MUST be newly generated.' : '');
         const refs = hasReference ? [refImagePath] : [];
         const saved = await generateFlowImage('thumbnail', targetDir, richPrompt, 'image', count, tlang, customPrompt, ratio, 'Frames', 'Lite', refs);
 
@@ -1503,6 +1513,147 @@ app.get('/api/get-prompt', (req, res) => {
     const fallbackFile = path.join(MEDIA_DIR, 'prompts', type || 'image', 'prompt_flow.txt');
     const raw = fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf8') : fs.existsSync(fallbackFile) ? fs.readFileSync(fallbackFile, 'utf8') : '';
     res.json({ prompt: raw.trim().replace(/\n/g, ' ') });
+});
+
+// ===== LIPS SYNC (proxy tới server local http://127.0.0.1:8010) =====
+const LIPS_SYNC_BASE = process.env.LIPS_SYNC_URL || 'http://127.0.0.1:8010';
+app.post('/api/lips-sync/jobs', async (req, res) => {
+    try {
+        const r = await globalThis.fetch(`${LIPS_SYNC_BASE}/jobs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(req.body || {}),
+        });
+        const data = await r.json();
+        res.status(r.status).json(data);
+    } catch (e) {
+        res.status(502).json({ error: 'Không kết nối được lips_sync server: ' + e.message });
+    }
+});
+app.get('/api/lips-sync/jobs/:id', async (req, res) => {
+    try {
+        const r = await globalThis.fetch(`${LIPS_SYNC_BASE}/jobs/${encodeURIComponent(req.params.id)}`);
+        const data = await r.json();
+        res.status(r.status).json(data);
+    } catch (e) {
+        res.status(502).json({ error: 'Không kết nối được lips_sync server: ' + e.message });
+    }
+});
+// Chạy lips_sync cho TỪNG CÂU của 1 post: tải mp3 mỗi câu, gửi job, output lưu vào <project>/lips_sync/
+app.post('/api/lips-sync/run-post', async (req, res) => {
+    try {
+        const { postId, videoPath, contentType: reqCt, force, guidanceScale } = req.body;
+        if (!postId || !videoPath) return res.status(400).json({ error: 'Thiếu postId hoặc videoPath' });
+        if (!fs.existsSync(videoPath)) return res.status(400).json({ error: 'Video không tồn tại: ' + videoPath });
+        const gs = Number(guidanceScale);
+        const guidance = Number.isFinite(gs) ? gs : 2.2;
+
+        const db = await getDb();
+        const post = await db.get('SELECT project_id, voice_content_type FROM Post WHERE id = ?', [postId]);
+        await db.close();
+        if (!post) return res.status(404).json({ error: 'Không tìm thấy post' });
+
+        const contentType = reqCt || post.voice_content_type || 'content';
+        const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
+        const outDir = path.join(MEDIA_DIR, projectId, 'lips_sync');
+        fs.mkdirSync(outDir, { recursive: true });
+
+        const audioList = await getAllAudioUrls(postId, contentType);
+        const jobs = [];
+        for (let i = 0; i < audioList.length; i++) {
+            const idx = i + 1;
+            const audioUrl = audioList[i].audio;
+            const audioPath = path.join(outDir, `${idx}.mp3`);
+            const outputPath = path.join(outDir, `${idx}.mp4`);
+            if (!audioUrl) { jobs.push({ index: idx, audioPath, outputPath, error: 'Không có audio' }); continue; }
+            // Bỏ qua câu đã có mp4 (trừ khi chạy lại từ đầu)
+            if (!force && fs.existsSync(outputPath)) {
+                jobs.push({ index: idx, audioPath, outputPath, status: 'done', skipped: true });
+                continue;
+            }
+            try {
+                const buf = await fetchBunnyAudio(audioUrl);
+                fs.writeFileSync(audioPath, buf);
+                const r = await globalThis.fetch(`${LIPS_SYNC_BASE}/jobs`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ video_path: videoPath, audio_path: audioPath, output_path: outputPath, guidance_scale: guidance }),
+                });
+                const data = await r.json();
+                if (!r.ok || data.error) { jobs.push({ index: idx, audioPath, outputPath, error: data.error || ('HTTP ' + r.status) }); continue; }
+                jobs.push({ index: idx, jobId: data.job_id, status: data.status || 'queued', audioPath, outputPath });
+            } catch (e) {
+                jobs.push({ index: idx, audioPath, outputPath, error: e.message });
+            }
+        }
+        res.json({ projectId, outDir, total: audioList.length, jobs });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Kiểm tra trạng thái nhiều job cùng lúc
+app.post('/api/lips-sync/status', async (req, res) => {
+    try {
+        const ids = Array.isArray(req.body?.jobIds) ? req.body.jobIds : [];
+        const out = {};
+        for (const id of ids) {
+            if (!id) continue;
+            try {
+                const r = await globalThis.fetch(`${LIPS_SYNC_BASE}/jobs/${encodeURIComponent(id)}`);
+                out[id] = await r.json();
+            } catch (e) { out[id] = { error: e.message }; }
+        }
+        res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Upload file lên server rồi trả về đường dẫn tuyệt đối để dùng làm input lips_sync
+app.post('/api/lips-sync/upload', upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'Thiếu file' });
+        const destDir = path.join(MEDIA_DIR, 'lips_sync_uploads');
+        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+        const ext = path.extname(req.file.originalname) || (req.body.kind === 'audio' ? '.mp3' : '.mp4');
+        const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+        const destPath = path.join(destDir, fileName);
+        fs.renameSync(req.file.path, destPath);
+        res.json({ path: destPath, name: req.file.originalname });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+// Duyệt file/thư mục trên máy server để chọn input (lấy đường dẫn tuyệt đối)
+app.get('/api/lips-sync/browse', (req, res) => {
+    try {
+        let dir = req.query.dir ? String(req.query.dir) : (process.env.HOME || process.cwd());
+        dir = path.resolve(dir);
+        if (!fs.existsSync(dir)) dir = process.env.HOME || process.cwd();
+        if (!fs.statSync(dir).isDirectory()) dir = path.dirname(dir);
+        const exts = (req.query.ext ? String(req.query.ext).split(',') : [])
+            .map(e => e.trim().toLowerCase()).filter(Boolean);
+        const entries = [];
+        for (const it of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (it.name.startsWith('.')) continue; // bỏ file/thư mục ẩn
+            const full = path.join(dir, it.name);
+            let isDir = it.isDirectory();
+            if (it.isSymbolicLink()) { try { isDir = fs.statSync(full).isDirectory(); } catch { continue; } }
+            if (isDir) { entries.push({ name: it.name, path: full, isDir: true }); continue; }
+            const ext = path.extname(it.name).slice(1).toLowerCase();
+            if (exts.length && !exts.includes(ext)) continue;
+            let size = 0; try { size = fs.statSync(full).size; } catch { }
+            entries.push({ name: it.name, path: full, isDir: false, size });
+        }
+        entries.sort((a, b) => (a.isDir === b.isDir) ? a.name.localeCompare(b.name) : (a.isDir ? -1 : 1));
+        const parent = path.dirname(dir);
+        res.json({ dir, parent: parent === dir ? null : parent, entries });
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+// Stream video output (nằm ngoài thư mục static) để preview, hỗ trợ tua (Range)
+app.get('/api/lips-sync/preview', (req, res) => {
+    const p = req.query.path;
+    if (!p || !fs.existsSync(p)) return res.status(404).send('Not found');
+    res.sendFile(path.resolve(p), (err) => {
+        if (err && !res.headersSent) res.status(404).send('Not found');
+    });
 });
 
 app.get('/', (req, res) => {

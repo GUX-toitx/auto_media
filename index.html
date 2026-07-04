@@ -85,6 +85,7 @@
                             <button @click="generateTitleSeo" :disabled="titleModal.loading" class="bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="titleModal.loading" class="animate-spin inline-block mr-1">⏳</span>📝 Title SEO</button>
                             <button @click="openIntroOutroModal" class="bg-teal-800 hover:bg-teal-700 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🎞️ Intro/Outro<span v-if="activePost.intro_path || activePost.outro_path" class="ml-1 inline-block w-2 h-2 rounded-full bg-green-400 align-middle"></span></button>
                             <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-700 hover:bg-orange-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}</button>
+                            <button @click="openLipsSyncModal" class="bg-pink-700 hover:bg-pink-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">👄 Lips Sync</button>
                         </div>
                     </div>
                     <div class="relative">
@@ -1382,6 +1383,104 @@
         </div>
     </div>
 
+    <!-- LIPS SYNC MODAL -->
+    <div v-if="lipsSyncModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50" @click.self="lipsSyncModal.open=false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-8 w-[620px] max-h-[90vh] overflow-y-auto space-y-5">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xl font-black text-white">👄 Lips Sync</h3>
+                <button @click="lipsSyncModal.open=false" class="text-gray-500 hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+            <p class="text-[11px] text-gray-400 leading-relaxed">Chọn <b>1 video</b> làm khuôn mặt. Hệ thống sẽ tự lặp qua <b>từng câu</b> (mp3) của post, tạo job lips_sync và lưu kết quả vào thư mục <b>lips_sync/</b> trong dự án (kèm khi tải Voice &amp; Media).</p>
+
+            <!-- Video input -->
+            <div class="space-y-2">
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Video (.mp4)</label>
+                <div class="flex gap-2">
+                    <input v-model="lipsSyncModal.videoPath" type="text" placeholder="/home/gux/.../input.mp4" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 focus:outline-none focus:border-pink-500">
+                    <button @click="openFileBrowser('video')" :disabled="lipsSyncModal.uploadingVideo" class="shrink-0 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 px-3 py-2 rounded-lg font-bold text-[11px] text-gray-200">📁 Chọn</button>
+                    <label class="shrink-0 bg-indigo-700 hover:bg-indigo-600 px-3 py-2 rounded-lg font-bold text-[11px] text-white cursor-pointer" :class="{'opacity-40 pointer-events-none': lipsSyncModal.uploadingVideo}">
+                        <span v-if="lipsSyncModal.uploadingVideo" class="animate-spin inline-block mr-1">⏳</span>⬆️ Upload
+                        <input type="file" accept="video/mp4" class="hidden" @change="uploadLipsSyncFile('video', $event)">
+                    </label>
+                </div>
+            </div>
+
+            <!-- Content type + guidance scale -->
+            <div class="flex gap-3">
+                <div class="flex-1 space-y-2">
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Ngôn ngữ audio</label>
+                    <div class="flex gap-2">
+                        <button @click="lipsSyncModal.contentType='content'" class="flex-1 py-2 rounded-lg text-[11px] font-black transition-colors" :class="lipsSyncModal.contentType==='content' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">🌍 Target</button>
+                        <button @click="lipsSyncModal.contentType='content_vi'" class="flex-1 py-2 rounded-lg text-[11px] font-black transition-colors" :class="lipsSyncModal.contentType==='content_vi' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">🇻🇳 Tiếng Việt</button>
+                    </div>
+                </div>
+                <div class="w-32 space-y-2">
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Guidance scale</label>
+                    <input v-model.number="lipsSyncModal.guidanceScale" type="number" step="0.1" min="0" placeholder="2.2" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 focus:outline-none focus:border-pink-500">
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2 flex-wrap">
+                <button @click="runLipsSync(false)" :disabled="lipsSyncModal.running || !lipsSyncModal.videoPath" class="bg-pink-700 hover:bg-pink-600 disabled:opacity-40 px-4 py-2.5 rounded-lg font-black text-[11px] uppercase tracking-widest text-white"><span v-if="lipsSyncModal.running" class="animate-spin inline-block mr-1">⏳</span>🚀 Chạy (câu còn thiếu)</button>
+                <button @click="runLipsSync(true)" :disabled="lipsSyncModal.running || !lipsSyncModal.videoPath" class="bg-orange-700 hover:bg-orange-600 disabled:opacity-40 px-4 py-2.5 rounded-lg font-black text-[11px] uppercase tracking-widest text-white" title="Ghi đè toàn bộ mp4">🔁 Chạy lại từ đầu</button>
+                <button @click="checkLipsSyncStatus" :disabled="!lipsSyncModal.jobs.length || lipsSyncModal.checking" class="bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-4 py-2.5 rounded-lg font-black text-[11px] uppercase tracking-widest text-white"><span v-if="lipsSyncModal.checking" class="animate-spin inline-block mr-1">⏳</span>🔄 Check status</button>
+                <span v-if="lipsSyncModal.jobs.length" class="text-[12px] text-gray-400 ml-auto">✅ {{ lipsSyncDone }}/{{ lipsSyncModal.jobs.length }} xong<span v-if="lipsSyncModal.polling" class="animate-pulse ml-1 text-yellow-400">•</span></span>
+            </div>
+
+            <!-- Jobs list -->
+            <div v-if="lipsSyncModal.jobs.length" class="border border-gray-800 rounded-lg divide-y divide-gray-800/60 max-h-56 overflow-y-auto">
+                <div v-for="j in lipsSyncModal.jobs" :key="j.index" class="flex items-center gap-2 px-3 py-2 text-[12px]">
+                    <span class="text-gray-500 w-10 shrink-0">#{{ j.index }}</span>
+                    <span class="font-black uppercase tracking-widest px-2 py-0.5 rounded text-[10px] shrink-0"
+                        :class="j.status==='done' ? 'bg-green-600 text-white' : j.error||j.status==='error' ? 'bg-red-600 text-white' : 'bg-yellow-600 text-white'">
+                        {{ j.error ? 'error' : (j.status || '...') }}
+                    </span>
+                    <span v-if="j.skipped" class="text-[9px] text-gray-500 shrink-0" title="Đã có mp4, bỏ qua">skip</span>
+                    <span v-if="j.error" class="text-red-400 truncate flex-1" :title="j.error">{{ j.error }}</span>
+                    <span v-else class="text-gray-500 font-mono truncate flex-1">{{ j.outputPath }}</span>
+                    <button v-if="j.status==='done'" @click="previewLipsSync(j)" class="shrink-0 bg-pink-700 hover:bg-pink-600 px-2 py-1 rounded font-bold text-[10px] text-white">▶️ Xem</button>
+                </div>
+            </div>
+
+            <!-- Preview -->
+            <div v-if="lipsSyncModal.previewPath" class="space-y-2">
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Preview</label>
+                <video :src="'/api/lips-sync/preview?path=' + encodeURIComponent(lipsSyncModal.previewPath)" controls autoplay class="w-full rounded-lg bg-black max-h-80"></video>
+            </div>
+
+            <div class="flex justify-end pt-1">
+                <button @click="lipsSyncModal.open=false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-400">Đóng</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- FILE BROWSER (chọn file trên server) -->
+    <div v-if="fileBrowser.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-[60]" @click.self="fileBrowser.open=false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[660px] max-h-[82vh] flex flex-col">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-lg font-black text-white">📁 Chọn {{ fileBrowser.label }}</h3>
+                <button @click="fileBrowser.open=false" class="text-gray-500 hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+            <div class="flex gap-2 mb-2">
+                <button @click="fileBrowser.parent && browseDir(fileBrowser.parent)" :disabled="!fileBrowser.parent" class="shrink-0 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 px-3 py-2 rounded-lg font-bold text-[12px] text-gray-200" title="Lên thư mục cha">⬆️</button>
+                <input v-model="fileBrowser.dir" @keyup.enter="browseDir(fileBrowser.dir)" type="text" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] font-mono text-gray-200 focus:outline-none focus:border-pink-500">
+                <button @click="browseDir(fileBrowser.dir)" class="shrink-0 bg-sky-700 hover:bg-sky-600 px-3 py-2 rounded-lg font-bold text-[12px] text-white">Đi</button>
+            </div>
+            <div class="flex-1 overflow-y-auto bg-gray-800/40 rounded-lg border border-gray-800 divide-y divide-gray-800/60 min-h-[240px]">
+                <div v-if="fileBrowser.loading" class="p-6 text-center text-gray-400 text-[12px]"><span class="animate-spin inline-block mr-1">⏳</span>Đang tải...</div>
+                <div v-else-if="!fileBrowser.entries.length" class="p-6 text-center text-gray-500 text-[12px]">Không có mục nào phù hợp.</div>
+                <button v-for="e in fileBrowser.entries" :key="e.path" @click="pickEntry(e)" class="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-700/50 transition-colors">
+                    <span>{{ e.isDir ? '📁' : (fileBrowser.ext === 'mp3' ? '🎵' : '🎬') }}</span>
+                    <span class="flex-1 text-[12px] truncate" :class="e.isDir ? 'text-sky-300 font-semibold' : 'text-gray-200'">{{ e.name }}</span>
+                    <span v-if="!e.isDir" class="text-[10px] text-gray-500 font-mono">{{ fmtBytes(e.size) }}</span>
+                </button>
+            </div>
+            <div class="flex justify-end pt-3">
+                <button @click="fileBrowser.open=false" class="px-5 py-2 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-400">Đóng</button>
+            </div>
+        </div>
+    </div>
+
     <!-- VOICE MODAL -->
     <div v-if="voiceModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl p-8 w-[420px] space-y-6">
@@ -2576,6 +2675,118 @@ createApp({
         const thumbLoading = ref(false);
 
         // ===== Intro / Outro =====
+        // ===== LIPS SYNC (lặp từng câu -> job, lưu vào lips_sync/ của dự án) =====
+        const lipsSyncModal = ref({ open: false, videoPath: '', contentType: 'content', guidanceScale: 2.2, jobs: [], previewPath: '', running: false, checking: false, polling: false, uploadingVideo: false });
+        const lipsSyncDone = computed(() => lipsSyncModal.value.jobs.filter(j => j.status === 'done').length);
+        async function uploadLipsSyncFile(kind, event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            lipsSyncModal.value.uploadingVideo = true;
+            try {
+                const fd = new FormData();
+                fd.append('file', file);
+                fd.append('kind', kind);
+                const res = await fetch('/api/lips-sync/upload', { method: 'POST', body: fd });
+                const r = await res.json();
+                if (!res.ok || r.error) { showToast('❌ ' + (r.error || 'Lỗi upload')); return; }
+                lipsSyncModal.value.videoPath = r.path;
+                showToast('✅ Đã upload ' + (r.name || file.name));
+            } catch (e) { showToast('❌ ' + e.message); }
+            finally { lipsSyncModal.value.uploadingVideo = false; event.target.value = ''; }
+        }
+        let lipsSyncPollTimer = null;
+        function stopLipsSyncPoll() { if (lipsSyncPollTimer) { clearInterval(lipsSyncPollTimer); lipsSyncPollTimer = null; } lipsSyncModal.value.polling = false; }
+        function openLipsSyncModal() {
+            stopLipsSyncPoll();
+            lipsSyncModal.value = { open: true, videoPath: lipsSyncModal.value.videoPath || '', contentType: 'content', guidanceScale: lipsSyncModal.value.guidanceScale ?? 2.2, jobs: [], previewPath: '', running: false, checking: false, polling: false, uploadingVideo: false };
+        }
+        async function runLipsSync(force = false) {
+            const m = lipsSyncModal.value;
+            if (!m.videoPath || !activePostId.value) return;
+            if (force && !confirm('Chạy lại lips sync từ đầu cho TẤT CẢ câu (ghi đè mp4 cũ)?')) return;
+            stopLipsSyncPoll();
+            m.running = true; m.jobs = []; m.previewPath = '';
+            try {
+                const res = await fetch('/api/lips-sync/run-post', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ postId: activePostId.value, videoPath: m.videoPath.trim(), contentType: m.contentType, guidanceScale: m.guidanceScale, force }),
+                });
+                const r = await res.json();
+                if (!res.ok || r.error) { showToast('❌ ' + (r.error || 'Lỗi chạy lips sync')); return; }
+                m.jobs = r.jobs || [];
+                const submitted = m.jobs.filter(j => j.jobId).length;
+                const skipped = m.jobs.filter(j => j.skipped).length;
+                showToast(`✅ Gửi ${submitted} job${skipped ? `, bỏ qua ${skipped} câu đã có mp4` : ''} → ${r.outDir}`);
+                if (m.jobs.some(j => j.jobId)) { m.polling = true; lipsSyncPollTimer = setInterval(checkLipsSyncStatus, 4000); }
+            } catch (e) { showToast('❌ ' + e.message); }
+            finally { m.running = false; }
+        }
+        async function checkLipsSyncStatus() {
+            const m = lipsSyncModal.value;
+            const ids = m.jobs.filter(j => j.jobId).map(j => j.jobId);
+            if (!ids.length) return;
+            m.checking = true;
+            try {
+                const res = await fetch('/api/lips-sync/status', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ jobIds: ids }),
+                });
+                const map = await res.json();
+                for (const j of m.jobs) {
+                    const s = j.jobId && map[j.jobId];
+                    if (!s) continue;
+                    j.status = s.status || j.status;
+                    if (s.output_path) j.outputPath = s.output_path;
+                    if (s.error) j.error = s.error;
+                }
+                const pending = m.jobs.filter(j => j.jobId && j.status !== 'done' && j.status !== 'error').length;
+                if (!pending) { stopLipsSyncPoll(); showToast('🎉 Lips sync hoàn tất!'); }
+            } catch (e) { showToast('❌ ' + e.message); }
+            finally { m.checking = false; }
+        }
+        function previewLipsSync(job) {
+            lipsSyncModal.value.previewPath = job.outputPath;
+        }
+
+        // ===== FILE BROWSER (chọn file trên server) =====
+        const fileBrowser = ref({ open: false, target: '', label: '', ext: '', dir: '', parent: null, entries: [], loading: false });
+        function fmtBytes(n) {
+            if (!n) return '';
+            if (n >= 1e9) return (n / 1e9).toFixed(1) + ' GB';
+            if (n >= 1e6) return (n / 1e6).toFixed(1) + ' MB';
+            if (n >= 1e3) return (n / 1e3).toFixed(0) + ' KB';
+            return n + ' B';
+        }
+        function openFileBrowser(target) {
+            const cfg = target === 'video' ? { ext: 'mp4', label: 'video (.mp4)' } : { ext: 'mp3', label: 'audio (.mp3)' };
+            const cur = target === 'video' ? lipsSyncModal.value.videoPath : lipsSyncModal.value.audioPath;
+            let startDir = '';
+            if (cur && cur.includes('/')) startDir = cur.slice(0, cur.lastIndexOf('/'));
+            fileBrowser.value = { open: true, target, ext: cfg.ext, label: cfg.label, dir: startDir, parent: null, entries: [], loading: false };
+            browseDir(startDir);
+        }
+        async function browseDir(dir) {
+            fileBrowser.value.loading = true;
+            try {
+                const q = new URLSearchParams({ ext: fileBrowser.value.ext });
+                if (dir) q.set('dir', dir);
+                const res = await fetch('/api/lips-sync/browse?' + q.toString());
+                const r = await res.json();
+                if (!res.ok || r.error) { showToast('❌ ' + (r.error || 'Lỗi mở thư mục')); return; }
+                fileBrowser.value.dir = r.dir;
+                fileBrowser.value.parent = r.parent;
+                fileBrowser.value.entries = r.entries;
+            } catch (e) { showToast('❌ ' + e.message); }
+            finally { fileBrowser.value.loading = false; }
+        }
+        function pickEntry(entry) {
+            if (entry.isDir) { browseDir(entry.path); return; }
+            if (fileBrowser.value.target === 'video') lipsSyncModal.value.videoPath = entry.path;
+            else lipsSyncModal.value.audioPath = entry.path;
+            fileBrowser.value.open = false;
+        }
+
         const introOutroModal = ref({ open: false, uploading: false, cacheBust: 0 });
         function openIntroOutroModal() {
             introOutroModal.value = { open: true, uploading: false, cacheBust: Date.now() };
@@ -3892,6 +4103,18 @@ createApp({
             seoParsed,
             saveSeoTitle,
             copyText,
+            lipsSyncModal,
+            lipsSyncDone,
+            openLipsSyncModal,
+            runLipsSync,
+            checkLipsSyncStatus,
+            previewLipsSync,
+            uploadLipsSyncFile,
+            fileBrowser,
+            openFileBrowser,
+            browseDir,
+            pickEntry,
+            fmtBytes,
             introOutroModal,
             openIntroOutroModal,
             uploadIntroOutro,

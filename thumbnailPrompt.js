@@ -47,9 +47,10 @@ export async function generateThumbnailFlowPrompt({ title = '', script = '', lan
     const style = readStyle(lang);
     const langName = LANG_NAMES[lang] || lang;
 
-    // Nhánh NHÂN VẬT khác nhau: có ảnh mẫu -> vẽ theo ảnh mẫu; không có -> tra web lãnh đạo đương nhiệm.
+    // Nhánh NHÂN VẬT khác nhau: có ảnh mẫu upload -> chỉ mượn mặt, dựng cảnh mới; không có -> tra web lãnh đạo đương nhiệm.
     const personBlock = hasReference
-        ? `- NHÂN VẬT: NGƯỜI DÙNG ĐÃ UPLOAD MỘT ẢNH MẪU của nhân vật chính. Mô tả chân dung là **"the exact person shown in the uploaded reference photo"**, GIỮ NGUYÊN khuôn mặt/đặc điểm/độ tuổi giống hệt ảnh mẫu. KHÔNG nêu tên, KHÔNG bịa nhân vật khác, KHÔNG đổi ngoại hình.`
+        ? `- NHÂN VẬT: Có 1 ẢNH MẪU được upload. **CHỈ dùng KHUÔN MẶT / nhận dạng của người trong ảnh mẫu** (giữ đúng gương mặt, độ tuổi). TẤT CẢ những thứ còn lại phải TÁI DỰNG MỚI: bối cảnh, hậu cảnh, tư thế, góc máy, ánh sáng, khung hình, trang phục — KHÔNG được sao chép ảnh mẫu.
+  Prompt PHẢI nói rõ đây là MỘT THUMBNAIL HOÀN TOÀN MỚI: "Use ONLY the face/likeness of the person from the reference image; place them into a completely NEW cinematic split-screen thumbnail scene described below. Do NOT reproduce, copy, or edit the reference photo's background, pose, framing, crop, or lighting — regenerate everything except the person's facial identity."`
         : `- NHÂN VẬT: Xác định (các) LÃNH ĐẠO / NHÂN VẬT CHÍNH TRỊ trung tâm của nội dung. QUAN TRỌNG:
     · Nếu nội dung nêu rõ TÊN người → dùng đúng người đó.
     · Nếu nội dung chỉ nói CHỨC VỤ (vd "thủ tướng Nhật", "tổng thống Mỹ") mà không nêu tên, hoặc nêu tên nhưng cần xác nhận đương nhiệm → **DÙNG web_search để tra ai đang GIỮ CHỨC VỤ ĐÓ TÍNH ĐẾN HÔM NAY** rồi vẽ đúng người đương nhiệm. TUYỆT ĐỐI không dựa vào trí nhớ của bạn (có thể đã lỗi thời — vd người đó đã mãn nhiệm/qua đời).
