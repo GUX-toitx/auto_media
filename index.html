@@ -1991,23 +1991,33 @@
 <script>
 const { createApp, ref, computed, watch, onMounted, onUnmounted } = Vue;
 
+// Map dùng chung: audioUrl -> { status, idx, url } của lips_sync video theo từng câu
+const lipsSyncIndex = ref({});
+
 // Thanh audio waveform custom: play/seek + thời gian m:ss.s chính xác
 const AudioBar = {
   props: { src: { type: String, required: true } },
   template: `
-    <div class="flex items-center gap-1.5 bg-gray-950 border border-gray-800 rounded px-1.5 py-1 w-full select-none">
-      <button type="button" @click="toggle" class="shrink-0 w-6 h-6 rounded-full bg-pink-600 hover:bg-pink-500 text-white text-[9px] flex items-center justify-center leading-none">{{ playing ? '❚❚' : '▶' }}</button>
-      <div ref="track" @click="seek" class="relative flex-1 h-7 cursor-pointer overflow-hidden rounded bg-gray-900">
-        <canvas ref="cv" class="absolute inset-0 w-full h-full"></canvas>
-        <div class="absolute top-0 bottom-0 left-0 bg-pink-500/20 pointer-events-none" :style="{ width: pct + '%' }"></div>
-        <div class="absolute top-0 bottom-0 w-0.5 bg-pink-400 pointer-events-none" :style="{ left: pct + '%' }"></div>
+    <div class="w-full">
+      <div class="flex items-center gap-1.5 bg-gray-950 border border-gray-800 rounded px-1.5 py-1 w-full select-none">
+        <button type="button" @click="toggle" class="shrink-0 w-6 h-6 rounded-full bg-pink-600 hover:bg-pink-500 text-white text-[9px] flex items-center justify-center leading-none">{{ playing ? '❚❚' : '▶' }}</button>
+        <div ref="track" @click="seek" class="relative flex-1 h-7 cursor-pointer overflow-hidden rounded bg-gray-900">
+          <canvas ref="cv" class="absolute inset-0 w-full h-full"></canvas>
+          <div class="absolute top-0 bottom-0 left-0 bg-pink-500/20 pointer-events-none" :style="{ width: pct + '%' }"></div>
+          <div class="absolute top-0 bottom-0 w-0.5 bg-pink-400 pointer-events-none" :style="{ left: pct + '%' }"></div>
+        </div>
+        <span class="shrink-0 text-[9px] font-mono tabular-nums text-pink-300">{{ fmt(cur) }}/<b class="text-pink-200">{{ fmt(dur) }}</b></span>
+        <button v-if="lips && lips.status==='done'" type="button" @click="showLips=!showLips" :title="'Lip sync #'+lips.idx" class="shrink-0 w-6 h-6 rounded text-white text-[11px] flex items-center justify-center leading-none" :class="showLips ? 'bg-fuchsia-500' : 'bg-fuchsia-700 hover:bg-fuchsia-600'">👄</button>
+        <span v-else-if="lips" class="shrink-0 text-[10px] opacity-60" :title="'Lip sync: '+lips.status">⏳</span>
       </div>
-      <span class="shrink-0 text-[9px] font-mono tabular-nums text-pink-300">{{ fmt(cur) }}/<b class="text-pink-200">{{ fmt(dur) }}</b></span>
+      <video v-if="showLips && lips" :src="lips.url" controls preload="metadata" class="w-full mt-1 rounded bg-black max-h-56"></video>
     </div>
   `,
   setup(props) {
     const cv = ref(null), track = ref(null);
     const playing = ref(false), cur = ref(0), dur = ref(0);
+    const showLips = ref(false);
+    const lips = computed(() => lipsSyncIndex.value[props.src] || null);
     let audio = null, raf = 0, peaks = null, io = null, decoded = false;
     const pct = computed(() => dur.value > 0 ? Math.min(100, cur.value / dur.value * 100) : 0);
     const fmt = (s) => {
@@ -2108,7 +2118,7 @@ const AudioBar = {
       if (audio) audio.src = nv;
       drawFlat(); decode();
     });
-    return { cv, track, playing, cur, dur, pct, fmt, toggle, seek };
+    return { cv, track, playing, cur, dur, pct, fmt, toggle, seek, showLips, lips };
   }
 };
 
@@ -2384,6 +2394,24 @@ createApp({
             (activePost.value.paragraphs || []).forEach(p => computeNarration(p));
             ['hook', 'summary', 'conclusion'].forEach(k => computeSectionNarration(k));
             maybeStartCrawlPoll(post.id);
+            loadLipsSyncIndex(post.id); // nạp lips_sync video theo từng câu
+        }
+
+        // Nạp map lips_sync (audioUrl -> video) để hiển thị trong từng câu
+        async function loadLipsSyncIndex(postId) {
+            lipsSyncIndex.value = {};
+            if (!postId) return;
+            try {
+                const res = await fetch('/api/lips-sync/saved/' + postId);
+                const r = await res.json();
+                if (!res.ok || !r.jobs) return;
+                const map = {};
+                for (const j of r.jobs) {
+                    if (!j.audio) continue;
+                    map[j.audio] = { status: j.status, idx: j.index, url: j.outputPath ? '/api/lips-sync/preview?path=' + encodeURIComponent(j.outputPath) : '' };
+                }
+                lipsSyncIndex.value = map;
+            } catch (_) { }
         }
 
         // Tự reload asset khi post đang crawl (mọi luồng, kể cả "Tạo dự án mới")
@@ -2696,9 +2724,26 @@ createApp({
         }
         let lipsSyncPollTimer = null;
         function stopLipsSyncPoll() { if (lipsSyncPollTimer) { clearInterval(lipsSyncPollTimer); lipsSyncPollTimer = null; } lipsSyncModal.value.polling = false; }
-        function openLipsSyncModal() {
+        async function openLipsSyncModal() {
             stopLipsSyncPoll();
             lipsSyncModal.value = { open: true, videoPath: lipsSyncModal.value.videoPath || '', contentType: 'content', guidanceScale: lipsSyncModal.value.guidanceScale ?? 2.2, jobs: [], previewPath: '', running: false, checking: false, polling: false, uploadingVideo: false };
+            if (!activePostId.value) return;
+            // Tải lại kết quả đã lưu trong DB
+            try {
+                const res = await fetch('/api/lips-sync/saved/' + activePostId.value);
+                const r = await res.json();
+                if (res.ok && r.jobs) {
+                    const m = lipsSyncModal.value;
+                    m.jobs = r.jobs;
+                    if (r.videoPath) m.videoPath = r.videoPath;
+                    if (r.contentType) m.contentType = r.contentType;
+                    if (r.guidanceScale != null) m.guidanceScale = r.guidanceScale;
+                    // Nếu còn job đang chạy thì poll tiếp
+                    if (m.jobs.some(j => j.jobId && j.status !== 'done' && j.status !== 'error')) {
+                        m.polling = true; lipsSyncPollTimer = setInterval(checkLipsSyncStatus, 4000);
+                    }
+                }
+            } catch (_) { }
         }
         async function runLipsSync(force = false) {
             const m = lipsSyncModal.value;
@@ -2718,6 +2763,7 @@ createApp({
                 const submitted = m.jobs.filter(j => j.jobId).length;
                 const skipped = m.jobs.filter(j => j.skipped).length;
                 showToast(`✅ Gửi ${submitted} job${skipped ? `, bỏ qua ${skipped} câu đã có mp4` : ''} → ${r.outDir}`);
+                loadLipsSyncIndex(activePostId.value);
                 if (m.jobs.some(j => j.jobId)) { m.polling = true; lipsSyncPollTimer = setInterval(checkLipsSyncStatus, 4000); }
             } catch (e) { showToast('❌ ' + e.message); }
             finally { m.running = false; }
@@ -2742,6 +2788,8 @@ createApp({
                 }
                 const pending = m.jobs.filter(j => j.jobId && j.status !== 'done' && j.status !== 'error').length;
                 if (!pending) { stopLipsSyncPoll(); showToast('🎉 Lips sync hoàn tất!'); }
+                loadLipsSyncIndex(activePostId.value); // cập nhật video hiển thị trong câu
+
             } catch (e) { showToast('❌ ' + e.message); }
             finally { m.checking = false; }
         }

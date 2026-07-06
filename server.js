@@ -448,7 +448,7 @@ app.post('/api/download-voice', async (req, res) => {
         const lipsDir = path.join(MEDIA_DIR, lipsProjectId, 'lips_sync');
         if (fs.existsSync(lipsDir)) {
             for (const f of fs.readdirSync(lipsDir)) {
-                if (f.toLowerCase().endsWith('.mp4')) archive.file(path.join(lipsDir, f), { name: `lips_sync/${f}` });
+                if (/^\d+\.mp4$/i.test(f)) archive.file(path.join(lipsDir, f), { name: `lips_sync/${f}` });
             }
         }
 
@@ -1586,22 +1586,98 @@ app.post('/api/lips-sync/run-post', async (req, res) => {
                 jobs.push({ index: idx, audioPath, outputPath, error: e.message });
             }
         }
+
+        // Lưu kết quả vào DB (upsert theo post_id + idx)
+        const now = Date.now();
+        const wdb = await getDb();
+        try {
+            // Xoá row thừa nếu số câu giảm
+            await wdb.run('DELETE FROM LipsSyncJob WHERE post_id = ? AND idx > ?', [postId, audioList.length]);
+            for (const j of jobs) {
+                await wdb.run(
+                    `INSERT INTO LipsSyncJob (post_id, idx, job_id, status, content_type, video_path, audio_path, output_path, guidance_scale, error, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(post_id, idx) DO UPDATE SET
+                        job_id=excluded.job_id, status=excluded.status, content_type=excluded.content_type,
+                        video_path=excluded.video_path, audio_path=excluded.audio_path, output_path=excluded.output_path,
+                        guidance_scale=excluded.guidance_scale, error=excluded.error, updated_at=excluded.updated_at`,
+                    [postId, j.index, j.jobId || null, j.error ? 'error' : (j.status || 'queued'), contentType,
+                     videoPath, j.audioPath, j.outputPath, guidance, j.error || null, now, now]
+                );
+            }
+        } finally { await wdb.close(); }
+
         res.json({ projectId, outDir, total: audioList.length, jobs });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
-// Kiểm tra trạng thái nhiều job cùng lúc
+// Kiểm tra trạng thái nhiều job cùng lúc (đồng thời cập nhật DB)
 app.post('/api/lips-sync/status', async (req, res) => {
     try {
         const ids = Array.isArray(req.body?.jobIds) ? req.body.jobIds : [];
         const out = {};
-        for (const id of ids) {
-            if (!id) continue;
-            try {
-                const r = await globalThis.fetch(`${LIPS_SYNC_BASE}/jobs/${encodeURIComponent(id)}`);
-                out[id] = await r.json();
-            } catch (e) { out[id] = { error: e.message }; }
-        }
+        const now = Date.now();
+        const db = await getDb();
+        try {
+            for (const id of ids) {
+                if (!id) continue;
+                try {
+                    const r = await globalThis.fetch(`${LIPS_SYNC_BASE}/jobs/${encodeURIComponent(id)}`);
+                    const data = await r.json();
+                    out[id] = data;
+                    if (data && (data.status || data.output_path || data.error)) {
+                        await db.run(
+                            'UPDATE LipsSyncJob SET status = COALESCE(?, status), output_path = COALESCE(?, output_path), error = ?, updated_at = ? WHERE job_id = ?',
+                            [data.status || null, data.output_path || null, data.error || null, now, id]
+                        );
+                    }
+                } catch (e) { out[id] = { error: e.message }; }
+            }
+        } finally { await db.close(); }
         res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Tải lại kết quả lips_sync đã lưu của 1 post
+app.get('/api/lips-sync/saved/:postId', async (req, res) => {
+    try {
+        const db = await getDb();
+        const rows = await db.all(
+            `SELECT idx AS "index", job_id AS jobId, status, content_type AS contentType,
+                    video_path AS videoPath, audio_path AS audioPath, output_path AS outputPath,
+                    guidance_scale AS guidanceScale, error
+             FROM LipsSyncJob WHERE post_id = ? ORDER BY idx`,
+            [req.params.postId]
+        );
+        const post = await db.get('SELECT project_id FROM Post WHERE id = ?', [req.params.postId]);
+        await db.close();
+
+        const meta = rows.find(r => r.videoPath) || {};
+        const contentType = meta.contentType || 'content';
+        let jobs = rows;
+
+        // Fallback: chưa lưu DB nhưng đã có file mp4 trên đĩa -> vẫn hiển thị
+        if (!jobs.length && post) {
+            const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
+            const dir = path.join(MEDIA_DIR, projectId, 'lips_sync');
+            if (fs.existsSync(dir)) {
+                jobs = fs.readdirSync(dir).filter(f => /^\d+\.mp4$/i.test(f))
+                    .map(f => ({ index: parseInt(f, 10), status: 'done', outputPath: path.join(dir, f) }))
+                    .sort((a, b) => a.index - b.index);
+            }
+        }
+
+        // Gắn URL audio gốc theo idx để client map lips_sync video vào từng câu
+        if (jobs.length) {
+            try {
+                const audioList = await getAllAudioUrls(req.params.postId, contentType);
+                for (const j of jobs) { const a = audioList[j.index - 1]; if (a) j.audio = a.audio; }
+            } catch (_) { }
+        }
+        res.json({
+            jobs,
+            videoPath: meta.videoPath || '',
+            contentType,
+            guidanceScale: meta.guidanceScale ?? 2.2,
+        });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Upload file lên server rồi trả về đường dẫn tuyệt đối để dùng làm input lips_sync
@@ -1930,6 +2006,22 @@ app.post('/api/capcut-render-status', (req, res) => {
         await db.run('ALTER TABLE Post ADD COLUMN outro_path TEXT DEFAULT NULL').catch(() => {});
         await db.run('ALTER TABLE Post ADD COLUMN seo_title TEXT DEFAULT NULL').catch(() => {});
         await db.run('ALTER TABLE Post ADD COLUMN target_lang TEXT DEFAULT NULL').catch(() => {});
+        await db.run(`CREATE TABLE IF NOT EXISTS LipsSyncJob (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            post_id INTEGER NOT NULL,
+            idx INTEGER NOT NULL,
+            job_id TEXT,
+            status TEXT,
+            content_type TEXT,
+            video_path TEXT,
+            audio_path TEXT,
+            output_path TEXT,
+            guidance_scale REAL,
+            error TEXT,
+            created_at INTEGER,
+            updated_at INTEGER,
+            UNIQUE(post_id, idx)
+        )`).catch(() => {});
         await db.close();
     } catch (_) {}
 })();
