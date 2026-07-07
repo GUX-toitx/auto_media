@@ -148,15 +148,24 @@
                 </div>
                 <!-- Mở bài -->
                 <div v-if="activePost.hook_details?.length" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
-                    <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Mở bài</p>
+                    <div class="flex items-center justify-between mb-1">
+                        <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Mở bài</p>
+                        <button @click="askDeleteContent('hook', activePost.id, 'Xóa toàn bộ khối MỞ BÀI? Tất cả đoạn, keyword và media của mở bài sẽ bị xóa vĩnh viễn.')" class="bg-red-600 hover:bg-red-700 text-white text-[12px] font-black w-5 h-5 rounded-lg flex items-center justify-center leading-none shadow shrink-0" title="Xóa cả khối mở bài">×</button>
+                    </div>
                     <div class="space-y-1">
                         <div v-for="d in activePost.hook_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
                              @drop="handleDetailDrop($event, d, 'hook_detail')"
                              @dragover.prevent
                              @dragenter.prevent>
                             <div class="grid grid-cols-2 gap-1">
-                                <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveHookDetailField(d, 'content_vi', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content_vi" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500"></div>
-                                <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveHookDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
+                                <div class="relative">
+                                    <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveHookDetailField(d, 'content_vi', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content_vi" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500"></div>
+                                    <button @click="askDeleteContent('hook_detail', d.id, 'Xóa đoạn này khỏi mở bài? Media gán riêng cho đoạn cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
+                                </div>
+                                <div class="relative">
+                                    <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveHookDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
+                                    <button @click="askDeleteContent('hook_detail', d.id, 'Xóa đoạn này khỏi mở bài? Media gán riêng cho đoạn cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
+                                </div>
                             </div>
                             <div class="grid grid-cols-2 gap-1">
                                 <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
@@ -340,15 +349,24 @@
 
                 <!-- Tóm tắt -->
                 <div v-if="activePost.summary_details?.length" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
-                    <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Tóm tắt</p>
+                    <div class="flex items-center justify-between mb-1">
+                        <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Tóm tắt</p>
+                        <button @click="askDeleteContent('summary', activePost.id, 'Xóa toàn bộ khối TÓM TẮT? Tất cả đoạn, keyword và media của tóm tắt sẽ bị xóa vĩnh viễn.')" class="bg-red-600 hover:bg-red-700 text-white text-[12px] font-black w-5 h-5 rounded-lg flex items-center justify-center leading-none shadow shrink-0" title="Xóa cả khối tóm tắt">×</button>
+                    </div>
                     <div class="space-y-1">
                         <div v-for="d in activePost.summary_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
                              @drop="handleDetailDrop($event, d, 'summary_detail')"
                              @dragover.prevent
                              @dragenter.prevent>
                             <div class="grid grid-cols-2 gap-1">
-                                <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveSummaryDetailField(d, 'content_vi', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content_vi" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500"></div>
-                                <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveSummaryDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
+                                <div class="relative">
+                                    <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveSummaryDetailField(d, 'content_vi', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content_vi" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500"></div>
+                                    <button @click="askDeleteContent('summary_detail', d.id, 'Xóa đoạn này khỏi tóm tắt? Media gán riêng cho đoạn cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
+                                </div>
+                                <div class="relative">
+                                    <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveSummaryDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
+                                    <button @click="askDeleteContent('summary_detail', d.id, 'Xóa đoạn này khỏi tóm tắt? Media gán riêng cho đoạn cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
+                                </div>
                             </div>
                             <div class="grid grid-cols-2 gap-1">
                                 <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
@@ -535,6 +553,7 @@
                     <!-- Row 1: badge + sentences -->
                     <div class="flex items-start gap-2">
                         <span class="bg-blue-600 text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 mt-0.5">#{{ i + 1 }}</span>
+                        <button @click="askDeleteContent('paragraph', para.id, 'Xóa luận điểm #' + (i + 1) + '? Toàn bộ câu, dòng detail và media bên trong sẽ bị xóa vĩnh viễn.')" class="order-last shrink-0 mt-0.5 bg-red-600 hover:bg-red-700 text-white text-[13px] font-black w-6 h-6 rounded-lg flex items-center justify-center leading-none shadow" title="Xóa luận điểm này">×</button>
                         <div class="flex-1 space-y-1">
                             <!-- Paragraph content: 2 input tiếng Việt và ngôn ngữ đích -->
                             <div v-if="para.content_vi || para.content" class="space-y-1">
@@ -552,13 +571,19 @@
                                 <!-- Content row -->
                                 <div class="space-y-1">
                                     <div v-if="para.details?.length" class="space-y-1">
-                                        <div v-for="d in para.details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
+                                        <div v-for="d in para.details" :key="d.id" class="relative bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
                                              @drop="handleDetailDrop($event, d, 'paragraph_detail')"
                                              @dragover.prevent
                                              @dragenter.prevent>
                                             <div class="grid grid-cols-2 gap-1">
-                                                <div contenteditable="true" @blur="saveParaDetailField(d, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500">{{ d.content_vi }}</div>
-                                                <div contenteditable="true" @blur="saveParaDetailField(d, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500">{{ d.content }}</div>
+                                                <div class="relative">
+                                                    <div contenteditable="true" @blur="saveParaDetailField(d, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500">{{ d.content_vi }}</div>
+                                                    <button @click="askDeleteContent('paragraph_detail', d.id, 'Xóa dòng này khỏi luận điểm? Media gán riêng cho dòng cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa dòng này">×</button>
+                                                </div>
+                                                <div class="relative">
+                                                    <div contenteditable="true" @blur="saveParaDetailField(d, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500">{{ d.content }}</div>
+                                                    <button @click="askDeleteContent('paragraph_detail', d.id, 'Xóa dòng này khỏi luận điểm? Media gán riêng cho dòng cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa dòng này">×</button>
+                                                </div>
                                             </div>
                                             <div class="grid grid-cols-2 gap-1">
                                                 <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
@@ -716,6 +741,7 @@
                                 <div v-for="(s, si) in (para.sentences || []).slice().sort((a,b) => a.order - b.order)" :key="s.id" class="bg-gray-900/60 border border-gray-800 rounded-lg p-2 space-y-1.5">
                                     <div class="flex items-start gap-2">
                                         <span class="bg-green-600 text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 mt-0.5">#{{ i + 1 }}.{{ si + 1 }}</span>
+                                        <button @click="askDeleteContent('sentence', s.id, 'Xóa câu #' + (i + 1) + '.' + (si + 1) + '? Toàn bộ dòng detail và media bên trong sẽ bị xóa.')" class="order-last shrink-0 mt-0.5 bg-red-600 hover:bg-red-700 text-white text-[12px] font-black w-5 h-5 rounded-lg flex items-center justify-center leading-none shadow" title="Xóa câu này">×</button>
                                         <div class="flex-1 space-y-1">
                                             <!-- Sentence title -->
                                             <div v-if="s.title || s.title_vi" class="space-y-1">
@@ -731,13 +757,19 @@
                                             <!-- Sentence content - hiển thị details -->
                                             <div class="space-y-1">
                                                 <div v-if="s.details?.length" class="space-y-1">
-                                                    <div v-for="d in s.details" :key="d.id" class="bg-gray-950/80 border border-gray-800 rounded-lg p-1.5 space-y-1"
+                                                    <div v-for="d in s.details" :key="d.id" class="relative bg-gray-950/80 border border-gray-800 rounded-lg p-1.5 space-y-1"
                                                          @drop="handleDetailDrop($event, d, 'sentence_detail')"
                                                          @dragover.prevent
                                                          @dragenter.prevent>
                                                         <div class="grid grid-cols-2 gap-1">
-                                                            <div contenteditable="true" @blur="saveDetailField(d, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500">{{ d.content_vi }}</div>
-                                                            <div contenteditable="true" @blur="saveDetailField(d, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500">{{ d.content }}</div>
+                                                            <div class="relative">
+                                                                <div contenteditable="true" @blur="saveDetailField(d, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500">{{ d.content_vi }}</div>
+                                                                <button @click="askDeleteContent('sentence_detail', d.id, 'Xóa dòng này khỏi câu? Media gán riêng cho dòng cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa dòng này">×</button>
+                                                            </div>
+                                                            <div class="relative">
+                                                                <div contenteditable="true" @blur="saveDetailField(d, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500">{{ d.content }}</div>
+                                                                <button @click="askDeleteContent('sentence_detail', d.id, 'Xóa dòng này khỏi câu? Media gán riêng cho dòng cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa dòng này">×</button>
+                                                            </div>
                                                         </div>
                                                         <div class="grid grid-cols-2 gap-1">
                                                             <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
@@ -921,15 +953,24 @@
 
                 <!-- Kết bài -->
                 <div v-if="activePost.conclusion_details?.length" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
-                    <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Kết bài</p>
+                    <div class="flex items-center justify-between mb-1">
+                        <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Kết bài</p>
+                        <button @click="askDeleteContent('conclusion', activePost.id, 'Xóa toàn bộ khối KẾT BÀI? Tất cả đoạn, keyword và media của kết bài sẽ bị xóa vĩnh viễn.')" class="bg-red-600 hover:bg-red-700 text-white text-[12px] font-black w-5 h-5 rounded-lg flex items-center justify-center leading-none shadow shrink-0" title="Xóa cả khối kết bài">×</button>
+                    </div>
                     <div class="space-y-1">
                         <div v-for="d in activePost.conclusion_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
                              @drop="handleDetailDrop($event, d, 'conclusion_detail')"
                              @dragover.prevent
                              @dragenter.prevent>
                             <div class="grid grid-cols-2 gap-1">
-                                <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveConclusionDetailField(d, 'content_vi', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content_vi" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500"></div>
-                                <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveConclusionDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
+                                <div class="relative">
+                                    <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveConclusionDetailField(d, 'content_vi', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content_vi" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500"></div>
+                                    <button @click="askDeleteContent('conclusion_detail', d.id, 'Xóa đoạn này khỏi kết bài? Media gán riêng cho đoạn cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
+                                </div>
+                                <div class="relative">
+                                    <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveConclusionDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
+                                    <button @click="askDeleteContent('conclusion_detail', d.id, 'Xóa đoạn này khỏi kết bài? Media gán riêng cho đoạn cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
+                                </div>
                             </div>
                             <div class="grid grid-cols-2 gap-1">
                                 <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
@@ -1256,6 +1297,21 @@
                     {{ previewModal.asset?.selected ? '✓ Đã chọn' : 'Chọn' }}
                 </button>
                 <button @click="closePreview" class="text-[11px] font-bold py-2 px-4 rounded uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Đóng</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CONFIRM DELETE MODAL -->
+    <div v-if="confirmModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-6" @click.self="confirmModal.open = false">
+        <div class="bg-gray-900 border border-red-800/60 rounded-2xl p-6 w-[420px] space-y-4">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-red-600/20 border border-red-600/50 flex items-center justify-center text-red-400 text-xl font-black shrink-0">!</div>
+                <h3 class="text-[15px] font-black text-gray-100">Xác nhận xóa</h3>
+            </div>
+            <p class="text-[12px] text-gray-400 leading-relaxed">{{ confirmModal.message }}</p>
+            <div class="flex justify-end gap-2 pt-1">
+                <button @click="confirmModal.open = false" :disabled="confirmModal.busy" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-50">Hủy</button>
+                <button @click="runDeleteContent" :disabled="confirmModal.busy" class="px-5 py-2.5 rounded-lg text-[11px] font-black uppercase bg-red-600 hover:bg-red-700 text-white disabled:opacity-50">{{ confirmModal.busy ? 'Đang xóa...' : 'Xóa' }}</button>
             </div>
         </div>
     </div>
@@ -1725,29 +1781,43 @@
                     :placeholder="nazeModal.genre === 'drama' ? 'Dán thông tin vụ việc (tên vụ, thời gian, đối tượng, diễn biến, hậu quả pháp lý, phản ứng dư luận...). Có thể dán nhiều vụ, GPT sẽ xào thành kịch bản kể chuyện.' : 'Ví dụ: Tại sao nước biển lại mặn? Tại sao bầu trời màu xanh?'"
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-cyan-500 resize-none leading-relaxed"></textarea>
             </div>
-            <!-- Tab: SRT -->
+            <!-- Tab: SRT (multi, theo cặp <lang>.<tên>.srt) -->
             <template v-if="nazeModal.mode === 'srt'">
                 <div>
-                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">File SRT gốc</label>
-                    <div class="border-2 border-dashed rounded-xl p-3 text-center cursor-pointer transition-colors"
-                        :class="nazeModal.srtFile ? 'border-cyan-400 bg-cyan-500/10' : 'border-gray-700 hover:border-cyan-500'"
-                        @dragover.prevent @drop.prevent="nazeModal.srtFile = $event.dataTransfer.files[0]"
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Nhiều file SRT — kéo thả cả nguồn + đích</label>
+                    <div class="border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-colors"
+                        :class="(nazeModal.srtFiles||[]).length ? 'border-cyan-400 bg-cyan-500/10' : 'border-gray-700 hover:border-cyan-500'"
+                        @dragover.prevent @drop.prevent="nazeSrtAddFiles($event.dataTransfer.files)"
                         @click="$refs.nazeSrtInput.click()">
-                        <div v-if="nazeModal.srtFile" class="text-[11px] text-cyan-400 font-bold">📄 {{ nazeModal.srtFile.name }}</div>
-                        <div v-else class="text-[11px] text-gray-500">Kéo thả hoặc <span class="text-cyan-400 font-bold">chọn file SRT gốc</span></div>
-                        <input ref="nazeSrtInput" type="file" accept=".srt" class="hidden" @change="nazeModal.srtFile = $event.target.files[0]">
+                        <div class="text-[11px] text-gray-400">Kéo thả nhiều file hoặc <span class="text-cyan-400 font-bold">chọn file</span></div>
+                        <div class="text-[9px] text-gray-600 mt-1">Đặt tên dạng <span class="text-gray-400 font-mono">&lt;lang&gt;.&lt;tên&gt;.srt</span> — vd <span class="text-gray-400 font-mono">vi.test.srt</span> + <span class="text-gray-400 font-mono">ja.test.srt</span></div>
+                        <input ref="nazeSrtInput" type="file" accept=".srt" multiple class="hidden" @change="nazeSrtAddFiles($event.target.files); $event.target.value=''">
                     </div>
                 </div>
-                <div>
-                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">File SRT đã dịch (ngôn ngữ đích)</label>
-                    <div class="border-2 border-dashed rounded-xl p-3 text-center cursor-pointer transition-colors"
-                        :class="nazeModal.srtTargetFile ? 'border-green-400 bg-green-500/10' : 'border-gray-700 hover:border-green-500'"
-                        @dragover.prevent @drop.prevent="nazeModal.srtTargetFile = $event.dataTransfer.files[0]"
-                        @click="$refs.nazeSrtTargetInput.click()">
-                        <div v-if="nazeModal.srtTargetFile" class="text-[11px] text-green-400 font-bold">📄 {{ nazeModal.srtTargetFile.name }}</div>
-                        <div v-else class="text-[11px] text-gray-500">Kéo thả hoặc <span class="text-green-400 font-bold">chọn file SRT đã dịch</span></div>
-                        <input ref="nazeSrtTargetInput" type="file" accept=".srt" class="hidden" @change="nazeModal.srtTargetFile = $event.target.files[0]">
+                <!-- Danh sách file đã chọn -->
+                <div v-if="(nazeModal.srtFiles||[]).length" class="max-h-28 overflow-y-auto space-y-0.5 border border-gray-800 rounded-lg p-2 bg-gray-950/50">
+                    <div v-for="f in nazeModal.srtFiles" :key="f.name" class="flex items-center justify-between text-[10px]">
+                        <span class="text-gray-300 truncate font-mono">📄 {{ f.name }}</span>
+                        <button @click="nazeSrtRemove(f.name)" class="text-red-400 hover:text-red-300 font-black ml-2 shrink-0">×</button>
                     </div>
+                </div>
+                <!-- Preview cặp project -->
+                <div v-if="nazeSrtInfo.pairs.length" class="space-y-1">
+                    <p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Project ({{ nazeSrtInfo.pairs.filter(p=>p.ok).length }}/{{ nazeSrtInfo.pairs.length }} hợp lệ)
+                        <span v-if="nazeSrtInfo.srcLang" class="text-gray-600 normal-case tracking-normal">— nguồn: {{ nazeSrtInfo.srcLang }} · đích: {{ nazeSrtInfo.targetLang }}</span>
+                    </p>
+                    <div class="flex flex-wrap gap-1">
+                        <span v-for="p in nazeSrtInfo.pairs" :key="p.base"
+                            class="px-2 py-0.5 rounded text-[10px] font-bold border"
+                            :class="p.ok ? 'border-green-700 text-green-300 bg-green-900/20' : 'border-red-700 text-red-300 bg-red-900/20'"
+                            :title="p.ok ? 'Đủ cặp' : (!p.hasSrc ? 'Thiếu file nguồn' : 'Thiếu file đích')">
+                            {{ p.ok ? '✓' : '✗' }} {{ p.base }}
+                        </span>
+                    </div>
+                </div>
+                <!-- Lỗi validate -->
+                <div v-if="nazeSrtInfo.errors.length" class="text-[10px] text-red-400 space-y-0.5 bg-red-950/30 border border-red-900/50 rounded-lg p-2">
+                    <div v-for="(e, i) in nazeSrtInfo.errors" :key="i">⚠️ {{ e }}</div>
                 </div>
             </template>
             <!-- Tab: YouTube -->
@@ -1757,8 +1827,8 @@
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-cyan-500">
                 <p class="text-[9px] text-gray-600 mt-1">Hệ thống sẽ tải subtitle từ YouTube và tạo nội dung</p>
             </div>
-            <!-- Project ID -->
-            <div>
+            <!-- Project ID (SRT batch lấy tên từ file nên ẩn) -->
+            <div v-if="nazeModal.mode !== 'srt'">
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Project ID (tùy chọn)</label>
                 <input v-model="nazeModal.projectId" type="text" placeholder="vd: naze_ocean_salt"
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-cyan-500">
@@ -1766,7 +1836,7 @@
             <div class="flex gap-3 justify-end pt-1">
                 <button @click="nazeModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
                 <button @click="submitNaze"
-                    :disabled="(nazeModal.mode==='text' ? !nazeModal.topic?.trim() : nazeModal.mode==='srt' ? !nazeModal.srtFile : !nazeModal.youtubeUrl?.trim()) || nazeModal.loading"
+                    :disabled="(nazeModal.mode==='text' ? !nazeModal.topic?.trim() : nazeModal.mode==='srt' ? !nazeSrtInfo.valid : !nazeModal.youtubeUrl?.trim()) || nazeModal.loading"
                     class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-cyan-600 hover:bg-cyan-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
                     {{ nazeModal.loading ? '⧗ Đang xử lý...' : '🚀 Tạo nội dung' }}
                 </button>
@@ -2084,11 +2154,57 @@ createApp({
         const aiModal = ref({ open: false, type: '', para: null, gid: '', count: 2, content: '', keywords: [], prompt: '', ratio: '16:9', videoMode: 'Frames', veo: 'Fast' });
         const sentenceModal = ref({ open: false, asset: null, para: null, type: '', sentences: [] });
         const previewModal = ref({ open: false, type: '', asset: null, para: null });
+        const confirmModal = ref({ open: false, message: '', type: null, id: null, busy: false });
         const page = ref('posts');
         const previewMode = ref(true);
         const profileModal = ref({ list: [], bulkText: '', cmds: [], addOpen: false, fileName: '' });
 
-        const nazeModal = ref({ open: false, genre: 'naze', mode: 'text', topic: '', projectId: '', targetLang: 'vi', loading: false, srtFile: null, srtTargetFile: null, youtubeUrl: '' });
+        const nazeModal = ref({ open: false, genre: 'naze', mode: 'text', topic: '', projectId: '', targetLang: 'vi', loading: false, srtFile: null, srtTargetFile: null, srtFiles: [], youtubeUrl: '' });
+
+        // Thêm file SRT vào danh sách multi (gộp, khử trùng theo tên)
+        function nazeSrtAddFiles(fileList) {
+            const arr = Array.from(fileList || []).filter(f => f.name.toLowerCase().endsWith('.srt'));
+            const map = new Map((nazeModal.value.srtFiles || []).map(f => [f.name, f]));
+            for (const f of arr) map.set(f.name, f);
+            nazeModal.value.srtFiles = [...map.values()];
+        }
+        function nazeSrtRemove(name) {
+            nazeModal.value.srtFiles = (nazeModal.value.srtFiles || []).filter(f => f.name !== name);
+        }
+        // Phân tích + validate cặp file theo prefix ngôn ngữ
+        const nazeSrtInfo = computed(() => {
+            const files = nazeModal.value.srtFiles || [];
+            const tl = (nazeModal.value.targetLang || '').trim().toLowerCase();
+            const parsed = [], badName = [], errors = [];
+            for (const f of files) {
+                const m = f.name.match(/^([a-z]{2})\.(.+)\.srt$/i);
+                if (!m) badName.push(f.name);
+                else parsed.push({ lang: m[1].toLowerCase(), base: m[2] });
+            }
+            if (badName.length) errors.push(`Sai định dạng tên (cần <lang>.<tên>.srt): ${badName.join(', ')}`);
+            const langs = [...new Set(parsed.map(p => p.lang))];
+            let srcLang = null;
+            if (files.length) {
+                if (!tl) errors.push('Chưa chọn ngôn ngữ đích');
+                if (langs.length > 2) errors.push(`Có quá 2 ngôn ngữ: ${langs.join(', ')}`);
+                else if (langs.length === 2 && tl && !langs.includes(tl)) errors.push(`Ngôn ngữ đích "${tl}" không khớp file (có: ${langs.join(', ')})`);
+                else if (langs.length < 2 && parsed.length) errors.push(`Cần đủ 2 ngôn ngữ nguồn + đích (mới có: ${langs.join(', ')})`);
+                if (langs.length === 2 && tl && langs.includes(tl)) srcLang = langs.find(l => l !== tl);
+            }
+            const groups = {};
+            for (const p of parsed) (groups[p.base] ||= {})[p.lang] = true;
+            const pairs = [];
+            for (const [base, g] of Object.entries(groups)) {
+                const hasSrc = srcLang ? !!g[srcLang] : false;
+                const hasTgt = tl ? !!g[tl] : false;
+                const ok = !!(srcLang && hasSrc && hasTgt);
+                pairs.push({ base, ok, hasSrc, hasTgt });
+                if (srcLang && !hasSrc) errors.push(`Thiếu ${srcLang}.${base}.srt`);
+                if (tl && srcLang && !hasTgt) errors.push(`Thiếu ${tl}.${base}.srt`);
+            }
+            const valid = files.length > 0 && errors.length === 0 && pairs.length > 0 && pairs.every(p => p.ok);
+            return { pairs, errors, langs, srcLang, targetLang: tl, valid };
+        });
         const genreChooser = ref({ open: false });
 
         function openGenre(genre) {
@@ -2110,13 +2226,12 @@ createApp({
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ topic, projectId, targetLang, genre }) });
                 } else if (mode === 'srt') {
-                    if (!srtFile) return;
+                    const info = nazeSrtInfo.value;
+                    if (!info.valid) { alert('❌ File chưa hợp lệ:\n' + (info.errors.join('\n') || 'Chưa đủ cặp file')); nazeModal.value.loading = false; return; }
                     const form = new FormData();
-                    form.append('srt', srtFile);
-                    if (srtTargetFile) form.append('srtTarget', srtTargetFile);
-                    form.append('projectId', projectId);
+                    for (const f of nazeModal.value.srtFiles) form.append('srts', f);
                     form.append('targetLang', targetLang);
-                    res = await fetch('/api/create-naze-srt', { method: 'POST', body: form });
+                    res = await fetch('/api/create-naze-srt-batch', { method: 'POST', body: form });
                 } else {
                     if (!youtubeUrl.trim()) return;
                     res = await fetch('/api/create-naze-youtube', { method: 'POST',
@@ -2131,8 +2246,9 @@ createApp({
                     nazeModal.value.projectId = '';
                     nazeModal.value.srtFile = null;
                     nazeModal.value.srtTargetFile = null;
+                    nazeModal.value.srtFiles = [];
                     nazeModal.value.youtubeUrl = '';
-                    showToast('✅ Đang xử lý, vui lòng chờ...');
+                    showToast(r.count ? `✅ Đã xếp hàng ${r.count} project, xử lý lần lượt...` : '✅ Đang xử lý, vui lòng chờ...');
                     await loadPosts();
                 } else { alert('❌ ' + (r.error || 'Lỗi')); }
             } catch (e) { alert('❌ ' + e.message); }
@@ -3838,6 +3954,30 @@ createApp({
             await reloadCurrentPost();
         }
 
+        // Mở modal confirm xóa nội dung (khối / luận điểm / câu / dòng detail)
+        function askDeleteContent(type, id, message) {
+            confirmModal.value = { open: true, message, type, id, busy: false };
+        }
+        async function runDeleteContent() {
+            const m = confirmModal.value;
+            if (m.busy || !m.type || !m.id) return;
+            m.busy = true;
+            try {
+                const res = await fetch('/api/delete-content', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: m.type, id: m.id })
+                });
+                if (!res.ok) { const r = await res.json().catch(() => ({})); throw new Error(r.error || 'Lỗi'); }
+                await reloadCurrentPost();
+                confirmModal.value.open = false;
+                showToast('✅ Đã xóa!');
+            } catch (e) {
+                showToast('❌ ' + e.message);
+            } finally {
+                confirmModal.value.busy = false;
+            }
+        }
+
         async function reloadCurrentPost() {
             if (!activePostId.value) return;
             const res = await fetch(`/api/posts/${activePostId.value}`);
@@ -3885,6 +4025,9 @@ createApp({
             handleSectionAssetDragStart,
             handleParaAssetDragStart,
             deleteDetailAsset,
+            confirmModal,
+            askDeleteContent,
+            runDeleteContent,
             uploadSectionAsset,
             assignDetailModal,
             openAssignDetailModal,
@@ -3980,6 +4123,9 @@ createApp({
             genreChooser,
             openGenre,
             submitNaze,
+            nazeSrtInfo,
+            nazeSrtAddFiles,
+            nazeSrtRemove,
             submitNewProject,
         };
     }

@@ -918,6 +918,107 @@ app.post('/api/delete-asset', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// API: Xóa nội dung (luận điểm / câu / dòng detail / cả khối section) + cascade con + media file
+app.post('/api/delete-content', async (req, res) => {
+    const { type, id } = req.body;
+    const allowed = ['paragraph', 'paragraph_detail', 'sentence', 'sentence_detail',
+        'hook_detail', 'summary_detail', 'conclusion_detail', 'hook', 'summary', 'conclusion'];
+    if (!allowed.includes(type) || !id)
+        return res.status(400).json({ error: 'type/id không hợp lệ' });
+    let db;
+    try {
+        db = await getDb();
+        const inClause = (arr) => `(${arr.map(() => '?').join(',')})`;
+        const filePaths = [];
+        const collect = async (sql, params) => {
+            const rows = await db.all(sql, params);
+            for (const r of rows) if (r.file_path) filePaths.push(r.file_path);
+        };
+
+        if (type === 'paragraph') {
+            const sentIds = (await db.all('SELECT id FROM Sentence WHERE paragraph_id = ?', [id])).map(s => s.id);
+            const sdIds = sentIds.length
+                ? (await db.all(`SELECT id FROM SentenceDetail WHERE sentence_id IN ${inClause(sentIds)}`, sentIds)).map(d => d.id)
+                : [];
+            const pdIds = (await db.all('SELECT id FROM ParagraphDetail WHERE paragraph_id = ?', [id])).map(d => d.id);
+
+            await collect('SELECT file_path FROM Asset WHERE paragraph_id = ?', [id]);
+            if (sentIds.length) await collect(`SELECT file_path FROM Asset WHERE sentence_id IN ${inClause(sentIds)}`, sentIds);
+            if (pdIds.length) await collect(`SELECT file_path FROM Asset WHERE paragraph_detail_id IN ${inClause(pdIds)}`, pdIds);
+            if (sdIds.length) await collect(`SELECT file_path FROM Asset WHERE sentence_detail_id IN ${inClause(sdIds)}`, sdIds);
+
+            await db.run('DELETE FROM Asset WHERE paragraph_id = ?', [id]);
+            if (sentIds.length) await db.run(`DELETE FROM Asset WHERE sentence_id IN ${inClause(sentIds)}`, sentIds);
+            if (pdIds.length) await db.run(`DELETE FROM Asset WHERE paragraph_detail_id IN ${inClause(pdIds)}`, pdIds);
+            if (sdIds.length) await db.run(`DELETE FROM Asset WHERE sentence_detail_id IN ${inClause(sdIds)}`, sdIds);
+            if (sdIds.length) await db.run(`DELETE FROM SentenceDetail WHERE id IN ${inClause(sdIds)}`, sdIds);
+            await db.run('DELETE FROM ParagraphDetail WHERE paragraph_id = ?', [id]);
+            if (sentIds.length) await db.run('DELETE FROM Sentence WHERE paragraph_id = ?', [id]);
+            await db.run('DELETE FROM Keyword WHERE paragraph_id = ?', [id]);
+            await db.run('DELETE FROM Paragraph WHERE id = ?', [id]);
+        } else if (type === 'paragraph_detail') {
+            await collect('SELECT file_path FROM Asset WHERE paragraph_detail_id = ?', [id]);
+            await db.run('DELETE FROM Asset WHERE paragraph_detail_id = ?', [id]);
+            await db.run('DELETE FROM ParagraphDetail WHERE id = ?', [id]);
+        } else if (type === 'sentence') {
+            const sdIds = (await db.all('SELECT id FROM SentenceDetail WHERE sentence_id = ?', [id])).map(d => d.id);
+            await collect('SELECT file_path FROM Asset WHERE sentence_id = ?', [id]);
+            if (sdIds.length) await collect(`SELECT file_path FROM Asset WHERE sentence_detail_id IN ${inClause(sdIds)}`, sdIds);
+            await db.run('DELETE FROM Asset WHERE sentence_id = ?', [id]);
+            if (sdIds.length) await db.run(`DELETE FROM Asset WHERE sentence_detail_id IN ${inClause(sdIds)}`, sdIds);
+            await db.run('DELETE FROM SentenceDetail WHERE sentence_id = ?', [id]);
+            await db.run('DELETE FROM Sentence WHERE id = ?', [id]);
+        } else if (type === 'sentence_detail') {
+            await collect('SELECT file_path FROM Asset WHERE sentence_detail_id = ?', [id]);
+            await db.run('DELETE FROM Asset WHERE sentence_detail_id = ?', [id]);
+            await db.run('DELETE FROM SentenceDetail WHERE id = ?', [id]);
+        } else if (type === 'hook_detail') {
+            await collect('SELECT file_path FROM Asset WHERE hook_detail_id = ?', [id]);
+            await db.run('DELETE FROM Asset WHERE hook_detail_id = ?', [id]);
+            await db.run('DELETE FROM HookDetail WHERE id = ?', [id]);
+        } else if (type === 'summary_detail') {
+            await collect('SELECT file_path FROM Asset WHERE summary_detail_id = ?', [id]);
+            await db.run('DELETE FROM Asset WHERE summary_detail_id = ?', [id]);
+            await db.run('DELETE FROM SummaryDetail WHERE id = ?', [id]);
+        } else if (type === 'conclusion_detail') {
+            await collect('SELECT file_path FROM Asset WHERE conclusion_detail_id = ?', [id]);
+            await db.run('DELETE FROM Asset WHERE conclusion_detail_id = ?', [id]);
+            await db.run('DELETE FROM ConclusionDetail WHERE id = ?', [id]);
+        } else if (type === 'hook' || type === 'summary' || type === 'conclusion') {
+            // id = post_id: xóa cả khối section (mở bài / tóm tắt / kết bài)
+            const detailTable = { hook: 'HookDetail', summary: 'SummaryDetail', conclusion: 'ConclusionDetail' }[type];
+            const detailCol = { hook: 'hook_detail_id', summary: 'summary_detail_id', conclusion: 'conclusion_detail_id' }[type];
+            const dIds = (await db.all(`SELECT id FROM ${detailTable} WHERE post_id = ?`, [id])).map(d => d.id);
+
+            if (dIds.length) await collect(`SELECT file_path FROM Asset WHERE ${detailCol} IN ${inClause(dIds)}`, dIds);
+            await collect('SELECT file_path FROM Asset WHERE post_id = ? AND section = ?', [id, type]);
+
+            if (dIds.length) await db.run(`DELETE FROM Asset WHERE ${detailCol} IN ${inClause(dIds)}`, dIds);
+            await db.run('DELETE FROM Asset WHERE post_id = ? AND section = ?', [id, type]);
+            await db.run(`DELETE FROM ${detailTable} WHERE post_id = ?`, [id]);
+            await db.run('DELETE FROM Keyword WHERE post_id = ? AND section = ?', [id, type]);
+            if (type === 'hook')
+                await db.run('UPDATE Post SET hook = NULL, hook_vi = NULL, hook_audio = NULL, hook_vi_audio = NULL WHERE id = ?', [id]);
+            else if (type === 'summary')
+                await db.run('UPDATE Post SET summary = NULL, summary_vi = NULL, summary_audio = NULL, summary_vi_audio = NULL, summary_target = NULL, summary_target_audio = NULL WHERE id = ?', [id]);
+            else
+                await db.run('UPDATE Post SET conclusion_vi = NULL, conclusion_vi_audio = NULL, conclusion_target = NULL, conclusion_target_audio = NULL WHERE id = ?', [id]);
+        }
+
+        await db.close();
+        for (const fp of filePaths) {
+            try {
+                const full = path.join(MEDIA_DIR, fp);
+                if (fs.existsSync(full)) fs.unlinkSync(full);
+            } catch (_) { /* bỏ qua file lỗi */ }
+        }
+        res.json({ ok: true });
+    } catch (e) {
+        try { if (db) await db.close(); } catch (_) {}
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.post('/api/unselect-asset', async (req, res) => {
     const { videoId, relativePath, order, gid, type } = req.body;
     try {
@@ -1035,6 +1136,80 @@ app.post('/api/create-naze-srt', upload.fields([{ name: 'srt', maxCount: 1 }, { 
         child.unref();
         res.json({ success: true, projectId });
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== Hàng đợi tuần tự cho naze SRT batch: mỗi lúc chỉ chạy 1 project (tránh nghẽn mạng) =====
+const nazeQueue = [];
+let nazeQueueRunning = false;
+function enqueueNazeJob(job) {
+    nazeQueue.push(job);
+    runNazeQueue();
+}
+async function runNazeQueue() {
+    if (nazeQueueRunning) return;
+    nazeQueueRunning = true;
+    while (nazeQueue.length) {
+        const job = nazeQueue.shift();
+        console.log(`[naze-queue] ▶ Bắt đầu ${job.projectId} (còn ${nazeQueue.length} trong hàng đợi)`);
+        await new Promise((resolve) => {
+            const child = spawn('node', job.args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+            child.stdout.on('data', d => process.stdout.write(`[naze:${job.projectId}] ${d}`));
+            child.stderr.on('data', d => process.stderr.write(`[naze:${job.projectId}] ${d}`));
+            child.on('exit', (code) => { console.log(`[naze-queue] ✔ Xong ${job.projectId} (code ${code})`); resolve(); });
+            child.on('error', (e) => { console.error(`[naze-queue] ✖ Lỗi spawn ${job.projectId}: ${e.message}`); resolve(); });
+        });
+    }
+    nazeQueueRunning = false;
+    console.log('[naze-queue] Hàng đợi trống, đã xử lý hết.');
+}
+
+// API: Tạo nhiều project naze từ nhiều cặp file SRT (nguồn + đích), xử lý tuần tự
+app.post('/api/create-naze-srt-batch', upload.array('srts', 500), async (req, res) => {
+    const files = req.files || [];
+    const targetLang = (req.body.targetLang || '').trim().toLowerCase();
+    if (!files.length) return res.status(400).json({ error: 'Không có file SRT nào' });
+    if (!targetLang) return res.status(400).json({ error: 'Thiếu ngôn ngữ đích' });
+
+    // Dọn file tạm nếu validate fail
+    const cleanup = () => { for (const f of files) { try { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); } catch (_) {} } };
+    try {
+        // Parse tên file: <lang>.<base>.srt
+        const parsed = [];
+        for (const f of files) {
+            const m = f.originalname.match(/^([a-z]{2})\.(.+)\.srt$/i);
+            if (!m) { cleanup(); return res.status(400).json({ error: `Sai định dạng tên (cần <lang>.<tên>.srt): ${f.originalname}` }); }
+            parsed.push({ lang: m[1].toLowerCase(), base: m[2], file: f });
+        }
+        const langs = [...new Set(parsed.map(p => p.lang))];
+        if (langs.length !== 2) { cleanup(); return res.status(400).json({ error: `Cần đúng 2 ngôn ngữ (nguồn + đích), đang có: ${langs.join(', ') || 'không có'}` }); }
+        if (!langs.includes(targetLang)) { cleanup(); return res.status(400).json({ error: `Ngôn ngữ đích "${targetLang}" không có trong file (có: ${langs.join(', ')})` }); }
+        const srcLang = langs.find(l => l !== targetLang);
+
+        // Nhóm theo base + validate đủ cặp
+        const groups = {};
+        for (const p of parsed) { (groups[p.base] ||= {})[p.lang] = p.file; }
+        const missing = [];
+        for (const [base, g] of Object.entries(groups)) {
+            if (!g[srcLang]) missing.push(`${targetLang}.${base}.srt thiếu cặp ${srcLang}.${base}.srt`);
+            if (!g[targetLang]) missing.push(`${srcLang}.${base}.srt thiếu cặp ${targetLang}.${base}.srt`);
+        }
+        if (missing.length) { cleanup(); return res.status(400).json({ error: 'Thiếu file cặp:\n- ' + missing.join('\n- ') }); }
+
+        // Tạo project + xếp hàng
+        const projects = [];
+        for (const [base, g] of Object.entries(groups)) {
+            const projectId = base;
+            const targetDir = path.join(MEDIA_DIR, projectId);
+            if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+            const srcPath = path.join(targetDir, 'input.srt');
+            const tgtPath = path.join(targetDir, 'input_target.srt');
+            fs.renameSync(g[srcLang].path, srcPath);
+            fs.renameSync(g[targetLang].path, tgtPath);
+            enqueueNazeJob({ projectId, args: ['naze_content.js', '--srt', srcPath, projectId, tgtPath, targetLang] });
+            projects.push(projectId);
+        }
+        res.json({ success: true, count: projects.length, projects });
+    } catch (e) { cleanup(); res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/create-naze-youtube', express.json(), async (req, res) => {
