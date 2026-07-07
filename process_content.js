@@ -485,20 +485,6 @@ async function analyzeWithGPT5(topic, newsTitles, sources) {
             },
             conclusion_keywords_factual: { type: 'array', items: { type: 'string' } },
             conclusion_keywords_cinematic: { type: 'array', items: { type: 'string' } },
-            summary_sentences: {
-                type: 'array',
-                items: {
-                    type: 'object',
-                    properties: {
-                        vi: { type: 'string' },
-                        en: { type: 'string' }
-                    },
-                    required: ['vi', 'en'],
-                    additionalProperties: false
-                }
-            },
-            summary_keywords_factual: { type: 'array', items: { type: 'string' } },
-            summary_keywords_cinematic: { type: 'array', items: { type: 'string' } },
         },
         required: [
             'title',
@@ -509,9 +495,6 @@ async function analyzeWithGPT5(topic, newsTitles, sources) {
             'conclusion_sentences',
             'conclusion_keywords_factual',
             'conclusion_keywords_cinematic',
-            'summary_sentences',
-            'summary_keywords_factual',
-            'summary_keywords_cinematic',
         ],
         additionalProperties: false
     };
@@ -637,7 +620,7 @@ async function analyzeWithGPT5(topic, newsTitles, sources) {
         '- Viet song ngu dong thoi.',
         '- _vi = tieng Viet.',
         '- _target = ' + targetLang + '.',
-        '- BAT BUOC: Tat ca content_sentences, hook_sentences, summary_sentences, conclusion_sentences PHAI LA ARRAY CUA CAC CAP {vi, en}.',
+        '- BAT BUOC: Tat ca content_sentences, hook_sentences, conclusion_sentences PHAI LA ARRAY CUA CAC CAP {vi, en}.',
         '- Moi phan tu trong array la mot cau hoan chinh VI va EN tuong ung.',
         '- Vi du: [{vi: "Cau 1 tieng Viet.", en: "Sentence 1 in English."}, {vi: "Cau 2.", en: "Sentence 2."}]',
         '- KHONG DUOC de content_vi hoac content_target rieng le.',
@@ -653,8 +636,8 @@ async function analyzeWithGPT5(topic, newsTitles, sources) {
         '  + Mieu ta chi tiet goc may quay, cam xuc, boi canh hoac chi tiet dac ta mang tinh bieu tuong.',
         '  + Vi du: "radar screen glow macro", "satellite data flow animation", "politician shadow walking steadycam".',
         '- Tu khoa phai cuc ky sat voi noi dung cua tung luan_cu, khong duoc lay chung chung.',
-        '- TUONG TU voi hook, conclusion, summary: cung phai co hook_keywords_factual, hook_keywords_cinematic,',
-        '  conclusion_keywords_factual, conclusion_keywords_cinematic, summary_keywords_factual, summary_keywords_cinematic.',
+        '- TUONG TU voi hook, conclusion: cung phai co hook_keywords_factual, hook_keywords_cinematic,',
+        '  conclusion_keywords_factual, conclusion_keywords_cinematic.',
         'KET BAI: tuong ung voi conclusion',
         '- BAT BUOC phai co phan conclusion_vi va conclusion_target rieng.',
         '- Ket bai chi can mot dong narrative tong ket, KHONG chia luan cu.',
@@ -733,19 +716,16 @@ async function saveToDb(projectId, result) {
     const post = await db.get('SELECT id FROM Post WHERE project_id = ?', [postTitle]);
     const postId = post.id;
 
-    // Lưu title, hook_vi/hook_target từ hook_sentences, summary, conclusion
+    // Lưu title, hook_vi/hook_target từ hook_sentences, conclusion
     const hookVi = result.hook_sentences?.map(s => s.vi).filter(Boolean).join(' ') || '';
     const hookTarget = result.hook_sentences?.map(s => s.en).filter(Boolean).join(' ') || '';
-    const summaryVi = result.summary_sentences?.map(s => s.vi).filter(Boolean).join(' ') || '';
-    const summaryTarget = result.summary_sentences?.map(s => s.en).filter(Boolean).join(' ') || '';
     const conclusionVi = result.conclusion_sentences?.map(s => s.vi).filter(Boolean).join(' ') || '';
     const conclusionTarget = result.conclusion_sentences?.map(s => s.en).filter(Boolean).join(' ') || '';
-    
+
     await db.run('ALTER TABLE Post ADD COLUMN target_lang TEXT DEFAULT NULL').catch(() => {}); // self-heal
     await db.run(
-        'UPDATE Post SET title = ?, target_lang = ?, hook = ?, hook_vi = ?, summary_vi = ?, summary_target = ?, conclusion_vi = ?, conclusion_target = ? WHERE id = ?',
+        'UPDATE Post SET title = ?, target_lang = ?, hook = ?, hook_vi = ?, conclusion_vi = ?, conclusion_target = ? WHERE id = ?',
         [stripLinks(result.title), targetLang, stripLinks(hookTarget), stripLinks(hookVi),
-         stripLinks(summaryVi), stripLinks(summaryTarget),
          stripLinks(conclusionVi), stripLinks(conclusionTarget), postId]
     );
 
@@ -754,15 +734,6 @@ async function saveToDb(projectId, result) {
         const pair = result.hook_sentences[k];
         await db.run(
             'INSERT INTO HookDetail (post_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
-            [postId, stripLinks(pair.en || ''), stripLinks(pair.vi || ''), k + 1]
-        );
-    }
-
-    // SummaryDetail từ array
-    for (let k = 0; k < (result.summary_sentences || []).length; k++) {
-        const pair = result.summary_sentences[k];
-        await db.run(
-            'INSERT INTO SummaryDetail (post_id, content, content_vi, "order") VALUES (?, ?, ?, ?)',
             [postId, stripLinks(pair.en || ''), stripLinks(pair.vi || ''), k + 1]
         );
     }
@@ -776,14 +747,13 @@ async function saveToDb(projectId, result) {
         );
     }
 
-    // Lưu keywords cho hook, conclusion, summary
+    // Lưu keywords cho hook, conclusion
     const savePostKeywords = async (section, factuals, cinematics) => {
         for (const kw of (factuals || [])) if (kw) await db.run('INSERT INTO Keyword (post_id, section, content, type) VALUES (?, ?, ?, ?)', [postId, section, kw, 'factual']);
         for (const kw of (cinematics || [])) if (kw) await db.run('INSERT INTO Keyword (post_id, section, content, type) VALUES (?, ?, ?, ?)', [postId, section, kw, 'cinematic']);
     };
     await savePostKeywords('hook', result.hook_keywords_factual, result.hook_keywords_cinematic);
     await savePostKeywords('conclusion', result.conclusion_keywords_factual, result.conclusion_keywords_cinematic);
-    await savePostKeywords('summary', result.summary_keywords_factual, result.summary_keywords_cinematic);
 
     let sentenceOrder = 0;
     await db.run('BEGIN TRANSACTION');
@@ -987,8 +957,8 @@ async function saveToDb(projectId, result) {
             }
         };
 
-        // Sections: hook, summary, conclusion — RSS news khớp keyword của section
-        for (const section of ['hook', 'summary', 'conclusion']) {
+        // Sections: hook, conclusion — RSS news khớp keyword của section
+        for (const section of ['hook', 'conclusion']) {
             const kws = await db.all('SELECT content FROM Keyword WHERE post_id = ? AND section = ?', [postId, section]);
             if (!kws.length) continue;
             const vFolder = path.join(BASE_DIR, projectId, 'assets', '_raw_videos', section);

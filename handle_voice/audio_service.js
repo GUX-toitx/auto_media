@@ -114,7 +114,7 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid, cont
     const db = await getDb();
 
     // Xây dựng danh sách theo đúng thứ tự DOM:
-    // HookDetail -> summary -> Paragraph(title, details -> Sentence(title, details)) -> conclusion
+    // HookDetail -> Paragraph(title, details -> Sentence(title, details)) -> conclusion
     const isVi = contentType === 'content_vi';
     const tf = isVi ? 'content_vi' : 'content'; // text field
     const rows = [];
@@ -123,9 +123,6 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid, cont
 
     const hookDetails = await db.all('SELECT id, content, content_vi FROM HookDetail WHERE post_id = ? ORDER BY "order"', [postId]);
     for (const d of hookDetails) if ((d[tf] || '').trim()) rows.push({ src: 'hook', id: d.id, text: d[tf] });
-
-    const summaryDetails = await db.all('SELECT id, content, content_vi FROM SummaryDetail WHERE post_id = ? ORDER BY "order"', [postId]);
-    for (const d of summaryDetails) if ((d[tf] || '').trim()) rows.push({ src: 'summary', id: d.id, text: d[tf] });
 
     const paragraphs = await db.all('SELECT id, title, title_vi FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);
     for (const para of paragraphs) {
@@ -166,7 +163,7 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid, cont
         for (let i = 0; i < batchSentences.length; i++) {
             const row = rowIds[i];
             if (row && batchSentences[i]?.uuid) {
-                const tblMap = { hook: 'HookDetail', summary: 'SummaryDetail', conclusion: 'ConclusionDetail', para: 'ParagraphDetail', sent: 'SentenceDetail', para_title: 'Paragraph', sent_title: 'Sentence' };
+                const tblMap = { hook: 'HookDetail', conclusion: 'ConclusionDetail', para: 'ParagraphDetail', sent: 'SentenceDetail', para_title: 'Paragraph', sent_title: 'Sentence' };
                 const tbl = tblMap[row.src];
                 if (tbl) await db2.run(`UPDATE ${tbl} SET sentence_uuid = ? WHERE id = ?`, [batchSentences[i].uuid, row.id]);
             }
@@ -216,7 +213,7 @@ export async function checkAndSaveVoice(batchUuid, postId, contentType = 'conten
         const batchSentences = sentenceData.data || [];
 
         // Xây dựng units theo đúng thứ tự DOM:
-        // HookDetail -> summary -> Paragraph(title, details -> Sentence(title, details)) -> conclusion
+        // HookDetail -> Paragraph(title, details -> Sentence(title, details)) -> conclusion
         const isVi = contentType === 'content_vi';
         const audioField = isVi ? '_vi_audio' : '_audio';
         const units = [];
@@ -226,11 +223,6 @@ export async function checkAndSaveVoice(batchUuid, postId, contentType = 'conten
         const hookDetails = await db.all('SELECT id, content, content_vi FROM HookDetail WHERE post_id = ? ORDER BY "order"', [postId]);
         for (const d of hookDetails) {
             if (d.content_vi || d.content) units.push({ table: 'HookDetail', id: d.id, field: `content${audioField}` });
-        }
-
-        const summaryDetails = await db.all('SELECT id, content, content_vi FROM SummaryDetail WHERE post_id = ? ORDER BY "order"', [postId]);
-        for (const d of summaryDetails) {
-            if (d.content_vi || d.content) units.push({ table: 'SummaryDetail', id: d.id, field: `content${audioField}` });
         }
 
         const paragraphs = await db.all('SELECT id, title, title_vi FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);
@@ -283,10 +275,6 @@ export async function getAllAudioUrls(postId, contentType = 'content') {
     // HookDetail
     const hookDetails = await db.all(`SELECT content${sf} FROM HookDetail WHERE post_id = ? ORDER BY "order"`, [postId]);
     for (const d of hookDetails) if (d[`content${sf}`]) urls.push({ order: urls.length + 1, audio: d[`content${sf}`] });
-
-    // SummaryDetail
-    const summaryDetails = await db.all(`SELECT content${sf} FROM SummaryDetail WHERE post_id = ? ORDER BY "order"`, [postId]);
-    for (const d of summaryDetails) if (d[`content${sf}`]) urls.push({ order: urls.length + 1, audio: d[`content${sf}`] });
 
     // Paragraphs
     const paragraphs = await db.all('SELECT id FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);

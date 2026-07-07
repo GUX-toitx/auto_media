@@ -74,12 +74,6 @@ export async function initDB() {
     await db.run('ALTER TABLE Post ADD COLUMN mo_bai_audio TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN mo_bai_vi_audio TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN voice_content_type TEXT DEFAULT NULL').catch(() => {});
-    await db.run('ALTER TABLE Post ADD COLUMN summary TEXT DEFAULT NULL').catch(() => {});
-    await db.run('ALTER TABLE Post ADD COLUMN summary_vi TEXT DEFAULT NULL').catch(() => {});
-    await db.run('ALTER TABLE Post ADD COLUMN summary_audio TEXT DEFAULT NULL').catch(() => {});
-    await db.run('ALTER TABLE Post ADD COLUMN summary_vi_audio TEXT DEFAULT NULL').catch(() => {});
-    await db.run('ALTER TABLE Post ADD COLUMN summary_target TEXT DEFAULT NULL').catch(() => {});
-    await db.run('ALTER TABLE Post ADD COLUMN summary_target_audio TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN conclusion_vi TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN conclusion_vi_audio TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN conclusion_target TEXT DEFAULT NULL').catch(() => {});
@@ -115,7 +109,6 @@ export async function initDB() {
     await db.run('ALTER TABLE Asset ADD COLUMN source_id INTEGER DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Asset ADD COLUMN source_url TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Asset ADD COLUMN hook_detail_id INTEGER DEFAULT NULL').catch(() => {});
-    await db.run('ALTER TABLE Asset ADD COLUMN summary_detail_id INTEGER DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Asset ADD COLUMN paragraph_detail_id INTEGER DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Asset ADD COLUMN sentence_detail_id INTEGER DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE ChromeProfile ADD COLUMN proxy TEXT DEFAULT NULL').catch(() => {});
@@ -168,17 +161,14 @@ export async function initDB() {
         FOREIGN KEY(post_id) REFERENCES Post(id)
     )`).catch(() => {});
     await db.run('ALTER TABLE Asset ADD COLUMN conclusion_detail_id INTEGER DEFAULT NULL').catch(() => {});
-    await db.run(`CREATE TABLE IF NOT EXISTS SummaryDetail (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        post_id INTEGER NOT NULL,
-        content TEXT,
-        content_vi TEXT,
-        content_audio TEXT,
-        content_vi_audio TEXT,
-        sentence_uuid TEXT,
-        "order" INTEGER NOT NULL DEFAULT 0,
-        FOREIGN KEY(post_id) REFERENCES Post(id)
-    )`).catch(() => {});
+    // Bỏ phần tóm tắt (summary): xóa dữ liệu, bảng SummaryDetail và các cột summary* trên DB hiện có
+    await db.run('DROP TABLE IF EXISTS SummaryDetail').catch(() => {});
+    await db.run("DELETE FROM Asset WHERE section = 'summary'").catch(() => {});
+    await db.run("DELETE FROM Keyword WHERE section = 'summary'").catch(() => {});
+    for (const col of ['summary', 'summary_vi', 'summary_audio', 'summary_vi_audio', 'summary_target', 'summary_target_audio']) {
+        await db.run(`ALTER TABLE Post DROP COLUMN ${col}`).catch(() => {});
+    }
+    await db.run('ALTER TABLE Asset DROP COLUMN summary_detail_id').catch(() => {});
     await db.run(`CREATE TABLE IF NOT EXISTS LipsSyncJob (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         post_id INTEGER NOT NULL,

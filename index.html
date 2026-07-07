@@ -344,203 +344,6 @@
                     </div>
                 </div>
 
-                <!-- Tóm tắt -->
-                <div v-if="activePost.summary_details?.length" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
-                    <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Tóm tắt</p>
-                    <div class="space-y-1">
-                        <div v-for="d in activePost.summary_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
-                             @drop="handleDetailDrop($event, d, 'summary_detail')"
-                             @dragover.prevent
-                             @dragenter.prevent>
-                            <div class="grid grid-cols-2 gap-1">
-                                <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveSummaryDetailField(d, 'content_vi', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content_vi" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500"></div>
-                                <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveSummaryDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
-                            </div>
-                            <div class="grid grid-cols-2 gap-1">
-                                <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                                <div><audio-bar v-if="d.content_audio" :src="d.content_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                            </div>
-                            <!-- Assets for this detail -->
-                            <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
-                                <div v-if="d.videos?.length" class="space-y-0.5">
-                                    <p class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
-                                    <div class="grid grid-cols-4 gap-1">
-                                        <div v-for="(v, vi) in d.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
-                                             draggable="true"
-                                             @dragstart="handleAssetDragStart($event, v, 'video', d, 'summary_detail')">
-                                            <news-tag :name="v.name" :link="v.sourceUrl"></news-tag>
-                                            <button @click="deleteDetailAsset(v, d, 'summary_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
-                                            <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video')" class="w-full h-16 object-cover rounded mb-1 bg-black cursor-pointer"></video>
-                                            <a v-else :href="v.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
-                                            <div class="flex gap-0.5">
-                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ vi+1 }}</span>
-                                                <button @click="openEdit(v,'video')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                <button @click="openAssignDetailModal(v,'video')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div v-if="d.images?.length" class="space-y-0.5 mt-1">
-                                    <p class="text-[8px] text-gray-500 mb-0.5">Images ({{d.images.length}})</p>
-                                    <div class="grid grid-cols-4 gap-1">
-                                        <div v-for="(img, ii) in d.images" :key="img.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
-                                             draggable="true"
-                                             @dragstart="handleAssetDragStart($event, img, 'image', d, 'summary_detail')">
-                                            <news-tag :name="img.name" :link="img.sourceUrl"></news-tag>
-                                            <button @click="deleteDetailAsset(img, d, 'summary_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
-                                            <img v-if="previewMode" :src="img.url" @click="openPreview(img,'image')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
-                                            <a v-else :href="img.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
-                                            <div class="flex gap-0.5">
-                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ ii+1 }}</span>
-                                                <button @click="openEdit(img,'image')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                <button @click="openAssignDetailModal(img,'image')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Keywords -->
-                    <div class="space-y-1 mt-1">
-                        <div class="flex flex-wrap gap-1 items-center">
-                            <span class="text-[9px] font-black text-blue-400 uppercase tracking-widest w-20 shrink-0">Factual</span>
-                            <span v-for="kw in (activePost.sections?.summary?.keywords || []).filter(k => k.type === 'factual' || !k.type)" :key="kw.id" class="keyword-tag text-[10px] border-blue-800 text-blue-300">
-                                {{ kw.content }}<b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteSectionKeyword(kw, 'summary')">×</b>
-                            </span>
-                            <input @keydown.enter="addSectionKeyword($event, 'summary', 'factual')" placeholder="+ factual" class="bg-transparent border border-dashed border-blue-800 rounded px-2 py-0.5 text-[10px] text-blue-400 outline-none w-28 focus:border-blue-500">
-                        </div>
-                        <div class="flex flex-wrap gap-1 items-center">
-                            <span class="text-[9px] font-black text-purple-400 uppercase tracking-widest w-20 shrink-0">Cinematic</span>
-                            <span v-for="kw in (activePost.sections?.summary?.keywords || []).filter(k => k.type === 'cinematic')" :key="kw.id" class="keyword-tag text-[10px] border-purple-800 text-purple-300">
-                                {{ kw.content }}<b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteSectionKeyword(kw, 'summary')">×</b>
-                            </span>
-                            <input @keydown.enter="addSectionKeyword($event, 'summary', 'cinematic')" placeholder="+ cinematic" class="bg-transparent border border-dashed border-purple-800 rounded px-2 py-0.5 text-[10px] text-purple-400 outline-none w-28 focus:border-purple-500">
-                        </div>
-                        <div class="flex flex-wrap gap-1 items-center">
-                            <span class="text-[9px] font-black text-green-400 uppercase tracking-widest w-20 shrink-0">🇻🇳 VN</span>
-                            <span v-for="kw in (activePost.sections?.summary?.keywords || []).filter(k => k.type === 'vn')" :key="kw.id" class="keyword-tag text-[10px] border-green-800 text-green-300">
-                                {{ kw.content }}<b class="cursor-pointer hover:text-red-400 ml-1" @click="deleteSectionKeyword(kw, 'summary')">×</b>
-                            </span>
-                            <input @keydown.enter="crawlVnSection($event, 'summary')" placeholder="+ keyword VN" class="bg-transparent border border-dashed border-green-800 rounded px-2 py-0.5 text-[10px] text-green-400 outline-none w-32 focus:border-green-500">
-                        </div>
-                    </div>
-                    <!-- Selected summary videos -->
-                    <div v-if="(activePost.sections?.summary?.videos||[]).some(a=>a.selected)">
-                        <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="activePost.sections['summary']._selVideoOpen = activePost.sections['summary']._selVideoOpen === false ? true : false">
-                            {{ activePost.sections['summary']._selVideoOpen === false ? '▶' : '▼' }} <span class="w-1.5 h-1.5 bg-blue-500 rounded-full mx-1"></span> Videos đã chọn ({{ (activePost.sections?.summary?.videos||[]).filter(a=>a.selected).length }})
-                        </div>
-                        <div v-if="activePost._secNarr?.summary && (activePost._secNarr.summary.vi > 0 || activePost._secNarr.summary.target > 0)" class="flex gap-3 mt-1 mb-1">
-                            <div v-if="activePost._secNarr.summary.vi > 0" class="flex-1 space-y-0.5">
-                                <div class="h-2.5 bg-gray-800 rounded-full overflow-hidden">
-                                    <div class="h-full rounded-full transition-all duration-300" :class="sectionSelectedSec('summary') + 0.05 >= activePost._secNarr.summary.vi ? 'bg-green-500' : 'bg-yellow-500'" :style="{ width: Math.min(100, sectionSelectedSec('summary') / activePost._secNarr.summary.vi * 100) + '%' }"></div>
-                                </div>
-                                <div class="text-[11px] font-mono tabular-nums font-black text-center">🇻🇳 <span class="text-gray-300">{{ sectionSelectedSec('summary').toFixed(1) }}/{{ activePost._secNarr.summary.vi.toFixed(1) }}s</span> <span class="text-gray-600">·</span> <span :class="coverageClass(sectionSelectedSec('summary'), activePost._secNarr.summary.vi)">{{ coverageText(sectionSelectedSec('summary'), activePost._secNarr.summary.vi) }}</span></div>
-                            </div>
-                            <div v-if="activePost._secNarr.summary.target > 0" class="flex-1 space-y-0.5">
-                                <div class="h-2.5 bg-gray-800 rounded-full overflow-hidden">
-                                    <div class="h-full rounded-full transition-all duration-300" :class="sectionSelectedSec('summary') + 0.05 >= activePost._secNarr.summary.target ? 'bg-green-500' : 'bg-yellow-500'" :style="{ width: Math.min(100, sectionSelectedSec('summary') / activePost._secNarr.summary.target * 100) + '%' }"></div>
-                                </div>
-                                <div class="text-[11px] font-mono tabular-nums font-black text-center">🌍 <span class="text-gray-300">{{ sectionSelectedSec('summary').toFixed(1) }}/{{ activePost._secNarr.summary.target.toFixed(1) }}s</span> <span class="text-gray-600">·</span> <span :class="coverageClass(sectionSelectedSec('summary'), activePost._secNarr.summary.target)">{{ coverageText(sectionSelectedSec('summary'), activePost._secNarr.summary.target) }}</span></div>
-                            </div>
-                        </div>
-                        <div v-if="activePost.sections['summary']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
-                            <div v-for="v in (activePost.sections?.summary?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" 
-                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
-                                 draggable="true"
-                                 @dragstart="handleSectionAssetDragStart($event, v, 'video', 'summary')">
-                                <news-tag :name="v.name" :link="v.sourceUrl"></news-tag>
-                                <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video',null,'summary')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
-                                <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
-                                <div class="flex gap-1">
-                                    <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
-                                    <button @click="toggleSectionAsset(v,'summary','video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
-                                    <button @click="openEdit(v,'video',null,'summary')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Selected summary images -->
-                    <div v-if="(activePost.sections?.summary?.images||[]).some(a=>a.selected)">
-                        <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="activePost.sections['summary']._selImageOpen = activePost.sections['summary']._selImageOpen === false ? true : false">
-                            {{ activePost.sections['summary']._selImageOpen === false ? '▶' : '▼' }} <span class="w-1.5 h-1.5 bg-orange-500 rounded-full mx-1"></span> Images đã chọn ({{ (activePost.sections?.summary?.images||[]).filter(a=>a.selected).length }})
-                        </div>
-                        <div v-if="activePost.sections['summary']._selImageOpen !== false" class="grid grid-cols-6 gap-1 mt-1">
-                            <div v-for="img in (activePost.sections?.summary?.images||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="img.relativePath" 
-                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
-                                 draggable="true"
-                                 @dragstart="handleSectionAssetDragStart($event, img, 'image', 'summary')">
-                                <news-tag :name="img.name" :link="img.sourceUrl"></news-tag>
-                                <img v-if="previewMode" :src="img.url" @click="openPreview(img,'image',null,'summary')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
-                                <a v-else :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
-                                <div class="flex gap-1">
-                                    <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
-                                    <button @click="toggleSectionAsset(img,'summary','image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
-                                    <button @click="openEdit(img,'image',null,'summary')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Videos -->
-                    <div>
-                        <div class="flex items-center text-[10px] font-black text-gray-500 select-none py-1">
-                            <span @click="activePost.sections['summary']._videoOpen = !activePost.sections['summary']._videoOpen" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
-                                {{ activePost.sections?.['summary']?._videoOpen ? '▼' : '▶' }}
-                                <span class="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
-                                Videos ({{ (activePost.sections?.summary?.videos || []).filter(v=>!v.selected).length }})
-                            </span>
-                            <button @click="deleteSectionAll('summary','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
-                            <button v-if="(activePost.sections?.summary?.videos || []).filter(v=>!v.selected && v._toDelete).length" @click="deleteSelectedSectionAssets('summary','video')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (activePost.sections?.summary?.videos || []).filter(v=>!v.selected && v._toDelete).length }})</button>
-                            <button @click="uploadSectionAsset('summary','video')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
-                        </div>
-                        <div v-if="activePost.sections?.['summary']?._videoOpen && (activePost.sections?.summary?.videos || []).filter(v=>!v.selected).length" class="grid grid-cols-4 gap-1 mt-1">
-                            <div v-for="v in (activePost.sections?.summary?.videos || []).filter(v=>!v.selected)" :key="v.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
-                                :class="[v.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800', v._toDelete ? 'ring-2 ring-red-500' : '']">
-                                <news-tag :name="v.name" :link="v.sourceUrl"></news-tag>
-                                <input type="checkbox" v-model="v._toDelete" class="absolute top-1 left-1 z-10 w-4 h-4 cursor-pointer">
-                                <button @click="deleteSectionAsset(v,'summary')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-10 flex items-center justify-center font-bold shadow-lg">&times;</button>
-                                <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v, 'video', null, 'summary')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
-                                <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
-                                <div class="flex gap-1">
-                                    <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
-                                    <button @click="toggleSectionAsset(v, 'summary', 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Images -->
-                    <div>
-                        <div class="flex items-center text-[10px] font-black text-gray-500 select-none py-1">
-                            <span @click="activePost.sections['summary']._imageOpen = !activePost.sections['summary']._imageOpen" class="flex items-center gap-1.5 cursor-pointer hover:text-gray-300">
-                                {{ activePost.sections?.['summary']?._imageOpen ? '▼' : '▶' }}
-                                <span class="w-1.5 h-1.5 bg-orange-500 rounded-full"></span>
-                                Images ({{ (activePost.sections?.summary?.images || []).filter(v=>!v.selected).length }})
-                            </span>
-                            <button @click="deleteSectionAll('summary','image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-2">Xóa tất cả</button>
-                            <button v-if="(activePost.sections?.summary?.images || []).filter(v=>!v.selected && v._toDelete).length" @click="deleteSelectedSectionAssets('summary','image')" class="text-[9px] px-1.5 py-0.5 rounded bg-red-900/50 hover:bg-red-600 text-red-400 hover:text-white ml-1">Xóa đã chọn ({{ (activePost.sections?.summary?.images || []).filter(v=>!v.selected && v._toDelete).length }})</button>
-                            <button @click="uploadSectionAsset('summary','image')" class="text-[9px] px-2.5 py-1 rounded-md bg-blue-600/80 hover:bg-blue-500 text-white font-black tracking-wide transition-all active:scale-95 ml-auto">📤 Upload</button>
-                        </div>
-                        <div v-if="activePost.sections?.['summary']?._imageOpen && (activePost.sections?.summary?.images || []).filter(v=>!v.selected).length" class="grid grid-cols-6 gap-1 mt-1">
-                            <div v-for="img in (activePost.sections?.summary?.images || []).filter(v=>!v.selected)" :key="img.relativePath" class="card-asset bg-gray-900 p-1 rounded-lg border relative"
-                                :class="[img.selected ? 'border-green-500 ring-1 ring-green-500/20' : 'border-gray-800', img._toDelete ? 'ring-2 ring-red-500' : '']">
-                                <news-tag :name="img.name" :link="img.sourceUrl"></news-tag>
-                                <input type="checkbox" v-model="img._toDelete" class="absolute top-0.5 left-0.5 z-10 w-4 h-4 cursor-pointer">
-                                <button @click="deleteSectionAsset(img,'summary')" class="absolute top-0.5 right-0.5 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-10 flex items-center justify-center font-bold shadow-lg">&times;</button>
-                                <img v-if="previewMode" :src="img.url" @click="openPreview(img, 'image', null, 'summary')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
-                                <a v-else :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
-                                <div class="flex gap-1">
-                                    <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
-                                    <button @click="toggleSectionAsset(img, 'summary', 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 <div v-for="(para, i) in activePost.paragraphs" :key="para.id" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
 
                     <!-- Row 1: badge + sentences -->
@@ -1894,25 +1697,6 @@
                     </div>
                 </div>
                 
-                <!-- Summary Section -->
-                <div class="border border-gray-700 rounded-lg overflow-hidden">
-                    <button @click="selectTargetSection('summary')" 
-                            @dblclick="assignToSection('summary')"
-                            class="w-full text-left px-3 py-2 bg-gray-800 hover:bg-gray-700 text-[11px] font-bold text-gray-300 transition-colors flex items-center justify-between">
-                        <span>📝 Tóm tắt (Summary)</span>
-                        <span class="text-gray-500">{{ assignDetailModal.selectedTarget === 'summary' ? '▼' : '▶' }}</span>
-                    </button>
-                    <div v-if="assignDetailModal.selectedTarget === 'summary'" class="bg-gray-900 border-t border-gray-700 p-2 space-y-1">
-                        <div v-if="!assignDetailModal.details.length" class="text-[10px] text-gray-600 italic px-2 py-2">Chưa có Summary Details</div>
-                        <button v-for="(d, i) in assignDetailModal.details" :key="d.id" 
-                                @click="expandDetail(d)"
-                                @dblclick="assignAssetToDetail(d.id)" 
-                                class="w-full text-left px-3 py-2 rounded bg-gray-800 hover:bg-blue-600 text-[10px] text-gray-300 transition-colors">
-                            📝 Detail #{{ i + 1 }}: {{ (d.content_vi || d.content || '').slice(0, 70) }}...
-                        </button>
-                    </div>
-                </div>
-                
                 <!-- Conclusion Section -->
                 <div class="border border-gray-700 rounded-lg overflow-hidden">
                     <button @click="selectTargetSection('conclusion')" 
@@ -1967,7 +1751,7 @@
             <p class="text-[10px] text-gray-500">Chọn nơi muốn di chuyển tới:</p>
             <div class="space-y-1 max-h-80 overflow-y-auto">
                 <!-- Sections -->
-                <div v-for="s in [['hook','Mở bài'],['summary','Tóm tắt'],['conclusion','Kết bài']]" :key="s[0]">
+                <div v-for="s in [['hook','Mở bài'],['conclusion','Kết bài']]" :key="s[0]">
                     <button @click="doMoveAsset(null, s[0])" class="w-full text-left px-3 py-2 rounded-lg bg-gray-800 hover:bg-blue-700 text-[11px] text-gray-300 transition-colors">
                         📌 {{ s[1] }}
                     </button>
@@ -2359,7 +2143,7 @@ createApp({
             }));
             if (!data.sections) data.sections = {};
             // Init toggle state cho sections
-            for (const s of ['hook', 'summary', 'conclusion']) {
+            for (const s of ['hook', 'conclusion']) {
                 if (!data.sections[s]) data.sections[s] = { keywords: [], videos: [], images: [] };
                 data.sections[s]._videoOpen = false;
                 data.sections[s]._imageOpen = false;
@@ -2378,7 +2162,7 @@ createApp({
                         p._narrationViSec = pp._narrationViSec; p._narrationTargetSec = pp._narrationTargetSec;
                     }
                 });
-                for (const s of ['hook', 'summary', 'conclusion']) {
+                for (const s of ['hook', 'conclusion']) {
                     const ps = prevPost.sections && prevPost.sections[s];
                     if (ps && data.sections[s]) {
                         data.sections[s]._videoOpen = ps._videoOpen;
@@ -2392,7 +2176,7 @@ createApp({
             activePost.value = data;
             // Tính độ dài giọng đọc từng cảnh + section (nền) -> hiện thanh gợi ý số giây đã chọn
             (activePost.value.paragraphs || []).forEach(p => computeNarration(p));
-            ['hook', 'summary', 'conclusion'].forEach(k => computeSectionNarration(k));
+            ['hook', 'conclusion'].forEach(k => computeSectionNarration(k));
             maybeStartCrawlPoll(post.id);
             loadLipsSyncIndex(post.id); // nạp lips_sync video theo từng câu
         }
@@ -2491,14 +2275,6 @@ createApp({
             if (value === (detail[field] || '').trim()) return;
             detail[field] = value;
             await fetch('/api/save-hook-detail-field', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ detailId: detail.id, field, value }) });
-        }
-
-        async function saveSummaryDetailField(detail, field, event) {
-            const value = event.target.innerText.trim();
-            if (value === (detail[field] || '').trim()) return;
-            detail[field] = value;
-            await fetch('/api/save-summary-detail-field', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ detailId: detail.id, field, value }) });
         }
 
@@ -3807,7 +3583,7 @@ createApp({
                 if (updatedData && updatedData.paragraphs) {
                     // Cập nhật sections (hook/summary/conclusion) - giữ toggle state và _toDelete
                     if (updatedData.sections) {
-                        for (const s of ['hook', 'summary', 'conclusion']) {
+                        for (const s of ['hook', 'conclusion']) {
                             if (updatedData.sections[s]) {
                                 const prev = activePost.value.sections?.[s];
                                 updatedData.sections[s]._videoOpen = prev?._videoOpen ?? false;
@@ -3914,9 +3690,6 @@ createApp({
             if (section === 'hook') {
                 details = activePost.value.hook_details || [];
                 detailType = 'hook_detail';
-            } else if (section === 'summary') {
-                details = activePost.value.summary_details || [];
-                detailType = 'summary_detail';
             } else if (section === 'conclusion') {
                 details = activePost.value.conclusion_details || [];
                 detailType = 'conclusion_detail';
@@ -4077,7 +3850,6 @@ createApp({
             deleteSectionKeyword,
             saveDetailField, saveParaDetailField,
             saveHookDetailField,
-            saveSummaryDetailField,
             saveConclusionDetailField,
             toggleSectionAsset,
             deleteSectionAsset,

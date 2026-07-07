@@ -267,7 +267,7 @@ async function main() {
         }
 
         if (paragraphsToProcess.length === 0) {
-            // Kiểm tra thêm post sections (hook/summary/conclusion)
+            // Kiểm tra thêm post sections (hook/conclusion)
             const sectionsToProcess = await db.all(`
                 SELECT DISTINCT k.post_id, k.section, p.project_id
                 FROM Keyword k

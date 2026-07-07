@@ -260,10 +260,10 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     const audioField = isVi ? 'content_vi_audio' : 'content_audio';
     const altField   = isVi ? 'content_audio' : 'content_vi_audio';
 
-    // ===== Dựng danh sách UNIT để xuất: mở bài -> tóm tắt -> [luận điểm] -> kết bài =====
+    // ===== Dựng danh sách UNIT để xuất: mở bài -> [luận điểm] -> kết bài =====
     // Mỗi unit: { label, audioUrls, selected[], videoPool[], imagePool[] }
     const units = [];
-    // Section (mở bài/tóm tắt/kết bài): audio ghép từ *Detail; media = pool đã chọn + media gán theo detail
+    // Section (mở bài/kết bài): audio ghép từ *Detail; media = pool đã chọn + media gán theo detail
     async function buildSectionUnit(key, detailTable, detailIdCol) {
         const details = await db.all(`SELECT id, ${audioField}, ${altField} FROM ${detailTable} WHERE post_id = ? ORDER BY "order"`, [postId]);
         if (!details.length) return null;
@@ -279,8 +279,6 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     }
     const hookU = await buildSectionUnit('hook', 'HookDetail', 'hook_detail_id');
     if (hookU) units.push(hookU);
-    const summaryU = await buildSectionUnit('summary', 'SummaryDetail', 'summary_detail_id');
-    if (summaryU) units.push(summaryU);
     for (const para of paragraphs) {
         const paraAudioUrl = para[audioField] || para[altField] || para['audio'];
         const pd = await db.all(`SELECT ${audioField}, ${altField} FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"`, [para.id]);

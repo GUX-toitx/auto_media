@@ -47,7 +47,7 @@ app.get('/api/posts', async (req, res) => {
 app.get('/api/posts/:postId', async (req, res) => {
     try {
         const db = await getDb();
-        const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, summary, summary_vi, summary_audio, summary_vi_audio, summary_target, summary_target_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio, intro_path, outro_path, seo_title FROM Post WHERE id = ?', [req.params.postId]);
+        const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio, intro_path, outro_path, seo_title FROM Post WHERE id = ?', [req.params.postId]);
         if (!post) return res.status(404).json({ error: 'Post not found' });
 
         // HookDetail
@@ -73,23 +73,11 @@ app.get('/api/posts/:postId', async (req, res) => {
             detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null }));
         }
         
-        // SummaryDetail
-        post.summary_details = await db.all(
-            'SELECT id, content, content_vi, content_audio, content_vi_audio, "order" FROM SummaryDetail WHERE post_id = ? ORDER BY "order"',
-            [post.id]
-        );
-        // Load assets for each summary_detail
-        for (const detail of post.summary_details) {
-            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration, source_url FROM Asset WHERE summary_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
-            detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null }));
-            detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null }));
-        }
-
         // Lấy keywords và assets cho từng section của post
         const sections = {};
-        for (const section of ['hook', 'summary', 'conclusion', 'thumbnail']) {
+        for (const section of ['hook', 'conclusion', 'thumbnail']) {
             const kws = await db.all('SELECT id, content, type FROM Keyword WHERE post_id = ? AND section = ? ORDER BY id', [post.id, section]);
-            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration, source_url FROM Asset WHERE post_id = ? AND section = ? AND hook_detail_id IS NULL AND summary_detail_id IS NULL AND conclusion_detail_id IS NULL ORDER BY selected DESC, COALESCE(source_id, id), id', [post.id, section]);
+            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration, source_url FROM Asset WHERE post_id = ? AND section = ? AND hook_detail_id IS NULL AND conclusion_detail_id IS NULL ORDER BY selected DESC, COALESCE(source_id, id), id', [post.id, section]);
             const projectId = (post.project_id || '').replace(/_[a-z]{2}$/, '');
             sections[section] = {
                 keywords: kws,
@@ -204,13 +192,13 @@ app.post('/api/move-asset', async (req, res) => {
         if (!asset) { await db.close(); return res.status(404).json({ error: 'Asset not found' }); }
 
         const isFromSection = !!(asset.post_id && asset.section &&
-            !asset.hook_detail_id && !asset.summary_detail_id && !asset.conclusion_detail_id &&
+            !asset.hook_detail_id && !asset.conclusion_detail_id &&
             !asset.paragraph_detail_id && !asset.sentence_detail_id);
-        const isFromDetail = !!(asset.hook_detail_id || asset.summary_detail_id || asset.conclusion_detail_id ||
+        const isFromDetail = !!(asset.hook_detail_id || asset.conclusion_detail_id ||
             asset.paragraph_detail_id || asset.sentence_detail_id);
 
         const detailCols = {
-            hook_detail: 'hook_detail_id', summary_detail: 'summary_detail_id',
+            hook_detail: 'hook_detail_id',
             conclusion_detail: 'conclusion_detail_id', paragraph_detail: 'paragraph_detail_id',
             sentence_detail: 'sentence_detail_id'
         };
@@ -231,17 +219,17 @@ app.post('/api/move-asset', async (req, res) => {
             } else {
                 // Từ detail -> detail: chỉ update id
                 await db.run(`UPDATE Asset SET
-                    hook_detail_id = NULL, summary_detail_id = NULL, conclusion_detail_id = NULL,
+                    hook_detail_id = NULL, conclusion_detail_id = NULL,
                     paragraph_detail_id = NULL, sentence_detail_id = NULL,
                     post_id = NULL, section = NULL, paragraph_id = NULL, sentence_id = NULL
                     WHERE id = ?`, [assetId]);
                 await db.run(`UPDATE Asset SET ${col} = ? WHERE id = ?`, [targetDetailId, assetId]);
             }
         } else if (targetPostId && targetSection) {
-            await db.run('UPDATE Asset SET paragraph_id = NULL, sentence_id = NULL, post_id = ?, section = ?, hook_detail_id = NULL, summary_detail_id = NULL, conclusion_detail_id = NULL, paragraph_detail_id = NULL, sentence_detail_id = NULL WHERE id = ?',
+            await db.run('UPDATE Asset SET paragraph_id = NULL, sentence_id = NULL, post_id = ?, section = ?, hook_detail_id = NULL, conclusion_detail_id = NULL, paragraph_detail_id = NULL, sentence_detail_id = NULL WHERE id = ?',
                 [targetPostId, targetSection, assetId]);
         } else if (targetParagraphId) {
-            await db.run('UPDATE Asset SET paragraph_id = ?, sentence_id = NULL, post_id = NULL, section = NULL, hook_detail_id = NULL, summary_detail_id = NULL, conclusion_detail_id = NULL, paragraph_detail_id = NULL, sentence_detail_id = NULL WHERE id = ?',
+            await db.run('UPDATE Asset SET paragraph_id = ?, sentence_id = NULL, post_id = NULL, section = NULL, hook_detail_id = NULL, conclusion_detail_id = NULL, paragraph_detail_id = NULL, sentence_detail_id = NULL WHERE id = ?',
                 [targetParagraphId, assetId]);
         }
 
@@ -543,7 +531,7 @@ app.post('/api/update-sentence', async (req, res) => {
 app.post('/api/save-post-field', async (req, res) => {
     try {
         const { postId, field, value } = req.body;
-        if (!['title', 'hook', 'hook_vi', 'summary', 'summary_vi', 'summary_target', 'conclusion_vi', 'conclusion_target'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
+        if (!['title', 'hook', 'hook_vi', 'conclusion_vi', 'conclusion_target'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
         const db = await getDb();
         await db.run(`UPDATE Post SET ${field} = ? WHERE id = ?`, [value, postId]);
         await db.close();
@@ -601,17 +589,6 @@ app.post('/api/save-conclusion-detail-field', async (req, res) => {
         if (!['content', 'content_vi'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
         const db = await getDb();
         await db.run(`UPDATE ConclusionDetail SET ${field} = ? WHERE id = ?`, [value, detailId]);
-        await db.close();
-        res.json({ ok: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post('/api/save-summary-detail-field', async (req, res) => {
-    try {
-        const { detailId, field, value } = req.body;
-        if (!['content', 'content_vi'].includes(field)) return res.status(400).json({ error: 'Invalid field' });
-        const db = await getDb();
-        await db.run(`UPDATE SummaryDetail SET ${field} = ? WHERE id = ?`, [value, detailId]);
         await db.close();
         res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -729,7 +706,7 @@ app.post('/api/crawl-all', async (req, res) => {
         };
 
         // Sections
-        for (const section of ['hook', 'summary', 'conclusion']) {
+        for (const section of ['hook', 'conclusion']) {
             const kws = await db.all('SELECT content FROM Keyword WHERE post_id = ? AND section = ?', [postId, section]);
             if (!kws.length) continue;
             const vF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_videos', section);
@@ -1326,7 +1303,7 @@ app.post('/api/generate-title', async (req, res) => {
         const post0 = await db.get('SELECT project_id, target_lang FROM Post WHERE id = ?', [postId]);
         const pick = (r) => (r.content || r.content_vi || '').trim();
         const parts = [];
-        for (const tbl of ['HookDetail', 'SummaryDetail']) {
+        for (const tbl of ['HookDetail']) {
             const rows = await db.all(`SELECT content, content_vi FROM ${tbl} WHERE post_id = ? ORDER BY "order"`, [postId]).catch(() => []);
             rows.forEach(r => { const s = pick(r); if (s) parts.push(s); });
         }
