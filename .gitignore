@@ -32,3 +32,6 @@ Thumbs.db
 .vscode/
 .idea/
 chrome*
+.venv/
+setting/chrome-profile-x/
+accounts.db

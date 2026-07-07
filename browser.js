@@ -319,8 +319,11 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
 // node browser.js <profile_dir> [email] [password]
 if (process.argv[1]?.endsWith('browser.js')) {
     const profileDirArg = process.argv[2];
-    const email = process.argv[3] || null;
-    const password = process.argv[4] || null;
+    // Chế độ "mở lấy cookie": node browser.js <profileDir> --open [url] [proxy]
+    const openOnly = process.argv[3] === '--open';
+    const openUrl = openOnly ? (process.argv[4] || 'https://x.com') : null;
+    const email = openOnly ? null : (process.argv[3] || null);
+    const password = openOnly ? null : (process.argv[4] || null);
     const proxy = process.argv[5] || null;
 
     const profileDir = profileDirArg
@@ -330,9 +333,18 @@ if (process.argv[1]?.endsWith('browser.js')) {
     if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
 
     const profileDirName = path.basename(profileDir);
-    console.log('[OK] Đang mở profile: ' + profileDirName + (email ? ` (${email})` : ''));
     const ctx = await getBrowser(profileDir, proxy);
     const page = ctx.pages()[0] || await ctx.newPage();
+
+    if (openOnly) {
+        console.log('[OK] Mở profile để lấy cookie: ' + profileDirName + ' → ' + openUrl);
+        await page.goto(openUrl).catch(() => {});
+        console.log('[OK] Đăng nhập/thao tác trên trang, xong thì đóng trình duyệt để lưu cookie.');
+        await ctx.waitForEvent('close').catch(() => {});
+        process.exit(0);
+    }
+
+    console.log('[OK] Đang mở profile: ' + profileDirName + (email ? ` (${email})` : ''));
     await page.goto('https://accounts.google.com');
 
     if (email) {

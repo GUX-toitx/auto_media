@@ -548,6 +548,42 @@
                     </div>
                 </div>
 
+                <!-- 🐦 Block nguồn X (Twitter) — chuyển ảnh/video sang các cảnh bằng nút 📦 -->
+                <div v-if="(activePost.sections?.x?.videos?.length || activePost.sections?.x?.images?.length || activePost.sections?.x?.keywords?.length)"
+                     class="bg-sky-950/30 border border-sky-800/50 rounded-xl p-3 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[11px] font-black uppercase tracking-widest text-sky-400">🐦 Nguồn X (Twitter)</span>
+                        <span class="text-[9px] text-gray-500">{{ (activePost.sections?.x?.videos||[]).length }} video · {{ (activePost.sections?.x?.images||[]).length }} ảnh — nút 📦 để chuyển sang cảnh</span>
+                    </div>
+                    <div class="flex flex-wrap gap-1 items-center">
+                        <span class="text-[9px] font-black text-sky-400 uppercase tracking-widest shrink-0">Keyword JA</span>
+                        <span v-for="kw in (activePost.sections?.x?.keywords||[])" :key="kw.id" class="keyword-tag text-[10px] border-sky-800 text-sky-300">{{ kw.content }}</span>
+                        <input @keydown.enter="addXKeyword($event)" :disabled="xCrawlLoading" placeholder="+ keyword tìm thêm trên X (Enter)" class="bg-transparent border border-dashed border-sky-700 rounded px-2 py-0.5 text-[10px] text-sky-300 outline-none w-52 focus:border-sky-500 disabled:opacity-40" title="Nhập keyword (tiếng Nhật nên dùng さくらんぼ...), Enter để cào thêm">
+                        <span v-if="xCrawlLoading" class="text-[10px] text-sky-400 animate-pulse">🔎 Đang tìm trên X...</span>
+                    </div>
+                    <div v-if="(activePost.sections?.x?.videos||[]).length" class="grid grid-cols-4 gap-1">
+                        <div v-for="v in activePost.sections.x.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-sky-700/40 relative">
+                            <news-tag :name="v.name" :link="v.sourceUrl"></news-tag>
+                            <video v-if="previewMode" muted loop preload="metadata" :src="v.url" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video')" class="w-full h-16 object-cover rounded mb-1 bg-black cursor-pointer"></video>
+                            <a v-else :href="v.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
+                            <div class="flex gap-0.5">
+                                <button @click="openMoveModal(v,'video')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white" title="Chuyển sang cảnh">📦 Chuyển</button>
+                                <button @click="deleteSectionAsset(v,'x')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-red-600/80 hover:bg-red-500 text-white">×</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-if="(activePost.sections?.x?.images||[]).length" class="grid grid-cols-6 gap-1">
+                        <div v-for="img in activePost.sections.x.images" :key="img.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-sky-700/40 relative">
+                            <news-tag :name="img.name" :link="img.sourceUrl"></news-tag>
+                            <img :src="img.url" @click="openPreview(img,'image')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
+                            <div class="flex gap-0.5">
+                                <button @click="openMoveModal(img,'image')" class="flex-1 text-[9px] font-black py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white" title="Chuyển sang cảnh">📦</button>
+                                <button @click="deleteSectionAsset(img,'x')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-red-600/80 hover:bg-red-500 text-white">×</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div v-for="(para, i) in activePost.paragraphs" :key="para.id" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3 space-y-2">
 
                     <!-- Row 1: badge + sentences -->
@@ -1621,7 +1657,7 @@
                         <td class="px-4 py-3 text-gray-300">{{ p.email || '-' }}</td>
                         <td class="px-4 py-3 text-gray-500">{{ p.updated_at ? new Date(p.updated_at).toLocaleString('vi') : 'Chưa dùng' }}</td>
                         <td class="px-4 py-3 text-right">
-                            <button @click="loginProfile(p)" :disabled="p._logging || !!p.profile_dir" class="bg-blue-600/80 hover:bg-blue-500 disabled:opacity-40 text-white text-[10px] px-2 py-1 rounded mr-1">{{ p._logging ? "Đang mở..." : "🔑 Đăng nhập" }}</button><button @click="deleteProfile(p)" class="bg-red-600/80 hover:bg-red-500 text-white text-[10px] px-2 py-1 rounded">Xóa</button>
+                            <button @click="loginProfile(p)" :disabled="p._logging || !!p.profile_dir" class="bg-blue-600/80 hover:bg-blue-500 disabled:opacity-40 text-white text-[10px] px-2 py-1 rounded mr-1">{{ p._logging ? "Đang mở..." : "🔑 Đăng nhập" }}</button><button @click="openProfileCookie(p)" :disabled="p._opening" class="bg-emerald-600/80 hover:bg-emerald-500 disabled:opacity-40 text-white text-[10px] px-2 py-1 rounded mr-1" title="Mở lại trình duyệt profile để đăng nhập trang khác / lấy thêm cookie">{{ p._opening ? "Đang mở..." : "🍪 Lấy cookie" }}</button><button @click="deleteProfile(p)" class="bg-red-600/80 hover:bg-red-500 text-white text-[10px] px-2 py-1 rounded">Xóa</button>
                         </td>
                     </tr>
                 </tbody>
@@ -1780,6 +1816,14 @@
                 <textarea v-model="nazeModal.topic" :rows="nazeModal.genre === 'drama' ? 10 : 4"
                     :placeholder="nazeModal.genre === 'drama' ? 'Dán thông tin vụ việc (tên vụ, thời gian, đối tượng, diễn biến, hậu quả pháp lý, phản ứng dư luận...). Có thể dán nhiều vụ, GPT sẽ xào thành kịch bản kể chuyện.' : 'Ví dụ: Tại sao nước biển lại mặn? Tại sao bầu trời màu xanh?'"
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-cyan-500 resize-none leading-relaxed"></textarea>
+                <!-- Drama: dán link tweet X (tùy chọn) -->
+                <div v-if="nazeModal.genre === 'drama'" class="mt-2">
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">🐦 Link bài X/Twitter (tùy chọn — mỗi dòng 1 link)</label>
+                    <textarea v-model="nazeModal.tweetUrls" rows="2"
+                        placeholder="https://x.com/user/status/123...&#10;Để trống cũng được — GPT sẽ tự sinh keyword tiếng Nhật để tìm trên X."
+                        class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[11px] text-gray-200 outline-none focus:border-cyan-500 resize-none leading-relaxed font-mono"></textarea>
+                    <p class="text-[9px] text-gray-600 mt-1">X được cào tự động cho drama: ảnh/video + ảnh chụp + quay màn hình bài viết. Keyword Nhật hiển thị dưới Factual.</p>
+                </div>
             </div>
             <!-- Tab: SRT (multi, theo cặp <lang>.<tên>.srt) -->
             <template v-if="nazeModal.mode === 'srt'">
@@ -2159,7 +2203,7 @@ createApp({
         const previewMode = ref(true);
         const profileModal = ref({ list: [], bulkText: '', cmds: [], addOpen: false, fileName: '' });
 
-        const nazeModal = ref({ open: false, genre: 'naze', mode: 'text', topic: '', projectId: '', targetLang: 'vi', loading: false, srtFile: null, srtTargetFile: null, srtFiles: [], youtubeUrl: '' });
+        const nazeModal = ref({ open: false, genre: 'naze', mode: 'text', topic: '', projectId: '', targetLang: 'vi', loading: false, srtFile: null, srtTargetFile: null, srtFiles: [], youtubeUrl: '', tweetUrls: '' });
 
         // Thêm file SRT vào danh sách multi (gộp, khử trùng theo tên)
         function nazeSrtAddFiles(fileList) {
@@ -2222,9 +2266,10 @@ createApp({
                 let res;
                 if (mode === 'text') {
                     if (!topic.trim()) return;
+                    const tweetUrls = (nazeModal.value.tweetUrls || '').split(/[\n,]+/).map(s => s.trim()).filter(Boolean).join(',');
                     res = await fetch('/api/create-naze', { method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ topic, projectId, targetLang, genre }) });
+                        body: JSON.stringify({ topic, projectId, targetLang, genre, tweetUrls }) });
                 } else if (mode === 'srt') {
                     const info = nazeSrtInfo.value;
                     if (!info.valid) { alert('❌ File chưa hợp lệ:\n' + (info.errors.join('\n') || 'Chưa đủ cặp file')); nazeModal.value.loading = false; return; }
@@ -2248,6 +2293,7 @@ createApp({
                     nazeModal.value.srtTargetFile = null;
                     nazeModal.value.srtFiles = [];
                     nazeModal.value.youtubeUrl = '';
+                    nazeModal.value.tweetUrls = '';
                     showToast(r.count ? `✅ Đã xếp hàng ${r.count} project, xử lý lần lượt...` : '✅ Đang xử lý, vui lòng chờ...');
                     await loadPosts();
                 } else { alert('❌ ' + (r.error || 'Lỗi')); }
@@ -2368,6 +2414,19 @@ createApp({
             await fetch(`/api/chrome-profiles/${p.id}/login`, { method: 'POST' });
             showToast(`🔑 Đã mở trình duyệt cho ${p.email || p.profile_dir}, đăng nhập xong thì tắt đi!`, 8000);
             p._logging = false;
+        }
+
+        // Mở lại trình duyệt profile để lấy thêm cookie (vd đăng nhập X), đóng trình duyệt để lưu
+        async function openProfileCookie(p) {
+            p._opening = true;
+            try {
+                await fetch(`/api/chrome-profiles/${p.id}/open`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: 'https://x.com' })
+                });
+                showToast(`🍪 Đã mở profile ${p.profile_dir || p.id}. Đăng nhập/thao tác xong hãy ĐÓNG trình duyệt để lưu cookie.`, 9000);
+            } catch (e) { showToast('❌ ' + e.message); }
+            p._opening = false;
         }
 
         const activeProjectId = computed(() => {
@@ -2546,6 +2605,28 @@ createApp({
         }
 
         const moveModal = ref({ open: false, asset: null, type: '' });
+        const xCrawlLoading = ref(false);
+
+        // Cào thêm X theo keyword nhập tay -> thêm media vào block X
+        async function addXKeyword(e) {
+            const kw = (e.target.value || '').trim();
+            if (!kw || !activePostId.value || xCrawlLoading.value) return;
+            e.target.value = '';
+            xCrawlLoading.value = true;
+            showToast(`🔎 Đang tìm trên X: "${kw}" — có thể mất ~1 phút...`, 90000);
+            try {
+                const res = await fetch('/api/x-crawl', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ postId: activePostId.value, keyword: kw })
+                });
+                const r = await res.json();
+                if (r.success) {
+                    showToast(`✅ "${kw}": +${r.added} media từ ${r.tweets} bài X`);
+                    await selectPost({ id: activePostId.value });
+                } else showToast('❌ ' + (r.error || 'Lỗi'));
+            } catch (err) { showToast('❌ ' + err.message); }
+            xCrawlLoading.value = false;
+        }
         const assignDetailModal = ref({ open: false, asset: null, type: '', selectedTarget: null, detailType: null, details: [] });
 
         function openMoveModal(asset, type) {
@@ -4040,6 +4121,8 @@ createApp({
             moveModal,
             openMoveModal,
             doMoveAsset,
+            xCrawlLoading,
+            addXKeyword,
             saveContent,
             fetchMedia,
             deleteAsset,
@@ -4095,6 +4178,7 @@ createApp({
             bulkAddProfiles,
             deleteProfile,
             loginProfile,
+            openProfileCookie,
             onProfileFileSelect,
             onDropProfileFile,
             loadSpeakersByLang,

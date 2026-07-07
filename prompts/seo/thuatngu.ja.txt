@@ -1,0 +1,508 @@
+
+### 1. Hiện đại hóa & Phát triển Kinh tế
+
+* **近代化 (Kindaika)**: Hiện đại hóa.
+* **改革開放 (Kaikaku Kaihō)**: Cải cách mở cửa.
+* **高度経済成長 (Kōdo Keizai Seichō)**: Giai đoạn tăng trưởng kinh tế thần kỳ.
+* **経済発展 (Keizai Hatten)**: Phát triển kinh tế.
+* **工業化 (Kōgyōka)**: Công nghiệp hóa.
+* **産業政策 (Sangyō Seisaku)**: Chính sách công nghiệp.
+* **国家戦略 (Kokka Senryaku)**: Chiến lược quốc gia.
+* **成長戦略 (Seichō Senryaku)**: Chiến lược tăng trưởng.
+* **経済成長率 (Keizai Seichōritsu)**: Tốc độ tăng trưởng kinh tế.
+* **生産性 (Seisansei)**: Năng suất lao động.
+* **付加価値 (Fuka Kachi)**: Giá trị gia tăng.
+* **競争力 (Kyōsōryoku)**: Năng lực cạnh tranh.
+* **国際競争力 (Kokusai Kyōsōryoku)**: Năng lực cạnh tranh quốc tế.
+* **先進国 (Senshinkoku)**: Quốc gia phát triển.
+* **新興国 (Shinkōkoku)**: Quốc gia mới nổi.
+* **経済大国 (Keizai Taikoku)**: Cường quốc kinh tế.
+* **製造大国 (Seizō Taikoku)**: Cường quốc sản xuất.
+* **輸出大国 (Yushutsu Taikoku)**: Cường quốc xuất khẩu.
+* **産業構造 (Sangyō Kōzō)**: Cơ cấu ngành công nghiệp.
+* **産業競争力 (Sangyō Kyōsōryoku)**: Sức cạnh tranh của ngành công nghiệp.
+
+### 2. Doanh nghiệp Nhật Bản
+
+* **日本企業 (Nihon Kigyō)**: Doanh nghiệp Nhật Bản.
+* **大企業 (Daikigyō)**: Tập đoàn lớn.
+* **中小企業 (Chūshō Kigyō)**: Doanh nghiệp vừa và nhỏ.
+* **老舗企業 (Shinise Kigyō)**: Doanh nghiệp lâu đời.
+* **百年企業 (Hyakunen Kigyō)**: Doanh nghiệp hơn 100 năm tuổi.
+* **企業文化 (Kigyō Bunka)**: Văn hóa doanh nghiệp.
+* **企業理念 (Kigyō Rinen)**: Triết lý doanh nghiệp.
+* **経営理念 (Keiei Rinen)**: Triết lý quản trị.
+* **日本式経営 (Nihon-shiki Keiei)**: Mô hình quản trị kiểu Nhật.
+* **長期経営 (Chōki Keiei)**: Quản trị dài hạn.
+* **持続可能経営 (Jizoku Kanō Keiei)**: Quản trị bền vững.
+* **ガバナンス (Gabanansu)**: Quản trị doanh nghiệp.
+* **企業価値 (Kigyō Kachi)**: Giá trị doanh nghiệp.
+* **ブランド価値 (Burando Kachi)**: Giá trị thương hiệu.
+* **信用 (Shinyō)**: Uy tín.
+* **信頼 (Shinrai)**: Niềm tin.
+* **社会的責任 / CSR (Shakaiteki Sekinin)**: Trách nhiệm xã hội của doanh nghiệp.
+* **事業承継 (Jigyō Shōkei)**: Kế thừa doanh nghiệp.
+* **創業者 (Sōgyōsha)**: Nhà sáng lập.
+* **後継者 (Kōkeisha)**: Người kế nghiệp.
+
+### 3. Monozukuri & Kaizen
+
+* **ものづくり (Monozukuri)**: Triết lý chế tạo của Nhật Bản.
+* **改善 (Kaizen)**: Cải tiến liên tục.
+* **現場主義 (Genba Shugi)**: Quản trị từ hiện trường.
+* **品質第一 (Hinshitsu Daiichi)**: Chất lượng là trên hết.
+* **品質管理 (Hinshitsu Kanri)**: Quản lý chất lượng.
+* **品質保証 (Hinshitsu Hoshō)**: Đảm bảo chất lượng.
+* **品質改善 (Hinshitsu Kaizen)**: Cải tiến chất lượng.
+* **職人精神 (Shokunin Seishin)**: Tinh thần nghệ nhân.
+* **匠 (Takumi)**: Bậc thầy thủ công.
+* **現場 (Genba)**: Hiện trường sản xuất.
+* **工程管理 (Kōtei Kanri)**: Quản lý quy trình sản xuất.
+* **生産管理 (Seisan Kanri)**: Quản lý sản xuất.
+* **品質基準 (Hinshitsu Kijun)**: Tiêu chuẩn chất lượng.
+* **安全基準 (Anzen Kijun)**: Tiêu chuẩn an toàn.
+* **不良品 (Furyōhin)**: Sản phẩm lỗi.
+* **歩留まり (Budomari)**: Tỷ lệ thành phẩm đạt chuẩn.
+* **生産効率 (Seisan Kōritsu)**: Hiệu quả sản xuất.
+* **標準化 (Hyōjunka)**: Tiêu chuẩn hóa.
+* **改善活動 (Kaizen Katsudō)**: Hoạt động cải tiến.
+* **品質重視 (Hinshitsu Jūshi)**: Coi trọng chất lượng.
+## PHẦN 2 - Công nghệ, AI, Bán dẫn & Đổi mới
+
+### 4. Công nghệ & Đổi mới
+
+* **技術 (Gijutsu)**: Công nghệ.
+* **技術力 (Gijutsuryoku)**: Năng lực công nghệ.
+* **技術革新 (Gijutsu Kakushin)**: Đổi mới công nghệ.
+* **先端技術 (Sentan Gijutsu)**: Công nghệ tiên tiến.
+* **先端産業 (Sentan Sangyō)**: Ngành công nghệ cao.
+* **技術移転 (Gijutsu Iten)**: Chuyển giao công nghệ.
+* **技術流出 (Gijutsu Ryūshutsu)**: Rò rỉ công nghệ.
+* **技術提携 (Gijutsu Teikei)**: Hợp tác công nghệ.
+* **研究開発 / R&D (Kenkyū Kaihatsu)**: Nghiên cứu và phát triển.
+* **基礎研究 (Kiso Kenkyū)**: Nghiên cứu cơ bản.
+* **応用研究 (Ōyō Kenkyū)**: Nghiên cứu ứng dụng.
+* **開発競争 (Kaihatsu Kyōsō)**: Cuộc đua phát triển công nghệ.
+* **技術競争 (Gijutsu Kyōsō)**: Cạnh tranh công nghệ.
+* **国際競争 (Kokusai Kyōsō)**: Cạnh tranh quốc tế.
+* **競争優位 (Kyōsō Yūi)**: Lợi thế cạnh tranh.
+* **イノベーション (Innovation)**: Đổi mới sáng tạo.
+* **デジタル化 (Dejitaruka)**: Chuyển đổi số.
+* **DX / デジタルトランスフォーメーション (Digital Transformation)**: Chuyển đổi số trong doanh nghiệp.
+* **スマート工場 (Smart Kōjō)**: Nhà máy thông minh.
+* **自動化 (Jidōka)**: Tự động hóa.
+
+### 5. Bán dẫn & Chip
+
+* **半導体 (Handōtai)**: Chất bán dẫn.
+* **半導体産業 (Handōtai Sangyō)**: Ngành công nghiệp bán dẫn.
+* **半導体メーカー (Handōtai Mēkā)**: Nhà sản xuất bán dẫn.
+* **半導体不足 (Handōtai Busoku)**: Thiếu hụt chất bán dẫn.
+* **先端半導体 (Sentan Handōtai)**: Chip tiên tiến.
+* **半導体材料 (Handōtai Zairyō)**: Vật liệu bán dẫn.
+* **半導体製造装置 (Handōtai Seizō Sōchi)**: Thiết bị sản xuất chip.
+* **シリコンウエハー (Silicon Wafer)**: Tấm wafer silicon.
+* **露光装置 (Rokkō Sōchi)**: Máy quang khắc.
+* **回路設計 (Kairo Sekkei)**: Thiết kế vi mạch.
+* **チップ (Chippu)**: Chip.
+* **CPU**: Bộ xử lý trung tâm.
+* **GPU**: Bộ xử lý đồ họa.
+* **メモリ半導体 (Memory Handōtai)**: Chip nhớ.
+* **ロジック半導体 (Logic Handōtai)**: Chip logic.
+* **微細化 (Biseka)**: Thu nhỏ tiến trình sản xuất.
+* **ナノメートル (Nanomētoru)**: Nanomet.
+* **ファウンドリー (Foundry)**: Nhà máy gia công chip.
+* **サプライチェーン (Supply Chain)**: Chuỗi cung ứng.
+* **経済安全保障 (Keizai Anzen Hoshō)**: An ninh kinh tế.
+
+### 6. AI & Robot
+
+* **AI / 人工知能 (Jinkō Chinō)**: Trí tuệ nhân tạo.
+* **生成AI (Seisei AI)**: AI tạo sinh.
+* **機械学習 (Kikai Gakushū)**: Máy học.
+* **深層学習 (Shinsō Gakushū)**: Học sâu.
+* **画像認識 (Gazō Ninshiki)**: Nhận dạng hình ảnh.
+* **音声認識 (Onsei Ninshiki)**: Nhận dạng giọng nói.
+* **自然言語処理 (Shizen Gengo Shori)**: Xử lý ngôn ngữ tự nhiên.
+* **ビッグデータ (Big Data)**: Dữ liệu lớn.
+* **クラウド (Cloud)**: Điện toán đám mây.
+* **データセンター (Data Center)**: Trung tâm dữ liệu.
+* **ロボット (Robotto)**: Robot.
+* **産業用ロボット (Sangyō-yō Robotto)**: Robot công nghiệp.
+* **サービスロボット (Sābisu Robotto)**: Robot dịch vụ.
+* **ヒューマノイド (Humanoid)**: Robot hình người.
+* **自律制御 (Jiritsu Seigyo)**: Điều khiển tự động.
+* **自律走行 (Jiritsu Sōkō)**: Tự hành.
+* **自動運転 (Jidō Unten)**: Lái xe tự động.
+* **IoT (Internet of Things)**: Internet vạn vật.
+* **スマートシティ (Smart City)**: Thành phố thông minh.
+* **デジタル社会 (Digital Shakai)**: Xã hội số.
+
+### 7. Chuỗi cung ứng & Sản xuất
+
+* **サプライチェーン (Supply Chain)**: Chuỗi cung ứng.
+* **供給網 (Kyōkyūmō)**: Mạng lưới cung ứng.
+* **部品供給 (Buhin Kyōkyū)**: Cung ứng linh kiện.
+* **部品メーカー (Buhin Mēkā)**: Nhà sản xuất linh kiện.
+* **素材メーカー (Sozai Mēkā)**: Nhà sản xuất vật liệu.
+* **完成品メーカー (Kanseihin Mēkā)**: Nhà sản xuất thành phẩm.
+* **製造業 (Seizōgyō)**: Ngành sản xuất.
+* **製造ライン (Seizō Rain)**: Dây chuyền sản xuất.
+* **量産 (Ryōsan)**: Sản xuất hàng loạt.
+* **量産化 (Ryōsanka)**: Thương mại hóa sản xuất hàng loạt.
+* **試作 (Shisaku)**: Chế tạo mẫu thử.
+* **試作品 (Shisakuhin)**: Sản phẩm thử nghiệm.
+* **品質検査 (Hinshitsu Kensa)**: Kiểm định chất lượng.
+* **品質保証 (Hinshitsu Hoshō)**: Đảm bảo chất lượng.
+* **品質不良 (Hinshitsu Furyō)**: Lỗi chất lượng.
+* **歩留まり (Budomari)**: Tỷ lệ thành phẩm đạt chuẩn.
+* **生産拠点 (Seisan Kyoten)**: Cơ sở sản xuất.
+* **海外工場 (Kaigai Kōjō)**: Nhà máy ở nước ngoài.
+* **国内生産 (Kokunai Seisan)**: Sản xuất trong nước.
+* **海外生産 (Kaigai Seisan)**: Sản xuất ở nước ngoài.
+
+### 8. Made in Japan
+
+* **日本製 (Nihon-sei)**: Sản xuất tại Nhật.
+* **メイド・イン・ジャパン (Made in Japan)**: Made in Japan.
+* **国産 (Kokusan)**: Sản xuất trong nước.
+* **海外製 (Kaigai-sei)**: Sản xuất ở nước ngoài.
+* **品質 (Hinshitsu)**: Chất lượng.
+* **高品質 (Kōhinshitsu)**: Chất lượng cao.
+* **耐久性 (Taikyūsei)**: Độ bền.
+* **安全性 (Anzensei)**: Độ an toàn.
+* **信頼性 (Shinraisei)**: Độ tin cậy.
+* **品質基準 (Hinshitsu Kijun)**: Tiêu chuẩn chất lượng.
+* **安全基準 (Anzen Kijun)**: Tiêu chuẩn an toàn.
+* **ブランド力 (Burando-ryoku)**: Sức mạnh thương hiệu.
+* **ブランド価値 (Burando Kachi)**: Giá trị thương hiệu.
+* **世界品質 (Sekai Hinshitsu)**: Chất lượng đẳng cấp thế giới.
+* **世界基準 (Sekai Kijun)**: Tiêu chuẩn quốc tế.
+* **高付加価値 (Kō Fuka Kachi)**: Giá trị gia tăng cao.
+* **高性能 (Kōseinō)**: Hiệu suất cao.
+* **高精度 (Kō Seido)**: Độ chính xác cao.
+* **高信頼性 (Kō Shinraisei)**: Độ tin cậy cao.
+* **世界市場 (Sekai Shijō)**: Thị trường toàn cầu.
+
+### 9. Ô tô Nhật Bản
+
+* **自動車産業 (Jidōsha Sangyō)**: Ngành công nghiệp ô tô.
+* **自動車メーカー (Jidōsha Mēkā)**: Hãng sản xuất ô tô.
+* **完成車メーカー (Kanseisha Mēkā)**: Nhà sản xuất ô tô hoàn chỉnh.
+* **ハイブリッド車 (Hybrid-sha)**: Xe Hybrid.
+* **電気自動車 / EV (Denki Jidōsha)**: Xe điện.
+* **燃料電池車 / FCV (Nenryō Denchi-sha)**: Xe pin nhiên liệu Hydro.
+* **水素エネルギー (Suiso Enerugī)**: Năng lượng Hydro.
+* **バッテリー (Battery)**: Pin.
+* **リチウムイオン電池 (Lithium-ion Denchi)**: Pin Lithium-ion.
+* **全固体電池 (Zenkotai Denchi)**: Pin thể rắn.
+* **充電インフラ (Jūden Infura)**: Hạ tầng sạc.
+* **航続距離 (Kōzoku Kyori)**: Quãng đường di chuyển.
+* **燃費 (Nenpi)**: Mức tiêu hao nhiên liệu.
+* **自動運転 (Jidō Unten)**: Lái xe tự động.
+* **ADAS (Advanced Driver Assistance Systems)**: Hệ thống hỗ trợ lái xe.
+* **車載半導体 (Shasai Handōtai)**: Chip dành cho ô tô.
+* **車載電池 (Shasai Denchi)**: Pin dùng cho ô tô.
+* **カーボンニュートラル (Carbon Neutral)**: Trung hòa carbon.
+* **脱炭素 (Datsu Tanso)**: Phi carbon hóa.
+* **次世代モビリティ (Jisedai Mobility)**: Phương tiện giao thông thế hệ mới.
+
+### 10. Công ty & Thương hiệu Nhật nổi bật
+
+* **トヨタ (Toyota)**: Toyota.
+* **ホンダ (Honda)**: Honda.
+* **日産 (Nissan)**: Nissan.
+* **スズキ (Suzuki)**: Suzuki.
+* **マツダ (Mazda)**: Mazda.
+* **SUBARU (Subaru)**: Subaru.
+* **ソニー (Sony)**: Sony.
+* **パナソニック (Panasonic)**: Panasonic.
+* **キヤノン (Canon)**: Canon.
+* **ニコン (Nikon)**: Nikon.
+* **シャープ (Sharp)**: Sharp.
+* **日立製作所 (Hitachi)**: Hitachi.
+* **東芝 (Toshiba)**: Toshiba.
+* **NEC**: NEC.
+* **富士通 (Fujitsu)**: Fujitsu.
+* **キーエンス (Keyence)**: Keyence.
+* **ファナック (FANUC)**: FANUC.
+* **村田製作所 (Murata Manufacturing)**: Murata.
+* **東京エレクトロン (Tokyo Electron)**: Tokyo Electron.
+* **Rapidus (ラピダス)**: Dự án bán dẫn chiến lược của Nhật.
+
+
+### 11. Trung Quốc & Quá trình phát triển
+
+* **中国経済 (Chūgoku Keizai)**: Kinh tế Trung Quốc.
+* **中国企業 (Chūgoku Kigyō)**: Doanh nghiệp Trung Quốc.
+* **中国市場 (Chūgoku Shijō)**: Thị trường Trung Quốc.
+* **改革開放 (Kaikaku Kaihō)**: Chính sách cải cách và mở cửa.
+* **社会主義市場経済 (Shakaishugi Shijō Keizai)**: Kinh tế thị trường định hướng xã hội chủ nghĩa.
+* **国有企業 (Kokuyū Kigyō)**: Doanh nghiệp nhà nước.
+* **民間企業 (Minkan Kigyō)**: Doanh nghiệp tư nhân.
+* **民営企業 (Min'ei Kigyō)**: Doanh nghiệp dân doanh.
+* **中国製造2025 (Made in China 2025)**: Chiến lược "Made in China 2025".
+* **双循環戦略 (Sō Junkan Senryaku)**: Chiến lược tuần hoàn kép.
+* **内需拡大 (Naiju Kakudai)**: Mở rộng nhu cầu trong nước.
+* **輸出依存 (Yushutsu Izon)**: Phụ thuộc vào xuất khẩu.
+* **経済成長 (Keizai Seichō)**: Tăng trưởng kinh tế.
+* **高度成長 (Kōdo Seichō)**: Tăng trưởng nhanh.
+* **経済減速 (Keizai Gensoku)**: Suy giảm tốc độ tăng trưởng.
+* **不動産危機 (Fudōsan Kiki)**: Khủng hoảng bất động sản.
+* **地方政府債務 (Chihō Seifu Saimu)**: Nợ chính quyền địa phương.
+* **人口減少 (Jinkō Genshō)**: Suy giảm dân số.
+* **少子高齢化 (Shōshi Kōreika)**: Già hóa dân số và tỷ lệ sinh thấp.
+* **共同富裕 (Kyōdō Fuyū)**: Chính sách "Thịnh vượng chung".
+
+### 12. Công nghệ Trung Quốc
+
+* **中国製 (Chūgoku-sei)**: Sản xuất tại Trung Quốc.
+* **中国ブランド (Chūgoku Burando)**: Thương hiệu Trung Quốc.
+* **技術革新 (Gijutsu Kakushin)**: Đổi mới công nghệ.
+* **技術移転 (Gijutsu Iten)**: Chuyển giao công nghệ.
+* **技術導入 (Gijutsu Dōnyū)**: Tiếp nhận công nghệ.
+* **技術開発 (Gijutsu Kaihatsu)**: Phát triển công nghệ.
+* **研究開発投資 (Kenkyū Kaihatsu Tōshi)**: Đầu tư cho R&D.
+* **知的財産 (Chiteki Zaisan)**: Sở hữu trí tuệ.
+* **特許 (Tokkyo)**: Bằng sáng chế.
+* **特許出願 (Tokkyo Shutsugan)**: Đăng ký bằng sáng chế.
+* **模倣 (Mohō)**: Sao chép.
+* **模倣品 (Mohōhin)**: Hàng nhái.
+* **コピー商品 (Copy Shōhin)**: Hàng sao chép.
+* **技術流出 (Gijutsu Ryūshutsu)**: Rò rỉ công nghệ.
+* **国産化 (Kokusanka)**: Nội địa hóa công nghệ.
+* **半導体自給 (Handōtai Jikyū)**: Tự chủ bán dẫn.
+* **AI大国 (AI Taikoku)**: Cường quốc AI.
+* **デジタル経済 (Digital Keizai)**: Kinh tế số.
+* **ハイテク企業 (High-tech Kigyō)**: Doanh nghiệp công nghệ cao.
+* **スタートアップ (Startup)**: Doanh nghiệp khởi nghiệp.
+
+### 13. Nhật Bản - Trung Quốc
+
+* **日中関係 (Nicchū Kankei)**: Quan hệ Nhật - Trung.
+* **日中経済 (Nicchū Keizai)**: Quan hệ kinh tế Nhật - Trung.
+* **日中貿易 (Nicchū Bōeki)**: Thương mại Nhật - Trung.
+* **経済協力 (Keizai Kyōryoku)**: Hợp tác kinh tế.
+* **経済摩擦 (Keizai Massatsu)**: Xung đột kinh tế.
+* **貿易摩擦 (Bōeki Massatsu)**: Xung đột thương mại.
+* **経済安全保障 (Keizai Anzen Hoshō)**: An ninh kinh tế.
+* **サプライチェーン再編 (Supply Chain Saihen)**: Tái cấu trúc chuỗi cung ứng.
+* **脱中国 (Datsu Chūgoku)**: Giảm phụ thuộc vào Trung Quốc.
+* **国内回帰 (Kokunai Kaiki)**: Đưa sản xuất trở về trong nước.
+* **海外移転 (Kaigai Iten)**: Chuyển nhà máy ra nước ngoài.
+* **対中投資 (Taichū Tōshi)**: Đầu tư vào Trung Quốc.
+* **対中依存 (Taichū Izon)**: Phụ thuộc vào Trung Quốc.
+* **経済制裁 (Keizai Seisai)**: Trừng phạt kinh tế.
+* **輸出規制 (Yushutsu Kisei)**: Kiểm soát xuất khẩu.
+* **輸入規制 (Yunyū Kisei)**: Kiểm soát nhập khẩu.
+* **関税 (Kanzei)**: Thuế quan.
+* **自由貿易 (Jiyū Bōeki)**: Thương mại tự do.
+* **経済連携 (Keizai Renkei)**: Liên kết kinh tế.
+* **相互依存 (Sōgo Izon)**: Phụ thuộc lẫn nhau.
+
+### 14. Doanh nghiệp & Thương hiệu Trung Quốc
+
+* **Huawei (ファーウェイ)**: Huawei.
+* **BYD (BYD)**: BYD.
+* **Xiaomi (シャオミ)**: Xiaomi.
+* **Lenovo (レノボ)**: Lenovo.
+* **DJI (ディージェーアイ)**: DJI.
+* **Alibaba (アリババ)**: Alibaba.
+* **Tencent (テンセント)**: Tencent.
+* **CATL (CATL)**: CATL.
+* **DeepSeek (ディープシーク)**: DeepSeek.
+* **Temu (テム)**: Temu.
+* **SHEIN (シーイン)**: SHEIN.
+* **TikTok (ティックトック)**: TikTok.
+* **ByteDance (バイトダンス)**: ByteDance.
+* **Baidu (バイドゥ)**: Baidu.
+* **Meituan (美団 / メイトゥアン)**: Meituan.
+* **Pinduoduo (拼多多 / ピンドゥオドゥオ)**: Pinduoduo.
+* **NIO (NIO)**: NIO.
+* **XPENG (XPENG)**: XPENG.
+* **Li Auto (Li Auto)**: Li Auto.
+* **Haier (ハイアール)**: Haier.
+
+### 15. Made in Japan & Chất lượng
+
+* **日本品質 (Nihon Hinshitsu)**: Chất lượng kiểu Nhật.
+* **メイド・イン・ジャパン (Made in Japan)**: Sản xuất tại Nhật Bản.
+* **日本ブランド (Nihon Burando)**: Thương hiệu Nhật Bản.
+* **品質第一 (Hinshitsu Daiichi)**: Chất lượng là trên hết.
+* **品質重視 (Hinshitsu Jūshi)**: Đề cao chất lượng.
+* **品質保証 (Hinshitsu Hoshō)**: Đảm bảo chất lượng.
+* **品質管理 (Hinshitsu Kanri)**: Quản lý chất lượng.
+* **安全性 (Anzensei)**: Tính an toàn.
+* **耐久性 (Taikyūsei)**: Độ bền.
+* **高品質 (Kō Hinshitsu)**: Chất lượng cao.
+* **高性能 (Kō Seinō)**: Hiệu năng cao.
+* **高精度 (Kō Seido)**: Độ chính xác cao.
+* **高付加価値 (Kō Fuka Kachi)**: Giá trị gia tăng cao.
+* **信頼性 (Shinraisei)**: Độ tin cậy.
+* **信頼 (Shinrai)**: Niềm tin.
+* **信用 (Shinyō)**: Uy tín.
+* **安心 (Anshin)**: Cảm giác yên tâm.
+* **安全基準 (Anzen Kijun)**: Tiêu chuẩn an toàn.
+* **世界基準 (Sekai Kijun)**: Tiêu chuẩn quốc tế.
+* **世界品質 (Sekai Hinshitsu)**: Chất lượng đẳng cấp thế giới.
+
+### 16. Người tiêu dùng Nhật
+
+* **消費者 (Shōhisha)**: Người tiêu dùng.
+* **消費者心理 (Shōhisha Shinri)**: Tâm lý người tiêu dùng.
+* **購買意欲 (Kōbai Iyoku)**: Nhu cầu mua sắm.
+* **購買行動 (Kōbai Kōdō)**: Hành vi mua sắm.
+* **購買力 (Kōbairyoku)**: Sức mua.
+* **ブランド志向 (Burando Shikō)**: Ưa chuộng thương hiệu.
+* **品質志向 (Hinshitsu Shikō)**: Ưa chuộng chất lượng.
+* **価格志向 (Kakaku Shikō)**: Ưa chuộng giá rẻ.
+* **口コミ (Kuchikomi)**: Truyền miệng.
+* **レビュー (Review)**: Đánh giá sản phẩm.
+* **リピーター (Repeater)**: Khách hàng quay lại.
+* **顧客満足 (Kokyaku Manzoku)**: Sự hài lòng của khách hàng.
+* **顧客体験 (Kokyaku Taiken)**: Trải nghiệm khách hàng.
+* **消費動向 (Shōhi Dōkō)**: Xu hướng tiêu dùng.
+* **ヒット商品 (Hitto Shōhin)**: Sản phẩm bán chạy.
+* **人気商品 (Ninki Shōhin)**: Sản phẩm được yêu thích.
+* **定番商品 (Teiban Shōhin)**: Sản phẩm bán lâu năm.
+* **ロングセラー (Long Seller)**: Sản phẩm bán chạy nhiều năm.
+* **爆買い (Bakugai)**: Mua sắm ồ ạt.
+* **インバウンド消費 (Inbound Shōhi)**: Tiêu dùng của khách du lịch quốc tế.
+
+### 17. Văn hóa doanh nghiệp Nhật
+
+* **おもてなし (Omotenashi)**: Tinh thần hiếu khách của Nhật.
+* **お客様第一 (Okyakusama Daiichi)**: Khách hàng là trên hết.
+* **現場主義 (Genba Shugi)**: Quản trị từ hiện trường.
+* **改善 (Kaizen)**: Cải tiến liên tục.
+* **ものづくり (Monozukuri)**: Triết lý chế tạo Nhật Bản.
+* **職人精神 (Shokunin Seishin)**: Tinh thần nghệ nhân.
+* **匠 (Takumi)**: Bậc thầy thủ công.
+* **誠実 (Seijitsu)**: Sự chân thành.
+* **責任感 (Sekininkan)**: Tinh thần trách nhiệm.
+* **使命感 (Shimeikan)**: Ý thức sứ mệnh.
+* **挑戦 (Chōsen)**: Thử thách.
+* **努力 (Doryoku)**: Nỗ lực.
+* **継続 (Keizoku)**: Kiên trì.
+* **改善活動 (Kaizen Katsudō)**: Hoạt động cải tiến.
+* **現地化 (Genchika)**: Bản địa hóa.
+* **社会貢献 (Shakai Kōken)**: Đóng góp cho xã hội.
+* **企業理念 (Kigyō Rinen)**: Triết lý doanh nghiệp.
+* **経営理念 (Keiei Rinen)**: Triết lý quản trị.
+* **長期経営 (Chōki Keiei)**: Quản trị dài hạn.
+* **持続可能性 (Jizoku Kanōsei)**: Tính bền vững.
+
+### 18. Thương hiệu & Giá trị
+
+* **ブランド (Burando)**: Thương hiệu.
+* **ブランド価値 (Burando Kachi)**: Giá trị thương hiệu.
+* **企業価値 (Kigyō Kachi)**: Giá trị doanh nghiệp.
+* **企業イメージ (Kigyō Image)**: Hình ảnh doanh nghiệp.
+* **知名度 (Chimeido)**: Mức độ nhận diện.
+* **市場シェア (Shijō Share)**: Thị phần.
+* **競争優位 (Kyōsō Yūi)**: Lợi thế cạnh tranh.
+* **差別化 (Sabetsuka)**: Khác biệt hóa.
+* **価格競争 (Kakaku Kyōsō)**: Cạnh tranh về giá.
+* **品質競争 (Hinshitsu Kyōsō)**: Cạnh tranh bằng chất lượng.
+* **価値創造 (Kachi Sōzō)**: Tạo ra giá trị.
+* **高級ブランド (Kōkyū Burando)**: Thương hiệu cao cấp.
+* **世界ブランド (Sekai Burando)**: Thương hiệu toàn cầu.
+* **老舗ブランド (Shinise Burando)**: Thương hiệu lâu đời.
+* **ブランド戦略 (Burando Senryaku)**: Chiến lược thương hiệu.
+* **市場価値 (Shijō Kachi)**: Giá trị thị trường.
+* **競争戦略 (Kyōsō Senryaku)**: Chiến lược cạnh tranh.
+* **企業戦略 (Kigyō Senryaku)**: Chiến lược doanh nghiệp.
+* **成長企業 (Seichō Kigyō)**: Doanh nghiệp tăng trưởng.
+* **世界市場 (Sekai Shijō)**: Thị trường toàn cầu.
+
+### 19. Kinh tế vĩ mô
+
+* **GDP (Gross Domestic Product)**: Tổng sản phẩm quốc nội.
+* **名目GDP (Meimoku GDP)**: GDP danh nghĩa.
+* **実質GDP (Jisshitsu GDP)**: GDP thực.
+* **一人当たりGDP (Hitori Atari GDP)**: GDP bình quân đầu người.
+* **経済成長率 (Keizai Seichōritsu)**: Tốc độ tăng trưởng kinh tế.
+* **景気 (Keiki)**: Tình hình kinh tế.
+* **景気回復 (Keiki Kaifuku)**: Phục hồi kinh tế.
+* **景気後退 (Keiki Kōtai)**: Suy thoái kinh tế.
+* **リセッション (Recession)**: Suy thoái.
+* **インフレ (Inflation)**: Lạm phát.
+* **デフレ (Deflation)**: Giảm phát.
+* **物価上昇 (Bukka Jōshō)**: Giá cả tăng.
+* **消費者物価指数 / CPI (CPI)**: Chỉ số giá tiêu dùng.
+* **円安 (En-yasu)**: Đồng Yên mất giá.
+* **円高 (En-daka)**: Đồng Yên tăng giá.
+* **為替相場 (Kawase Sōba)**: Tỷ giá hối đoái.
+* **金利 (Kinri)**: Lãi suất.
+* **日本銀行 (Nippon Ginkō)**: Ngân hàng Trung ương Nhật Bản.
+* **金融政策 (Kin'yū Seisaku)**: Chính sách tiền tệ.
+* **財政政策 (Zaisei Seisaku)**: Chính sách tài khóa.
+
+### 20. Thương mại & Đầu tư
+
+* **輸出 (Yushutsu)**: Xuất khẩu.
+* **輸入 (Yunyū)**: Nhập khẩu.
+* **貿易黒字 (Bōeki Kuroji)**: Thặng dư thương mại.
+* **貿易赤字 (Bōeki Akaji)**: Thâm hụt thương mại.
+* **海外投資 (Kaigai Tōshi)**: Đầu tư ra nước ngoài.
+* **対日投資 (Tai-Nichi Tōshi)**: Đầu tư vào Nhật Bản.
+* **対中投資 (Tai-Chū Tōshi)**: Đầu tư vào Trung Quốc.
+* **設備投資 (Setsubi Tōshi)**: Đầu tư thiết bị.
+* **直接投資 (Chokusetsu Tōshi)**: Đầu tư trực tiếp.
+* **外国直接投資 / FDI (FDI)**: Đầu tư trực tiếp nước ngoài.
+* **市場開放 (Shijō Kaihō)**: Mở cửa thị trường.
+* **自由貿易 (Jiyū Bōeki)**: Thương mại tự do.
+* **保護主義 (Hogo Shugi)**: Chủ nghĩa bảo hộ.
+* **関税 (Kanzei)**: Thuế quan.
+* **輸出規制 (Yushutsu Kisei)**: Kiểm soát xuất khẩu.
+* **経済制裁 (Keizai Seisai)**: Trừng phạt kinh tế.
+* **経済連携 (Keizai Renkei)**: Liên kết kinh tế.
+* **FTA (Free Trade Agreement)**: Hiệp định thương mại tự do.
+* **EPA (Economic Partnership Agreement)**: Hiệp định đối tác kinh tế.
+* **RCEP**: Hiệp định Đối tác Kinh tế Toàn diện Khu vực.
+
+### 21. Thuật ngữ báo chí Nhật
+
+* **速報 (Sokuhō)**: Tin nóng.
+* **最新情報 (Saishin Jōhō)**: Thông tin mới nhất.
+* **独自 (Dokuji)**: Tin độc quyền.
+* **判明 (Hanmei)**: Đã được xác nhận.
+* **明らかになった (Akiraka ni Natta)**: Đã được làm rõ.
+* **発表 (Happyō)**: Công bố.
+* **発言 (Hatsugen)**: Phát biểu.
+* **会見 (Kaiken)**: Họp báo.
+* **記者会見 (Kisha Kaiken)**: Họp báo chính thức.
+* **専門家 (Senmonka)**: Chuyên gia.
+* **分析 (Bunseki)**: Phân tích.
+* **検証 (Kenshō)**: Kiểm chứng.
+* **考察 (Kōsatsu)**: Bình luận, phân tích chuyên sâu.
+* **解説 (Kaisetsu)**: Giải thích.
+* **背景 (Haikei)**: Bối cảnh.
+* **影響 (Eikyō)**: Ảnh hưởng.
+* **課題 (Kadai)**: Thách thức.
+* **現状 (Genjō)**: Thực trạng.
+* **今後 (Kongo)**: Trong thời gian tới.
+* **見通し (Mitoshi)**: Triển vọng.
+
+### 22. Thuật ngữ YouTube & Nội dung phân tích
+
+* **なぜ〜なのか？ (Naze ... Nano ka?)**: Vì sao...?
+* **本当の理由 (Hontō no Riyū)**: Lý do thực sự.
+* **真実 (Shinjitsu)**: Sự thật.
+* **知られざる (Shirarezaru)**: Ít người biết đến.
+* **驚きの事実 (Odoroki no Jijitsu)**: Sự thật gây kinh ngạc.
+* **徹底解説 (Tettei Kaisetsu)**: Giải thích chi tiết.
+* **徹底分析 (Tettei Bunseki)**: Phân tích chuyên sâu.
+* **比較 (Hikaku)**: So sánh.
+* **検証 (Kenshō)**: Kiểm chứng.
+* **ランキング (Ranking)**: Bảng xếp hạng.
+* **最新 (Saishin)**: Mới nhất.
+* **話題 (Wadai)**: Chủ đề đang được quan tâm.
+* **注目 (Chūmoku)**: Đáng chú ý.
+* **急成長 (Kyū Seichō)**: Tăng trưởng nhanh.
+* **衝撃 (Shōgeki)**: Gây sốc.
+* **世界が注目 (Sekai ga Chūmoku)**: Thế giới đang chú ý.
+* **海外の反応 (Kaigai no Hannō)**: Phản ứng của người nước ngoài.
+* **専門家が語る (Senmonka ga Kataru)**: Chuyên gia nhận định.
+* **徹底調査 (Tettei Chōsa)**: Điều tra toàn diện.
+* **深掘り (Fukabori)**: Phân tích chuyên sâu, đào sâu vấn đề.

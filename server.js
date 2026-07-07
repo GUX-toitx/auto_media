@@ -14,6 +14,7 @@ import multer from 'multer';
 import { getLanguages, getReferenceSpeakers, getDictionary, getMe, sendToQueue, getSentenceStatus, updateSentence, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio, getAllAudioUrls } from './handle_voice/audio_service.js';
 import { processAll } from './video_service.js';
 import { generateFlowImage } from './browser.js';
+import { crawlX } from './x_crawler.js';
 import { translateTitle } from './translateTitle.js';
 import archiver from 'archiver';
 import { downloadWithYtDlp } from './ytDlpDownloader.js'; // Nhúng con Bot vừa viết
@@ -85,14 +86,14 @@ app.get('/api/posts/:postId', async (req, res) => {
 
         // Lấy keywords và assets cho từng section của post
         const sections = {};
-        for (const section of ['hook', 'summary', 'conclusion', 'thumbnail']) {
+        for (const section of ['hook', 'summary', 'conclusion', 'thumbnail', 'x']) {
             const kws = await db.all('SELECT id, content, type FROM Keyword WHERE post_id = ? AND section = ? ORDER BY id', [post.id, section]);
-            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE post_id = ? AND section = ? AND hook_detail_id IS NULL AND summary_detail_id IS NULL AND conclusion_detail_id IS NULL ORDER BY selected DESC, COALESCE(source_id, id), id', [post.id, section]);
+            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration, source_url FROM Asset WHERE post_id = ? AND section = ? AND hook_detail_id IS NULL AND summary_detail_id IS NULL AND conclusion_detail_id IS NULL ORDER BY selected DESC, COALESCE(source_id, id), id', [post.id, section]);
             const projectId = (post.project_id || '').replace(/_[a-z]{2}$/, '');
             sections[section] = {
                 keywords: kws,
-                videos: assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 })),
-                images: assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 })),
+                videos: assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null })),
+                images: assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null })),
             };
         }
 
@@ -1229,18 +1230,61 @@ app.post('/api/create-naze-youtube', express.json(), async (req, res) => {
 });
 
 app.post('/api/create-naze', express.json(), async (req, res) => {
-    const { topic, projectId, targetLang, genre } = req.body;
+    const { topic, projectId, targetLang, genre, tweetUrls } = req.body;
     if (!topic?.trim() || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu topic hoặc projectId' });
     try {
         const targetDir = path.join(MEDIA_DIR, projectId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
         const args = ['naze_content.js', topic.trim(), projectId, targetLang || 'vi', genre === 'drama' ? 'drama' : 'naze'];
-        const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+        const env = { ...process.env };
+        // Chỉ drama mới cào X; truyền link tweet dán tay (nếu có) qua env
+        if (genre === 'drama' && tweetUrls && tweetUrls.trim()) env.NAZE_TWEET_URLS = tweetUrls.trim();
+        const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'], env });
         child.stdout.on('data', d => process.stdout.write(`[naze] ${d}`));
         child.stderr.on('data', d => process.stderr.write(`[naze] ${d}`));
         child.unref();
         res.json({ success: true, projectId });
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API: Cào thêm X theo keyword nhập tay -> thêm vào block section='x' của post
+app.post('/api/x-crawl', express.json(), async (req, res) => {
+    const { postId, keyword } = req.body;
+    if (!postId || !keyword?.trim()) return res.status(400).json({ error: 'Thiếu postId hoặc keyword' });
+    const kw = keyword.trim();
+    let db;
+    try {
+        db = await getDb();
+        const post = await db.get('SELECT id, project_id FROM Post WHERE id = ?', [postId]);
+        if (!post) { await db.close(); return res.status(404).json({ error: 'Post not found' }); }
+        const projectId = post.project_id;
+        const existsKw = await db.get("SELECT id FROM Keyword WHERE post_id = ? AND section = 'x' AND content = ?", [postId, kw]);
+        if (!existsKw) await db.run("INSERT INTO Keyword (post_id, section, content, type) VALUES (?, 'x', ?, 'x_ja')", [postId, kw]);
+        await db.close(); db = null;
+
+        const outDir = path.join(MEDIA_DIR, projectId, 'assets', 'x');
+        const profileName = process.env.X_PROFILE || 'chrome-profile-4';
+        const { manifest } = await crawlX({
+            profileName, outDir, keywords: kw, urls: '',
+            limit: 12, max: 8, captureMax: parseInt(process.env.X_CAPTURE_BUDGET_MANUAL || '3'),
+        });
+
+        const db2 = await getDb();
+        let added = 0;
+        const insertAsset = async (absPath, type, srcUrl) => {
+            const rel = path.relative(MEDIA_DIR, absPath);
+            const ex = await db2.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
+            if (!ex) { await db2.run("INSERT INTO Asset (post_id, section, type, file_path, source_url) VALUES (?, 'x', ?, ?, ?)", [postId, type, rel, srcUrl || null]); added++; }
+        };
+        for (const t of manifest) {
+            for (const img of t.images) await insertAsset(img, 'image', t.url);
+            for (const vid of t.videos) await insertAsset(vid, 'video', t.url);
+            if (t.screenshot) await insertAsset(t.screenshot, 'image', t.url);
+            if (t.recording) await insertAsset(t.recording, 'video', t.url);
+        }
+        await db2.close();
+        res.json({ success: true, added, tweets: manifest.length });
+    } catch (e) { try { if (db) await db.close(); } catch (_) {} res.status(500).json({ error: e.message }); }
 });
 
 
@@ -1596,6 +1640,22 @@ app.post('/api/chrome-profiles/:id/login', async (req, res) => {
         await db2.run('UPDATE ChromeProfile SET profile_dir = ? WHERE id = ?', [profileDirName, profile.id]);
         await db2.close();
 
+        const child = spawn('node', args, { detached: false, stdio: 'inherit' });
+        child.unref();
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// API: Mở lại trình duyệt profile để lấy thêm cookie (không auto-login, thao tác thủ công)
+app.post('/api/chrome-profiles/:id/open', async (req, res) => {
+    try {
+        const { url } = req.body || {};
+        const db = await getDb();
+        const profile = await db.get('SELECT id, profile_dir FROM ChromeProfile WHERE id = ?', [req.params.id]);
+        await db.close();
+        if (!profile) return res.status(404).json({ error: 'Profile not found' });
+        const profileDirName = profile.profile_dir || `chrome-profile-${profile.id}`;
+        const args = ['browser.js', profileDirName, '--open', (url && url.trim()) || 'https://x.com'];
         const child = spawn('node', args, { detached: false, stdio: 'inherit' });
         child.unref();
         res.json({ success: true });

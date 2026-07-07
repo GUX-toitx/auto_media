@@ -5,6 +5,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import { fetchFromStoryblocksBot } from './storyblocksCrawler.js';
 import { fetchFromGoogleImageBot } from './googleImageCrawler.js';
+import { crawlX } from './x_crawler.js';
 import { fetchIPv4 as fetch } from './fetchIPv4.js';
 import { claimNextStockPath } from './stockNaming.js';
 import fs from 'fs';
@@ -276,6 +277,45 @@ async function getKeywordsFromGPT(sentence) {
     }
 }
 
+// Sinh 3 keyword tiếng NHẬT để tìm bài trên X (Twitter) từ nội dung đoạn
+async function getXKeywordsJa(caseInfo) {
+    try {
+        const res = await httpsPost(
+            'https://api.openai.com/v1/chat/completions',
+            { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+            {
+                model: 'gpt-4o',
+                messages: [
+                    {
+                        role: 'system',
+                        content: [
+                            'Bạn là chuyên gia tìm kiếm trên X (Twitter) tiếng Nhật.',
+                            'Từ THÔNG TIN VỤ VIỆC, xác định sự kiện cốt lõi: AI (quốc tịch/nhân vật) đã LÀM GÌ (hành vi), Ở ĐÂU (địa điểm/quốc gia), với ĐỐI TƯỢNG/VẬT gì.',
+                            'Rồi tạo ĐÚNG 3 câu tìm kiếm tiếng NHẬT để tìm bài đăng về CHÍNH sự kiện đó.',
+                            'Quy tắc:',
+                            '- Mỗi câu ghép 2-3 từ khóa cốt lõi bằng dấu cách (AND). Đặt cụm đặc trưng nhất trong dấu ngoặc kép "..." để khớp chính xác.',
+                            '- Dùng ĐÚNG thuật ngữ tiếng Nhật cho vật/hành vi thật. VD: quả cherry = さくらんぼ (TUYỆT ĐỐI KHÔNG dùng 桜 = hoa anh đào); trộm/hái trộm = 窃盗 / 盗む / 無断; người Việt = ベトナム人 (không dùng "phụ nữ Việt" chung chung).',
+                            '- ƯU TIÊN từ thuần Nhật mà người Nhật thật sự tweet; TRÁNH katakana ngoại lai khi có từ thuần Nhật phổ biến hơn. VD quả cherry: BẮT BUỘC dùng さくらんぼ, KHÔNG dùng チェリー. Nếu phân vân, chọn từ cho ra nhiều kết quả tìm kiếm nhất.',
+                            '- Tránh từ chung chung, cảm xúc, hay chỉ 1 danh từ đơn lẻ. Ưu tiên cách người Nhật thật sự tweet về vụ việc.',
+                            '- CHỈ trả về JSON array gồm 3 chuỗi, không giải thích.',
+                            'Ví dụ (vụ người Việt hái trộm cherry ở Nhật): ["\\"ベトナム人\\" さくらんぼ", "ベトナム人 さくらんぼ 窃盗", "さくらんぼ 盗難 外国人"]'
+                        ].join('\n')
+                    },
+                    { role: 'user', content: String(caseInfo).slice(0, 6000) }
+                ],
+                temperature: 0.2
+            }
+        );
+        if (res.status !== 200) return [];
+        const data = JSON.parse(res.body);
+        let content = (data.choices?.[0]?.message?.content || '[]').replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        try { const p = JSON.parse(content); if (Array.isArray(p)) return p.slice(0, 3); } catch (_) {}
+        const m = content.match(/\[.*?\]/s);
+        if (m) { try { return JSON.parse(m[0]).slice(0, 3); } catch (_) {} }
+        return [];
+    } catch (e) { console.error(`    [X] keyword JA lỗi: ${e.message}`); return []; }
+}
+
 async function main() {
     const args = process.argv.slice(2);
     const mode = args[0]; // topic text, --srt, --youtube
@@ -475,6 +515,16 @@ except Exception as e:
     }
     console.log(`[naze] ✅ Đã lưu ${rawSentences.length} câu vào DB`);
 
+    // Cấu hình cào X (chỉ genre drama) — sinh keyword tiếng Nhật 1 LẦN từ toàn bộ vụ việc
+    const X_PROFILE = process.env.X_PROFILE || 'chrome-profile-4';
+    const X_TWEET_URLS = process.env.NAZE_TWEET_URLS || '';
+    const xCaptureBudget = parseInt(process.env.X_CAPTURE_BUDGET || '5');
+    let xKeywords = [];
+    if (genre === 'drama') {
+        xKeywords = await getXKeywordsJa(mode); // mode = toàn bộ thông tin vụ việc
+        console.log(`[X] keywords (JA): ${xKeywords.join(' | ') || '(none)'}`);
+    }
+
     // Crawl ảnh
     for (const { index, text, paragraphId } of paragraphIds) {
         console.log(`\n[${index}/${paragraphIds.length}] "${text.slice(0, 60)}..."`);
@@ -553,6 +603,35 @@ except Exception as e:
             ]);
             await syncDir(imgDir, 'image', ['.jpg', '.jpeg', '.png', '.webp']);
             await syncDir(vidDir, 'video', ['.mp4', '.mov']);
+        }
+
+        // ===== Cào X (Twitter) — CHỈ genre drama, chạy 1 LẦN, lưu ở block riêng section='x' =====
+        if (genre === 'drama' && index === 1 && (xKeywords.length || X_TWEET_URLS.trim())) {
+            try {
+                for (const kw of xKeywords) {
+                    if (kw) await db.run('INSERT INTO Keyword (post_id, section, content, type) VALUES (?, ?, ?, ?)', [postId, 'x', kw, 'x_ja']);
+                }
+                const xOut = path.join(MEDIA_DIR, projectId, 'assets', 'x');
+                const { manifest } = await crawlX({
+                    profileName: X_PROFILE,
+                    outDir: xOut,
+                    keywords: xKeywords.join('|'),
+                    urls: X_TWEET_URLS,
+                    limit: 12, max: 12, captureMax: xCaptureBudget,
+                });
+                const insertAsset = async (absPath, type, srcUrl) => {
+                    const rel = path.relative(MEDIA_DIR, absPath);
+                    const ex = await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
+                    if (!ex) await db.run('INSERT INTO Asset (post_id, section, type, file_path, source_url) VALUES (?, ?, ?, ?, ?)', [postId, 'x', type, rel, srcUrl || null]);
+                };
+                for (const t of manifest) {
+                    for (const img of t.images) await insertAsset(img, 'image', t.url);
+                    for (const vid of t.videos) await insertAsset(vid, 'video', t.url);
+                    if (t.screenshot) await insertAsset(t.screenshot, 'image', t.url);
+                    if (t.recording) await insertAsset(t.recording, 'video', t.url);
+                }
+                console.log(`    [X] ${manifest.length} bài → block X (section='x')`);
+            } catch (e) { console.error(`    [X] lỗi: ${e.message}`); }
         }
     }
 
