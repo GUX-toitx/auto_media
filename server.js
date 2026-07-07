@@ -1054,13 +1054,12 @@ app.post('/api/create-naze-youtube', express.json(), async (req, res) => {
 });
 
 app.post('/api/create-naze', express.json(), async (req, res) => {
-    const { topic, projectId, targetLang } = req.body;
+    const { topic, projectId, targetLang, genre } = req.body;
     if (!topic?.trim() || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu topic hoặc projectId' });
     try {
         const targetDir = path.join(MEDIA_DIR, projectId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-        const args = ['naze_content.js', topic.trim(), projectId];
-        if (targetLang) args.push(targetLang);
+        const args = ['naze_content.js', topic.trim(), projectId, targetLang || 'vi', genre === 'drama' ? 'drama' : 'naze'];
         const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
         child.stdout.on('data', d => process.stdout.write(`[naze] ${d}`));
         child.stderr.on('data', d => process.stderr.write(`[naze] ${d}`));

@@ -162,6 +162,84 @@ Task:
     return { title: parsed.title || '', title_vi: parsed.title_vi || '', sentences: parsed.sentences || [] };
 }
 
+async function generateDramaContent(info, targetLang) {
+    const langName = { vi: 'Vietnamese', en: 'English', ja: 'Japanese', ko: 'Korean', zh: 'Chinese', fr: 'French', es: 'Spanish', th: 'Thai', id: 'Bahasa Indonesia' }[targetLang] || targetLang;
+    const schema = {
+        type: 'object',
+        properties: {
+            title: { type: 'string' },
+            title_vi: { type: 'string' },
+            sentences: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    properties: {
+                        vi: { type: 'string' },
+                        target: { type: 'string' }
+                    },
+                    required: ['vi', 'target'],
+                    additionalProperties: false
+                }
+            }
+        },
+        required: ['title', 'title_vi', 'sentences'],
+        additionalProperties: false
+    };
+
+    const systemPrompt = `You are a professional true-crime / drama storytelling YouTube narrator.
+Task:
+1. You are given RAW CASE INFORMATION (real incidents, crime cases, scandals — names, dates, events, legal outcomes, public reactions). Rework ("xào") this information into a gripping narrated script.
+2. Write the script in BOTH Vietnamese AND ${langName} simultaneously.
+3. Style: suspenseful, dramatic, cinematic storytelling. Build tension, dramatize the sequence of events, use vivid pacing. NOT a dry news report — tell it like a true-crime story.
+4. Structure: Hook (a striking opening that grabs attention) → Set the scene / background → Escalating events (chi tiết diễn biến, phương thức) → Climax / turning point → Aftermath (hậu quả pháp lý, phản ứng dư luận) → Reflective conclusion.
+5. If MULTIPLE cases are provided, weave them into one cohesive episode with smooth transitions between stories (or treat them as connected chapters).
+6. Target length: 8-10 minutes of voice-over (approximately 2400-3500 words per language). Divide into paragraphs of 3-5 sentences each. Each "sentence" in the JSON output should be a FULL PARAGRAPH (multiple sentences combined), not a single short sentence.
+7. Stay faithful to the facts given (names, dates, outcomes) — do NOT invent contradicting facts, but you MAY add atmospheric narration and natural dramatic framing.
+8. NEVER cite sources, never add URLs, never add footnotes or references.
+9. Output clean narration only with no citations whatsoever.`;
+
+    const res = await httpsPost(
+        'https://api.openai.com/v1/responses',
+        { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+        {
+            model: 'gpt-5',
+            reasoning: { effort: 'high' },
+            max_output_tokens: 32000,
+            text: {
+                format: {
+                    type: 'json_schema',
+                    name: 'drama_content',
+                    schema,
+                    strict: true
+                }
+            },
+            input: systemPrompt + '\n\nCase information:\n' + info
+        }
+    );
+
+    if (res.status !== 200) throw new Error(`GPT loi ${res.status}: ${res.body.slice(0, 200)}`);
+    const data = JSON.parse(res.body);
+    const usage = data.usage;
+    console.log(`[GPT-5 drama] tokens - input: ${usage?.input_tokens}, output: ${usage?.output_tokens}, reasoning: ${usage?.output_tokens_details?.reasoning_tokens}`);
+    if (data.status === 'incomplete') {
+        throw new Error(`GPT-5 incomplete: ${data.incomplete_details?.reason}. Tokens: ${usage?.output_tokens}/32000`);
+    }
+    const outputText = data.output?.find(o => o.type === 'message')?.content?.find(c => c.type === 'output_text')?.text;
+    if (!outputText) throw new Error('GPT-5 no output: ' + JSON.stringify(data).slice(0, 200));
+
+    const parsed = JSON.parse(outputText);
+    const stripCitations = s => s.replace(/\s*\([^)]*\(https?:[^)]+\)[^)]*\)/g, '').replace(/\s*\(https?:\/\/[^)]+\)/g, '').trim();
+    parsed.sentences = (parsed.sentences || []).map(s => ({ vi: stripCitations(s.vi), target: stripCitations(s.target) }));
+
+    console.log('[GPT-5 drama] === OUTPUT ===');
+    console.log('Title VI:', parsed.title_vi);
+    console.log('Title:', parsed.title);
+    (parsed.sentences || []).forEach((s, i) => console.log(`  [${i+1}] VI: ${s.vi} | TARGET: ${s.target}`));
+    console.log('[GPT-5 drama] === END OUTPUT ===');
+
+    return { title: parsed.title || '', title_vi: parsed.title_vi || '', sentences: parsed.sentences || [] };
+}
+
 async function getKeywordsFromGPT(sentence) {
     const res = await httpsPost(
         'https://api.openai.com/v1/chat/completions',
@@ -202,7 +280,7 @@ async function main() {
     const args = process.argv.slice(2);
     const mode = args[0]; // topic text, --srt, --youtube
 
-    let projectId, targetLang, rawSentences = null, postTitleVi = '';
+    let projectId, targetLang, rawSentences = null, postTitleVi = '', genre = 'naze';
 
     if (mode === '--srt') {
         const srtPath = args[1];
@@ -368,11 +446,12 @@ except Exception as e:
         const topic = mode;
         projectId = args[1];
         targetLang = args[2] || 'vi';
-        if (!topic || !projectId) { console.error('Usage: node naze_content.js <topic> <projectId> [targetLang]'); process.exit(1); }
-        console.log(`[naze] Topic: ${topic} | Lang: ${targetLang}`);
+        genre = args[3] || 'naze';
+        if (!topic || !projectId) { console.error('Usage: node naze_content.js <topic> <projectId> [targetLang] [genre]'); process.exit(1); }
+        console.log(`[naze] Topic: ${topic} | Lang: ${targetLang} | Genre: ${genre}`);
     }
 
-    const result = rawSentences ? null : await generateContent(mode, targetLang);
+    const result = rawSentences ? null : await (genre === 'drama' ? generateDramaContent(mode, targetLang) : generateContent(mode, targetLang));
     if (result) { rawSentences = result.sentences; postTitleVi = result.title_vi || result.title; }
 
     const db = await getDb();

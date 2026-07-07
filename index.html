@@ -22,7 +22,7 @@
                 <button @click="page = 'posts'" :class="['flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all', page === 'posts' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white']">📂 Dự án</button>
                 <button @click="openProfilePage" :class="['flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all', page === 'profiles' ? 'bg-green-600 text-white shadow-lg shadow-green-500/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white']">🧑💻 Profiles</button>
             </div>
-            <button @click="nazeModal.open = true" class="w-full py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-cyan-600 hover:bg-cyan-500 text-white">❓ Tại sao?</button>
+            <button @click="genreChooser.open = true" class="w-full py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-cyan-600 hover:bg-cyan-500 text-white">➕ Tạo dự án</button>
         </div>
         <div class="flex-1 overflow-y-auto p-4 space-y-1">
             <div v-for="post in posts" :key="post.id" class="flex items-stretch gap-1">
@@ -1667,15 +1667,39 @@
         </div>
     </div>
 
+    <!-- GENRE CHOOSER MODAL -->
+    <div v-if="genreChooser.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="genreChooser.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[480px] space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-lg font-black text-white">➕ Chọn chủ đề</h3>
+                <button @click="genreChooser.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <button @click="openGenre('naze')"
+                    class="flex flex-col items-center gap-2 p-6 rounded-xl border border-gray-700 bg-gray-800 hover:bg-cyan-600 hover:border-cyan-500 transition-all group">
+                    <span class="text-4xl">❓</span>
+                    <span class="text-[13px] font-black text-white">Naze</span>
+                    <span class="text-[10px] text-gray-400 group-hover:text-white text-center">Kiến thức / khoa học "Tại sao?"</span>
+                </button>
+                <button @click="openGenre('drama')"
+                    class="flex flex-col items-center gap-2 p-6 rounded-xl border border-gray-700 bg-gray-800 hover:bg-rose-600 hover:border-rose-500 transition-all group">
+                    <span class="text-4xl">🎭</span>
+                    <span class="text-[13px] font-black text-white">Drama</span>
+                    <span class="text-[10px] text-gray-400 group-hover:text-white text-center">Kể chuyện vụ việc / hình sự</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- NAZE MODAL -->
     <div v-if="nazeModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="nazeModal.open = false">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[540px] space-y-4">
             <div class="flex justify-between items-center">
-                <h3 class="text-lg font-black text-white">❓ Tạo dự án</h3>
+                <h3 class="text-lg font-black text-white">{{ nazeModal.genre === 'drama' ? '🎭 Tạo dự án Drama' : '❓ Tạo dự án Naze' }}</h3>
                 <button @click="nazeModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
             </div>
             <!-- Tabs -->
-            <div class="flex gap-1 bg-gray-800 rounded-lg p-1">
+            <div v-if="nazeModal.genre !== 'drama'" class="flex gap-1 bg-gray-800 rounded-lg p-1">
                 <button @click="nazeModal.mode = 'text'" class="flex-1 py-1.5 rounded text-[10px] font-black transition-colors" :class="nazeModal.mode === 'text' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'">✍️ Nhập text</button>
                 <button @click="nazeModal.mode = 'srt'" class="flex-1 py-1.5 rounded text-[10px] font-black transition-colors" :class="nazeModal.mode === 'srt' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'">📄 File SRT</button>
                 <button @click="nazeModal.mode = 'youtube'" class="flex-1 py-1.5 rounded text-[10px] font-black transition-colors" :class="nazeModal.mode === 'youtube' ? 'bg-cyan-600 text-white' : 'text-gray-400 hover:text-white'">▶️ YouTube</button>
@@ -1696,9 +1720,9 @@
             </div>
             <!-- Tab: Text -->
             <div v-if="nazeModal.mode === 'text'">
-                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Chủ đề / Nội dung</label>
-                <textarea v-model="nazeModal.topic" rows="4"
-                    placeholder="Ví dụ: Tại sao nước biển lại mặn? Tại sao bầu trời màu xanh?"
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">{{ nazeModal.genre === 'drama' ? 'Thông tin vụ việc' : 'Chủ đề / Nội dung' }}</label>
+                <textarea v-model="nazeModal.topic" :rows="nazeModal.genre === 'drama' ? 10 : 4"
+                    :placeholder="nazeModal.genre === 'drama' ? 'Dán thông tin vụ việc (tên vụ, thời gian, đối tượng, diễn biến, hậu quả pháp lý, phản ứng dư luận...). Có thể dán nhiều vụ, GPT sẽ xào thành kịch bản kể chuyện.' : 'Ví dụ: Tại sao nước biển lại mặn? Tại sao bầu trời màu xanh?'"
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-cyan-500 resize-none leading-relaxed"></textarea>
             </div>
             <!-- Tab: SRT -->
@@ -2064,10 +2088,18 @@ createApp({
         const previewMode = ref(true);
         const profileModal = ref({ list: [], bulkText: '', cmds: [], addOpen: false, fileName: '' });
 
-        const nazeModal = ref({ open: false, mode: 'text', topic: '', projectId: '', targetLang: 'vi', loading: false, srtFile: null, srtTargetFile: null, youtubeUrl: '' });
+        const nazeModal = ref({ open: false, genre: 'naze', mode: 'text', topic: '', projectId: '', targetLang: 'vi', loading: false, srtFile: null, srtTargetFile: null, youtubeUrl: '' });
+        const genreChooser = ref({ open: false });
+
+        function openGenre(genre) {
+            genreChooser.value.open = false;
+            nazeModal.value.genre = genre;
+            nazeModal.value.mode = 'text';
+            nazeModal.value.open = true;
+        }
 
         async function submitNaze() {
-            const { mode, topic, targetLang, youtubeUrl, srtFile, srtTargetFile } = nazeModal.value;
+            const { mode, genre, topic, targetLang, youtubeUrl, srtFile, srtTargetFile } = nazeModal.value;
             const projectId = nazeModal.value.projectId.trim() || ('naze_' + Date.now());
             nazeModal.value.loading = true;
             try {
@@ -2076,7 +2108,7 @@ createApp({
                     if (!topic.trim()) return;
                     res = await fetch('/api/create-naze', { method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ topic, projectId, targetLang }) });
+                        body: JSON.stringify({ topic, projectId, targetLang, genre }) });
                 } else if (mode === 'srt') {
                     if (!srtFile) return;
                     const form = new FormData();
@@ -3945,6 +3977,8 @@ createApp({
             togglePreviewSelect,
             newProjectModal,
             nazeModal,
+            genreChooser,
+            openGenre,
             submitNaze,
             submitNewProject,
         };
