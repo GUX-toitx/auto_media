@@ -917,6 +917,99 @@ app.post('/api/delete-asset', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// API: Xóa nội dung (luận điểm / dòng detail) + cascade con + media file
+app.post('/api/delete-content', async (req, res) => {
+    const { type, id } = req.body;
+    if (!['paragraph', 'paragraph_detail', 'sentence', 'sentence_detail', 'hook_detail', 'conclusion_detail', 'hook', 'conclusion'].includes(type) || !id)
+        return res.status(400).json({ error: 'type/id không hợp lệ' });
+    let db;
+    try {
+        db = await getDb();
+        const inClause = (arr) => `(${arr.map(() => '?').join(',')})`;
+        const filePaths = [];
+        const collect = async (sql, params) => {
+            const rows = await db.all(sql, params);
+            for (const r of rows) if (r.file_path) filePaths.push(r.file_path);
+        };
+
+        if (type === 'paragraph') {
+            const sentIds = (await db.all('SELECT id FROM Sentence WHERE paragraph_id = ?', [id])).map(s => s.id);
+            const sdIds = sentIds.length
+                ? (await db.all(`SELECT id FROM SentenceDetail WHERE sentence_id IN ${inClause(sentIds)}`, sentIds)).map(d => d.id)
+                : [];
+            const pdIds = (await db.all('SELECT id FROM ParagraphDetail WHERE paragraph_id = ?', [id])).map(d => d.id);
+
+            await collect('SELECT file_path FROM Asset WHERE paragraph_id = ?', [id]);
+            if (sentIds.length) await collect(`SELECT file_path FROM Asset WHERE sentence_id IN ${inClause(sentIds)}`, sentIds);
+            if (pdIds.length) await collect(`SELECT file_path FROM Asset WHERE paragraph_detail_id IN ${inClause(pdIds)}`, pdIds);
+            if (sdIds.length) await collect(`SELECT file_path FROM Asset WHERE sentence_detail_id IN ${inClause(sdIds)}`, sdIds);
+
+            await db.run('DELETE FROM Asset WHERE paragraph_id = ?', [id]);
+            if (sentIds.length) await db.run(`DELETE FROM Asset WHERE sentence_id IN ${inClause(sentIds)}`, sentIds);
+            if (pdIds.length) await db.run(`DELETE FROM Asset WHERE paragraph_detail_id IN ${inClause(pdIds)}`, pdIds);
+            if (sdIds.length) await db.run(`DELETE FROM Asset WHERE sentence_detail_id IN ${inClause(sdIds)}`, sdIds);
+            if (sdIds.length) await db.run(`DELETE FROM SentenceDetail WHERE id IN ${inClause(sdIds)}`, sdIds);
+            await db.run('DELETE FROM ParagraphDetail WHERE paragraph_id = ?', [id]);
+            if (sentIds.length) await db.run('DELETE FROM Sentence WHERE paragraph_id = ?', [id]);
+            await db.run('DELETE FROM Keyword WHERE paragraph_id = ?', [id]);
+            await db.run('DELETE FROM Paragraph WHERE id = ?', [id]);
+        } else if (type === 'paragraph_detail') {
+            await collect('SELECT file_path FROM Asset WHERE paragraph_detail_id = ?', [id]);
+            await db.run('DELETE FROM Asset WHERE paragraph_detail_id = ?', [id]);
+            await db.run('DELETE FROM ParagraphDetail WHERE id = ?', [id]);
+        } else if (type === 'sentence') {
+            const sdIds = (await db.all('SELECT id FROM SentenceDetail WHERE sentence_id = ?', [id])).map(d => d.id);
+            await collect('SELECT file_path FROM Asset WHERE sentence_id = ?', [id]);
+            if (sdIds.length) await collect(`SELECT file_path FROM Asset WHERE sentence_detail_id IN ${inClause(sdIds)}`, sdIds);
+            await db.run('DELETE FROM Asset WHERE sentence_id = ?', [id]);
+            if (sdIds.length) await db.run(`DELETE FROM Asset WHERE sentence_detail_id IN ${inClause(sdIds)}`, sdIds);
+            await db.run('DELETE FROM SentenceDetail WHERE sentence_id = ?', [id]);
+            await db.run('DELETE FROM Sentence WHERE id = ?', [id]);
+        } else if (type === 'sentence_detail') {
+            await collect('SELECT file_path FROM Asset WHERE sentence_detail_id = ?', [id]);
+            await db.run('DELETE FROM Asset WHERE sentence_detail_id = ?', [id]);
+            await db.run('DELETE FROM SentenceDetail WHERE id = ?', [id]);
+        } else if (type === 'hook_detail') {
+            await collect('SELECT file_path FROM Asset WHERE hook_detail_id = ?', [id]);
+            await db.run('DELETE FROM Asset WHERE hook_detail_id = ?', [id]);
+            await db.run('DELETE FROM HookDetail WHERE id = ?', [id]);
+        } else if (type === 'conclusion_detail') {
+            await collect('SELECT file_path FROM Asset WHERE conclusion_detail_id = ?', [id]);
+            await db.run('DELETE FROM Asset WHERE conclusion_detail_id = ?', [id]);
+            await db.run('DELETE FROM ConclusionDetail WHERE id = ?', [id]);
+        } else if (type === 'hook' || type === 'conclusion') {
+            // id = post_id: xóa cả khối section (mở bài / kết bài)
+            const detailTable = type === 'hook' ? 'HookDetail' : 'ConclusionDetail';
+            const detailCol = type === 'hook' ? 'hook_detail_id' : 'conclusion_detail_id';
+            const dIds = (await db.all(`SELECT id FROM ${detailTable} WHERE post_id = ?`, [id])).map(d => d.id);
+
+            if (dIds.length) await collect(`SELECT file_path FROM Asset WHERE ${detailCol} IN ${inClause(dIds)}`, dIds);
+            await collect('SELECT file_path FROM Asset WHERE post_id = ? AND section = ?', [id, type]);
+
+            if (dIds.length) await db.run(`DELETE FROM Asset WHERE ${detailCol} IN ${inClause(dIds)}`, dIds);
+            await db.run('DELETE FROM Asset WHERE post_id = ? AND section = ?', [id, type]);
+            await db.run(`DELETE FROM ${detailTable} WHERE post_id = ?`, [id]);
+            await db.run('DELETE FROM Keyword WHERE post_id = ? AND section = ?', [id, type]);
+            if (type === 'hook')
+                await db.run('UPDATE Post SET hook = NULL, hook_vi = NULL, hook_audio = NULL, hook_vi_audio = NULL WHERE id = ?', [id]);
+            else
+                await db.run('UPDATE Post SET conclusion_vi = NULL, conclusion_vi_audio = NULL, conclusion_target = NULL, conclusion_target_audio = NULL WHERE id = ?', [id]);
+        }
+
+        await db.close();
+        for (const fp of filePaths) {
+            try {
+                const full = path.join(MEDIA_DIR, fp);
+                if (fs.existsSync(full)) fs.unlinkSync(full);
+            } catch (_) { /* bỏ qua file lỗi */ }
+        }
+        res.json({ ok: true });
+    } catch (e) {
+        try { if (db) await db.close(); } catch (_) {}
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.post('/api/unselect-asset', async (req, res) => {
     const { videoId, relativePath, order, gid, type } = req.body;
     try {
