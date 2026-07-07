@@ -90,6 +90,7 @@ export async function initDB() {
     await db.run('ALTER TABLE Post ADD COLUMN hook_vi_audio TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN intro_path TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN outro_path TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Post ADD COLUMN seo_title TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Sentence ADD COLUMN sentence_uuid TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Sentence ADD COLUMN title TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Sentence ADD COLUMN title_vi TEXT DEFAULT NULL').catch(() => {});
