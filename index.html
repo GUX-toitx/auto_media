@@ -647,8 +647,8 @@
                                                 </div>
                                             </div>
                                             <div class="grid grid-cols-2 gap-1">
-                                                <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio" :text="d.content_vi" :wt="d.content_vi_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                                                <div><audio-bar v-if="d.content_audio" :src="d.content_audio" :text="d.content" :wt="d.content_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                                <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio" :text="d.content_vi" :wt="d.content_vi_wt" :cover-sec="detailCoverSec(para, d, 'vi')" :cover-full="coverFull(para, 'vi')"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                                <div><audio-bar v-if="d.content_audio" :src="d.content_audio" :text="d.content" :wt="d.content_wt" :cover-sec="detailCoverSec(para, d, 'target')" :cover-full="coverFull(para, 'target')"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                                             </div>
                                             <!-- Assets for this detail -->
                                             <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
@@ -2110,7 +2110,7 @@ const { createApp, ref, computed, watch, onMounted, onUnmounted } = Vue;
 
 // Thanh audio waveform custom: play/seek + thời gian m:ss.s chính xác
 const AudioBar = {
-  props: { src: { type: String, required: true }, text: { type: String, default: '' }, wt: { type: String, default: '' } },
+  props: { src: { type: String, required: true }, text: { type: String, default: '' }, wt: { type: String, default: '' }, coverSec: { type: Number, default: null }, coverFull: { type: Boolean, default: false } },
   template: `
     <div class="w-full">
       <div class="flex items-center gap-1.5 bg-gray-950 border border-gray-800 rounded px-1.5 py-1 w-full select-none">
@@ -2122,7 +2122,7 @@ const AudioBar = {
         </div>
         <span class="shrink-0 text-[9px] font-mono tabular-nums text-pink-300">{{ fmt(cur) }}/<b class="text-pink-200">{{ fmt(dur) }}</b></span>
       </div>
-      <div v-if="tokens.length" @mouseup="onSelect" @mousedown="clearSel" class="relative mt-1 px-1 leading-relaxed text-[11px] whitespace-pre-wrap break-words"><template v-for="(tok, i) in tokens" :key="i"><span v-if="tok.isWord" :data-wi="tok.wordIndex" @click="seekWord(tok.wordIndex)" :title="wordTip(tok.wordIndex)" class="cursor-pointer transition-colors duration-75 rounded hover:bg-pink-400/20" :class="tok.wordIndex === activeWord ? 'bg-pink-500/30 text-pink-100' : (tok.wordIndex < activeWord ? 'text-pink-300/80' : 'text-gray-500')">{{ tok.text }}</span><template v-else>{{ tok.text }}</template></template><div v-if="selTip" :style="{ left: selTip.x + 'px', top: (selTip.y - 6) + 'px' }" class="absolute z-50 -translate-x-1/2 -translate-y-full bg-pink-600 text-white text-[10px] font-mono font-bold px-2 py-1 rounded shadow-lg pointer-events-none whitespace-nowrap">{{ selTip.text }}</div></div>
+      <div v-if="tokens.length" @mouseup="onSelect" @mousedown="clearSel" class="relative mt-1 px-1 leading-relaxed text-[11px] whitespace-pre-wrap break-words"><template v-for="(tok, i) in tokens" :key="i"><span v-if="tok.isWord" :data-wi="tok.wordIndex" @click="seekWord(tok.wordIndex)" :title="wordTip(tok.wordIndex)" class="cursor-pointer transition-colors duration-75 rounded hover:bg-pink-400/20" :class="wordClass(tok.wordIndex)">{{ tok.text }}</span><template v-else>{{ tok.text }}</template></template><div v-if="selTip" :style="{ left: selTip.x + 'px', top: (selTip.y - 6) + 'px' }" class="absolute z-50 -translate-x-1/2 -translate-y-full bg-pink-600 text-white text-[10px] font-mono font-bold px-2 py-1 rounded shadow-lg pointer-events-none whitespace-nowrap">{{ selTip.text }}</div></div>
     </div>
   `,
   setup(props) {
@@ -2302,6 +2302,20 @@ const AudioBar = {
     };
     // Tooltip hover: từ này bắt đầu ở giây thứ mấy
     const wordTip = (wi) => { const b = wordBounds.value[wi]; return b ? ('⏱ ' + b[0].toFixed(2) + 's → ' + b[1].toFixed(2) + 's') : ''; };
+    // Màu mỗi từ: đang phát -> karaoke hồng; nghỉ -> theo COVERAGE media (cam tới mức đã phủ, khít audio thì xanh lá)
+    const wordClass = (wi) => {
+      if (started.value) {
+        const a = activeWord.value;
+        if (wi === a) return 'bg-pink-500/30 text-pink-100';
+        return wi < a ? 'text-pink-300/80' : 'text-gray-500';
+      }
+      if (props.coverFull) return 'text-green-400';                       // media phủ khít audio -> xanh
+      if (props.coverSec != null && props.coverSec > 0) {
+        const b = wordBounds.value[wi];
+        if (b && b[0] < props.coverSec) return 'text-orange-400';         // đã phủ tới từ này -> cam
+      }
+      return 'text-gray-500';
+    };
     // Bôi đen 1 đoạn -> tooltip khoảng thời gian của đoạn (giây đầu -> giây cuối + độ dài)
     const selTip = ref(null);
     const clearSel = () => { selTip.value = null; };
@@ -2326,7 +2340,7 @@ const AudioBar = {
         y: r.top - cr.top,
       };
     };
-    return { cv, track, playing, cur, dur, pct, fmt, toggle, seek, tokens, activeWord, seekWord, wordTip, selTip, onSelect, clearSel };
+    return { cv, track, playing, cur, dur, pct, fmt, toggle, seek, tokens, activeWord, seekWord, wordTip, wordClass, selTip, onSelect, clearSel };
   }
 };
 
@@ -2640,17 +2654,35 @@ createApp({
         // Tổng độ dài giọng đọc của 1 cảnh theo từng ngôn ngữ (ghép audio như capcut_export)
         // -> para._narrationViSec (tiếng Việt) và para._narrationTargetSec (ngôn ngữ đích)
         async function computeNarration(para) {
-            const urlsFor = (field) => para[field]
-                ? [para[field]]
-                : (para.details || []).map(d => d[field]).filter(Boolean);
-            const viUrls = urlsFor('content_vi_audio');
-            const tgUrls = urlsFor('content_audio');
-            const [viDurs, tgDurs] = await Promise.all([
-                Promise.all(viUrls.map(loadAudioDuration)),
-                Promise.all(tgUrls.map(loadAudioDuration)),
-            ]);
-            para._narrationViSec = viDurs.reduce((s, d) => s + d, 0);
-            para._narrationTargetSec = tgDurs.reduce((s, d) => s + d, 0);
+            const details = para.details || [];
+            // Lưu duration TỪNG detail (dùng cho coverage: tính offset để tô cam text theo media đã chọn)
+            await Promise.all(details.map(async d => {
+                d._durVi = d.content_vi_audio ? await loadAudioDuration(d.content_vi_audio) : 0;
+                d._durTg = d.content_audio ? await loadAudioDuration(d.content_audio) : 0;
+            }));
+            // Narration tổng: ưu tiên audio gộp ở para nếu có, không thì cộng theo detail
+            para._narrationViSec = para.content_vi_audio ? await loadAudioDuration(para.content_vi_audio) : details.reduce((s, d) => s + (d._durVi || 0), 0);
+            para._narrationTargetSec = para.content_audio ? await loadAudioDuration(para.content_audio) : details.reduce((s, d) => s + (d._durTg || 0), 0);
+        }
+
+        // COVERAGE: media đã chọn (theo thứ tự) phủ được tới giây nào -> tô cam text tới đó, khít audio thì xanh lá.
+        // Media dùng chung cho vi & target nhưng so với narration từng ngôn ngữ.
+        function coverFull(para, lang) {
+            const narr = lang === 'vi' ? para._narrationViSec : para._narrationTargetSec;
+            return !!narr && selectedTotalSec(para) + 0.05 >= narr;
+        }
+        // Số giây phủ dành cho RIÊNG 1 detail = (tổng media đã chọn) trừ độ dài các detail đứng trước, kẹp [0, dur detail này]
+        function detailCoverSec(para, detail, lang) {
+            const covered = selectedTotalSec(para);
+            if (!covered) return 0;
+            const durField = lang === 'vi' ? '_durVi' : '_durTg';
+            let offset = 0;
+            for (const d of (para.details || [])) {
+                const dur = d[durField] || 0;
+                if (d === detail) return Math.max(0, Math.min(dur, covered - offset));
+                offset += dur;
+            }
+            return 0;
         }
 
         async function deleteProject(post) {
@@ -4404,6 +4436,7 @@ createApp({
             reloadParaAssets,
             selectedMedia,
             selectedTotalSec, coverageText, coverageClass, sectionSelectedSec,
+            coverFull, detailCoverSec,
             coverageRemain,
             coverageHintClass,
             setImageDuration,
