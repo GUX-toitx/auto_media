@@ -70,6 +70,7 @@
                         <div class="flex gap-1.5 bg-gray-900/60 border border-gray-800 rounded-lg p-1.5">
                             <button @click="createVoice" class="bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Tạo Voice</button>
                             <button @click="retryDownloadVoice" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🔄 Refresh</button>
+                            <button @click="alignWords" :disabled="aligning" class="bg-fuchsia-600 hover:bg-fuchsia-500 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest transition-all active:scale-95" title="WhisperX: căn mốc từng từ cho karaoke"><span v-if="aligning" class="animate-spin inline-block mr-1">⏳</span>{{ aligning ? 'Đang sync...' : '🎤 Sync lời' }}</button>
                         </div>
                     </div>
 
@@ -192,8 +193,8 @@
                                 </div>
                             </div>
                             <div class="grid grid-cols-2 gap-1">
-                                <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                                <div><audio-bar v-if="d.content_audio" :src="d.content_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio" :text="d.content_vi" :wt="d.content_vi_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                <div><audio-bar v-if="d.content_audio" :src="d.content_audio" :text="d.content" :wt="d.content_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                             </div>
                             <!-- Assets for this detail -->
                             <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
@@ -393,8 +394,8 @@
                                 </div>
                             </div>
                             <div class="grid grid-cols-2 gap-1">
-                                <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                                <div><audio-bar v-if="d.content_audio" :src="d.content_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio" :text="d.content_vi" :wt="d.content_vi_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                <div><audio-bar v-if="d.content_audio" :src="d.content_audio" :text="d.content" :wt="d.content_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                             </div>
                             <!-- Assets for this detail -->
                             <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
@@ -624,8 +625,8 @@
                                         <div contenteditable="true" @blur="saveParaField(para, 'title', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-300 leading-relaxed min-h-[32px] outline-none focus:border-yellow-500">{{ para.title }}</div>
                                     </div>
                                     <div class="grid grid-cols-2 gap-2">
-                                        <div><audio-bar v-if="para.title_vi_audio" :src="para.title_vi_audio"></audio-bar><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
-                                        <div><audio-bar v-if="para.title_audio" :src="para.title_audio"></audio-bar><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                                        <div><audio-bar v-if="para.title_vi_audio" :src="para.title_vi_audio" :text="para.title_vi" :wt="para.title_vi_wt"></audio-bar><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                                        <div><audio-bar v-if="para.title_audio" :src="para.title_audio" :text="para.title" :wt="para.title_wt"></audio-bar><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
                                     </div>
                                 </div>
                                 <!-- Content row -->
@@ -646,8 +647,8 @@
                                                 </div>
                                             </div>
                                             <div class="grid grid-cols-2 gap-1">
-                                                <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                                                <div><audio-bar v-if="d.content_audio" :src="d.content_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                                <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio" :text="d.content_vi" :wt="d.content_vi_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                                <div><audio-bar v-if="d.content_audio" :src="d.content_audio" :text="d.content" :wt="d.content_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                                             </div>
                                             <!-- Assets for this detail -->
                                             <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
@@ -810,8 +811,8 @@
                                                     <div contenteditable="true" @blur="saveSentenceField(s, 'title', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-800 border border-yellow-600/40 rounded-lg p-2 text-[11px] font-black text-yellow-300 leading-relaxed min-h-[28px] outline-none focus:border-yellow-500">{{ s.title }}</div>
                                                 </div>
                                                 <div class="grid grid-cols-2 gap-2">
-                                                    <div><audio-bar v-if="s.title_vi_audio" :src="s.title_vi_audio"></audio-bar><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
-                                                    <div><audio-bar v-if="s.title_audio" :src="s.title_audio"></audio-bar><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                                                    <div><audio-bar v-if="s.title_vi_audio" :src="s.title_vi_audio" :text="s.title_vi" :wt="s.title_vi_wt"></audio-bar><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
+                                                    <div><audio-bar v-if="s.title_audio" :src="s.title_audio" :text="s.title" :wt="s.title_wt"></audio-bar><span v-else class="inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-gray-600 border border-gray-700">No audio</span></div>
                                                 </div>
                                             </div>
                                             <!-- Sentence content - hiển thị details -->
@@ -832,8 +833,8 @@
                                                             </div>
                                                         </div>
                                                         <div class="grid grid-cols-2 gap-1">
-                                                            <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                                                            <div><audio-bar v-if="d.content_audio" :src="d.content_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                                            <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio" :text="d.content_vi" :wt="d.content_vi_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                                            <div><audio-bar v-if="d.content_audio" :src="d.content_audio" :text="d.content" :wt="d.content_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                                                         </div>
                                                         <!-- Assets for this detail -->
                                                         <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
@@ -1033,8 +1034,8 @@
                                 </div>
                             </div>
                             <div class="grid grid-cols-2 gap-1">
-                                <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                                <div><audio-bar v-if="d.content_audio" :src="d.content_audio"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio" :text="d.content_vi" :wt="d.content_vi_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
+                                <div><audio-bar v-if="d.content_audio" :src="d.content_audio" :text="d.content" :wt="d.content_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                             </div>
                             <!-- Assets for this detail -->
                             <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
@@ -2109,21 +2110,24 @@ const { createApp, ref, computed, watch, onMounted, onUnmounted } = Vue;
 
 // Thanh audio waveform custom: play/seek + thời gian m:ss.s chính xác
 const AudioBar = {
-  props: { src: { type: String, required: true } },
+  props: { src: { type: String, required: true }, text: { type: String, default: '' }, wt: { type: String, default: '' } },
   template: `
-    <div class="flex items-center gap-1.5 bg-gray-950 border border-gray-800 rounded px-1.5 py-1 w-full select-none">
-      <button type="button" @click="toggle" class="shrink-0 w-6 h-6 rounded-full bg-pink-600 hover:bg-pink-500 text-white text-[9px] flex items-center justify-center leading-none">{{ playing ? '❚❚' : '▶' }}</button>
-      <div ref="track" @click="seek" class="relative flex-1 h-7 cursor-pointer overflow-hidden rounded bg-gray-900">
-        <canvas ref="cv" class="absolute inset-0 w-full h-full"></canvas>
-        <div class="absolute top-0 bottom-0 left-0 bg-pink-500/20 pointer-events-none" :style="{ width: pct + '%' }"></div>
-        <div class="absolute top-0 bottom-0 w-0.5 bg-pink-400 pointer-events-none" :style="{ left: pct + '%' }"></div>
+    <div class="w-full">
+      <div class="flex items-center gap-1.5 bg-gray-950 border border-gray-800 rounded px-1.5 py-1 w-full select-none">
+        <button type="button" @click="toggle" class="shrink-0 w-6 h-6 rounded-full bg-pink-600 hover:bg-pink-500 text-white text-[9px] flex items-center justify-center leading-none">{{ playing ? '❚❚' : '▶' }}</button>
+        <div ref="track" @click="seek" class="relative flex-1 h-7 cursor-pointer overflow-hidden rounded bg-gray-900">
+          <canvas ref="cv" class="absolute inset-0 w-full h-full"></canvas>
+          <div class="absolute top-0 bottom-0 left-0 bg-pink-500/20 pointer-events-none" :style="{ width: pct + '%' }"></div>
+          <div class="absolute top-0 bottom-0 w-0.5 bg-pink-400 pointer-events-none" :style="{ left: pct + '%' }"></div>
+        </div>
+        <span class="shrink-0 text-[9px] font-mono tabular-nums text-pink-300">{{ fmt(cur) }}/<b class="text-pink-200">{{ fmt(dur) }}</b></span>
       </div>
-      <span class="shrink-0 text-[9px] font-mono tabular-nums text-pink-300">{{ fmt(cur) }}/<b class="text-pink-200">{{ fmt(dur) }}</b></span>
+      <div v-if="tokens.length" @mouseup="onSelect" @mousedown="clearSel" class="relative mt-1 px-1 leading-relaxed text-[11px] whitespace-pre-wrap break-words"><template v-for="(tok, i) in tokens" :key="i"><span v-if="tok.isWord" :data-wi="tok.wordIndex" @click="seekWord(tok.wordIndex)" :title="wordTip(tok.wordIndex)" class="cursor-pointer transition-colors duration-75 rounded hover:bg-pink-400/20" :class="tok.wordIndex === activeWord ? 'bg-pink-500/30 text-pink-100' : (tok.wordIndex < activeWord ? 'text-pink-300/80' : 'text-gray-500')">{{ tok.text }}</span><template v-else>{{ tok.text }}</template></template><div v-if="selTip" :style="{ left: selTip.x + 'px', top: (selTip.y - 6) + 'px' }" class="absolute z-50 -translate-x-1/2 -translate-y-full bg-pink-600 text-white text-[10px] font-mono font-bold px-2 py-1 rounded shadow-lg pointer-events-none whitespace-nowrap">{{ selTip.text }}</div></div>
     </div>
   `,
   setup(props) {
     const cv = ref(null), track = ref(null);
-    const playing = ref(false), cur = ref(0), dur = ref(0);
+    const playing = ref(false), cur = ref(0), dur = ref(0), started = ref(false);
     let audio = null, raf = 0, peaks = null, io = null, decoded = false;
     const pct = computed(() => dur.value > 0 ? Math.min(100, cur.value / dur.value * 100) : 0);
     const fmt = (s) => {
@@ -2139,9 +2143,9 @@ const AudioBar = {
       audio.src = props.src;
       audio.addEventListener('loadedmetadata', () => { dur.value = audio.duration || 0; });
       audio.addEventListener('timeupdate', () => { cur.value = audio.currentTime || 0; });
-      audio.addEventListener('play', () => { playing.value = true; loop(); });
+      audio.addEventListener('play', () => { playing.value = true; started.value = true; loop(); });
       audio.addEventListener('pause', () => { playing.value = false; });
-      audio.addEventListener('ended', () => { playing.value = false; cur.value = 0; });
+      audio.addEventListener('ended', () => { playing.value = false; started.value = false; cur.value = 0; });
       return audio;
     };
     const loop = () => { if (audio && !audio.paused) { cur.value = audio.currentTime; raf = requestAnimationFrame(loop); } };
@@ -2224,7 +2228,105 @@ const AudioBar = {
       if (audio) audio.src = nv;
       drawFlat(); decode();
     });
-    return { cv, track, playing, cur, dur, pct, fmt, toggle, seek };
+    // === Karaoke ===
+    // Ưu tiên MỐC THẬT từ WhisperX (prop wt = JSON [[từ, start, end], ...]).
+    // Nếu chưa align thì fallback: tách bằng Intl.Segmenter + ước lượng theo độ dài từ.
+    const realWords = computed(() => {
+      if (!props.wt) return null;
+      try {
+        const arr = JSON.parse(props.wt);
+        if (Array.isArray(arr) && arr.length && Array.isArray(arr[0])) return arr;
+      } catch (_) { /* wt hỏng -> fallback */ }
+      return null;
+    });
+    const tokens = computed(() => {
+      const rw = realWords.value;
+      if (rw) {
+        const spaced = /\s/.test(props.text || '');   // VN/EN có dấu cách; Nhật/Trung thì không
+        const out = [];
+        rw.forEach((w, i) => {
+          if (i > 0 && spaced) out.push({ text: ' ', isWord: false, wordIndex: -1 });
+          out.push({ text: w[0], isWord: true, wordIndex: i });
+        });
+        return out;
+      }
+      const raw = (props.text || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ');
+      let wi = 0;
+      try {
+        if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+          const seg = new Intl.Segmenter(undefined, { granularity: 'word' });
+          return [...seg.segment(raw)].map(s => {
+            const isWord = s.isWordLike && /\S/.test(s.segment);
+            return { text: s.segment, isWord, wordIndex: isWord ? wi++ : -1 };
+          });
+        }
+      } catch (_) { /* fallback bên dưới */ }
+      const parts = raw.match(/\S+|\s+/g) || [];
+      wi = 0;
+      return parts.map(t => /\S/.test(t) ? { text: t, isWord: true, wordIndex: wi++ } : { text: t, isWord: false, wordIndex: -1 });
+    });
+    const wordBounds = computed(() => {
+      const rw = realWords.value;
+      if (rw) return rw.map(w => [w[1], w[2]]);   // mốc thật, không cần ước lượng
+      const toks = tokens.value;
+      const weights = [];
+      for (let i = 0; i < toks.length; i++) {
+        if (!toks[i].isWord) continue;
+        const self = toks[i].text;
+        const core = self.replace(/[^\p{L}\p{N}]/gu, '');
+        let w = Math.max(1, core.length || self.length);
+        // Ngắt câu: xét cả dấu dính cuối từ (VN/EN) lẫn token dấu câu kế tiếp (Nhật/Trung)
+        const next = toks[i + 1];
+        const nx = (next && !next.isWord) ? next.text : '';
+        if (/[.!?…。！？]$/.test(self) || /[.!?…。！？]/.test(nx)) w += 3;        // ngắt câu → chờ lâu hơn
+        else if (/[,;:—]$/.test(self) || /[,;:—、，；：]/.test(nx)) w += 1.5;   // ngắt nhẹ
+        weights.push(w);
+      }
+      const total = weights.reduce((a, b) => a + b, 0) || 1;
+      const d = dur.value || 0;
+      let acc = 0; const out = [];
+      for (const w of weights) { const s = d * acc / total; acc += w; out.push([s, d * acc / total]); }
+      return out;
+    });
+    const activeWord = computed(() => {
+      if (!started.value) return -1;
+      const b = wordBounds.value, c = cur.value;
+      for (let i = 0; i < b.length; i++) if (c < b[i][1]) return i;
+      return b.length - 1;
+    });
+    // Click từ: tua giọng TỚI từ đó rồi DỪNG (không tự chạy tiếp). Từ đó vẫn sáng.
+    const seekWord = (wi) => {
+      const a = ensure(); const b = wordBounds.value[wi]; if (!b) return;
+      if (!a.paused) a.pause();
+      a.currentTime = b[0]; cur.value = b[0]; started.value = true;
+    };
+    // Tooltip hover: từ này bắt đầu ở giây thứ mấy
+    const wordTip = (wi) => { const b = wordBounds.value[wi]; return b ? ('⏱ ' + b[0].toFixed(2) + 's → ' + b[1].toFixed(2) + 's') : ''; };
+    // Bôi đen 1 đoạn -> tooltip khoảng thời gian của đoạn (giây đầu -> giây cuối + độ dài)
+    const selTip = ref(null);
+    const clearSel = () => { selTip.value = null; };
+    const onSelect = (ev) => {
+      const sel = window.getSelection();
+      const container = ev.currentTarget;
+      if (!sel || sel.isCollapsed || !sel.rangeCount) { selTip.value = null; return; }
+      const idxs = [];
+      container.querySelectorAll('[data-wi]').forEach(s => {
+        if (sel.containsNode(s, true)) { const n = parseInt(s.dataset.wi); if (!isNaN(n)) idxs.push(n); }
+      });
+      if (!idxs.length) { selTip.value = null; return; }
+      const lo = Math.min(...idxs), hi = Math.max(...idxs);
+      const b = wordBounds.value;
+      if (!b[lo] || !b[hi]) { selTip.value = null; return; }
+      const start = b[lo][0], end = b[hi][1];
+      const r = sel.getRangeAt(0).getBoundingClientRect();
+      const cr = container.getBoundingClientRect();
+      selTip.value = {
+        text: start.toFixed(2) + 's → ' + end.toFixed(2) + 's  ·  ' + (end - start).toFixed(2) + 's',
+        x: (r.left + r.width / 2) - cr.left,
+        y: r.top - cr.top,
+      };
+    };
+    return { cv, track, playing, cur, dur, pct, fmt, toggle, seek, tokens, activeWord, seekWord, wordTip, selTip, onSelect, clearSel };
   }
 };
 
@@ -4155,6 +4257,27 @@ createApp({
             activePost.value = data;
         }
 
+        // Karaoke: gọi WhisperX căn mốc từng từ cho cả post (cả target + VN), rồi reload
+        const aligning = ref(false);
+        async function alignWords() {
+            if (!activePostId.value || aligning.value) return;
+            aligning.value = true;
+            showToast('🎤 Đang căn mốc từng từ (WhisperX)... có thể mất chút thời gian');
+            try {
+                const res = await fetch('/api/align-words', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ postId: activePostId.value }),
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) throw new Error(data.error || 'lỗi align');
+                const sum = (data.results || []).map(r => `${r.contentType === 'content_vi' ? '🇻🇳' : '🌍'} ${r.aligned}/${r.total}`).join('  ');
+                showToast(`✅ Sync lời xong: ${sum}`);
+                await reloadCurrentPost();
+            } catch (e) { alert('❌ Sync lời lỗi: ' + e.message); }
+            aligning.value = false;
+        }
+
         return {
             page,
             posts,
@@ -4254,6 +4377,8 @@ createApp({
             openDownloadVoiceModal,
             submitDownloadAudio,
             retryDownloadVoice,
+            aligning,
+            alignWords,
             submitCreateVoice,
             genAudio,
             downloadVoice,

@@ -175,6 +175,18 @@ export async function initDB() {
         "order" INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY(post_id) REFERENCES Post(id)
     )`).catch(() => {});
+    // Word-times cho karaoke (JSON mốc từng từ, do WhisperX forced-alignment sinh ra)
+    // Bảng "detail" (content/content_vi) → content_wt / content_vi_wt
+    for (const t of ['HookDetail', 'SummaryDetail', 'ConclusionDetail', 'ParagraphDetail', 'SentenceDetail']) {
+        await db.run(`ALTER TABLE ${t} ADD COLUMN content_wt TEXT DEFAULT NULL`).catch(() => {});
+        await db.run(`ALTER TABLE ${t} ADD COLUMN content_vi_wt TEXT DEFAULT NULL`).catch(() => {});
+    }
+    // Bảng có tiêu đề (title/title_vi) → title_wt / title_vi_wt
+    for (const t of ['Paragraph', 'Sentence']) {
+        await db.run(`ALTER TABLE ${t} ADD COLUMN title_wt TEXT DEFAULT NULL`).catch(() => {});
+        await db.run(`ALTER TABLE ${t} ADD COLUMN title_vi_wt TEXT DEFAULT NULL`).catch(() => {});
+    }
+
     // Rename migrations
     await db.run('ALTER TABLE Post RENAME COLUMN title TO project_id').catch(() => {});
     await db.run('ALTER TABLE Post RENAME COLUMN tieu_de TO title').catch(() => {});

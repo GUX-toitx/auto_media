@@ -33,5 +33,7 @@ Thumbs.db
 .idea/
 chrome*
 .venv/
+.venv-whisperx/
+__pycache__/
 setting/chrome-profile-x/
 accounts.db

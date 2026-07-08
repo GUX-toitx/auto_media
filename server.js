@@ -12,6 +12,7 @@ import { open } from 'sqlite';
 import multer from 'multer';
 
 import { getLanguages, getReferenceSpeakers, getDictionary, getMe, sendToQueue, getSentenceStatus, updateSentence, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio, getAllAudioUrls } from './handle_voice/audio_service.js';
+import { alignPost } from './handle_voice/align_service.js';
 import { processAll } from './video_service.js';
 import { generateFlowImage } from './browser.js';
 import { crawlX } from './x_crawler.js';
@@ -52,7 +53,7 @@ app.get('/api/posts/:postId', async (req, res) => {
 
         // HookDetail
         post.hook_details = await db.all(
-            'SELECT id, content, content_vi, content_audio, content_vi_audio, "order" FROM HookDetail WHERE post_id = ? ORDER BY "order"',
+            'SELECT id, content, content_vi, content_audio, content_vi_audio, content_wt, content_vi_wt, "order" FROM HookDetail WHERE post_id = ? ORDER BY "order"',
             [post.id]
         );
         // Load assets for each hook_detail
@@ -64,7 +65,7 @@ app.get('/api/posts/:postId', async (req, res) => {
         
         // ConclusionDetail
         post.conclusion_details = await db.all(
-            'SELECT id, content, content_vi, content_audio, content_vi_audio, "order" FROM ConclusionDetail WHERE post_id = ? ORDER BY "order"',
+            'SELECT id, content, content_vi, content_audio, content_vi_audio, content_wt, content_vi_wt, "order" FROM ConclusionDetail WHERE post_id = ? ORDER BY "order"',
             [post.id]
         );
         for (const detail of post.conclusion_details) {
@@ -75,7 +76,7 @@ app.get('/api/posts/:postId', async (req, res) => {
         
         // SummaryDetail
         post.summary_details = await db.all(
-            'SELECT id, content, content_vi, content_audio, content_vi_audio, "order" FROM SummaryDetail WHERE post_id = ? ORDER BY "order"',
+            'SELECT id, content, content_vi, content_audio, content_vi_audio, content_wt, content_vi_wt, "order" FROM SummaryDetail WHERE post_id = ? ORDER BY "order"',
             [post.id]
         );
         // Load assets for each summary_detail
@@ -99,7 +100,7 @@ app.get('/api/posts/:postId', async (req, res) => {
         }
 
         const paragraphs = await db.all(
-            'SELECT id, content, content_vi, title, title_vi, content_audio, content_vi_audio, title_audio, title_vi_audio FROM Paragraph WHERE post_id = ? ORDER BY id',
+            'SELECT id, content, content_vi, title, title_vi, content_audio, content_vi_audio, title_audio, title_vi_audio, title_wt, title_vi_wt FROM Paragraph WHERE post_id = ? ORDER BY id',
             [post.id]
         );
 
@@ -112,7 +113,7 @@ app.get('/api/posts/:postId', async (req, res) => {
 
             // ParagraphDetail
             para.details = await db.all(
-                'SELECT id, content, content_vi, content_audio, content_vi_audio, "order" FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"',
+                'SELECT id, content, content_vi, content_audio, content_vi_audio, content_wt, content_vi_wt, "order" FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"',
                 [para.id]
             );
             // Load assets for each paragraph_detail
@@ -122,12 +123,12 @@ app.get('/api/posts/:postId', async (req, res) => {
                 detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
             }
             const rawSentences = await db.all(
-                'SELECT id, content, content_vi, title, title_vi, content_audio, content_vi_audio, title_audio, title_vi_audio, audio, sentence_uuid, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"',
+                'SELECT id, content, content_vi, title, title_vi, content_audio, content_vi_audio, title_audio, title_vi_audio, title_wt, title_vi_wt, audio, sentence_uuid, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"',
                 [para.id]
             );
             para.sentences = await Promise.all(rawSentences.map(async s => {
                 const details = await db.all(
-                    'SELECT id, content, content_vi, content_audio, content_vi_audio, "order" FROM SentenceDetail WHERE sentence_id = ? ORDER BY "order"',
+                    'SELECT id, content, content_vi, content_audio, content_vi_audio, content_wt, content_vi_wt, "order" FROM SentenceDetail WHERE sentence_id = ? ORDER BY "order"',
                     [s.id]
                 );
                 // Load assets for each sentence_detail
@@ -506,6 +507,19 @@ app.post('/api/generate-media-video', async (req, res) => {
         const projectDir = path.join(MEDIA_DIR, videoId);
         const results = await processAll(projectDir, lang);
         res.json({ success: true, results });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Karaoke: forced-align (WhisperX) mốc từng từ cho cả post, lưu vào cột *_wt.
+// contentType: 'content' (target) | 'content_vi' (VN). Không truyền -> chạy cả hai.
+app.post('/api/align-words', async (req, res) => {
+    try {
+        const { postId, contentType } = req.body;
+        if (!postId) return res.status(400).json({ error: 'thiếu postId' });
+        const types = contentType ? [contentType] : ['content', 'content_vi'];
+        const out = [];
+        for (const ct of types) out.push(await alignPost(postId, ct));
+        res.json({ success: true, results: out });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
