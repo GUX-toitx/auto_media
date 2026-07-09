@@ -2096,6 +2096,30 @@
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-blue-500 resize-none leading-relaxed"></textarea>
             </div>
 
+            <!-- Auto Lips Sync (luồng địa chính trị) -->
+            <div class="border border-gray-800 rounded-lg p-3 space-y-2 bg-gray-950/40">
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" v-model="newProjectModal.lipsAuto" class="accent-fuchsia-500 w-4 h-4">
+                    <span class="text-[12px] font-black text-fuchsia-300">👄 Auto Lips Sync sau khi tạo audio target</span>
+                </label>
+                <p class="text-[9px] text-gray-600 leading-relaxed">Khi audio ngôn ngữ đích (🌍 Target) gen xong sẽ tự chạy lips sync từng câu với video khuôn mặt bên dưới, lưu vào <span class="font-mono">lips_sync/</span>.</p>
+                <div v-if="newProjectModal.lipsAuto" class="space-y-2 pt-1">
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Video khuôn mặt (.mp4)</label>
+                    <div class="flex gap-2">
+                        <input v-model="newProjectModal.lipsVideo" type="text" placeholder="/home/gux/.../face.mp4" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-fuchsia-500">
+                        <button @click="openFileBrowser('geoVideo')" class="shrink-0 bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded-lg font-bold text-[11px] text-gray-200">📁 Chọn</button>
+                        <label class="shrink-0 bg-indigo-700 hover:bg-indigo-600 px-3 py-2 rounded-lg font-bold text-[11px] text-white cursor-pointer" :class="{'opacity-40 pointer-events-none': newProjectModal.lipsUploading}">
+                            <span v-if="newProjectModal.lipsUploading" class="animate-spin inline-block mr-1">⏳</span>⬆️ Upload
+                            <input type="file" accept="video/mp4" class="hidden" @change="uploadGeoLipsVideo($event)">
+                        </label>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Guidance scale</label>
+                        <input v-model.number="newProjectModal.lipsGuidance" type="number" step="0.1" min="0" placeholder="2.2" class="w-24 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-[12px] text-gray-200 outline-none focus:border-fuchsia-500">
+                    </div>
+                </div>
+            </div>
+
             <div class="flex gap-3 justify-end pt-1">
                 <button @click="newProjectModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
                 <button @click="submitNewProject" :disabled="(!newProjectModal.keywordsText.trim() && !newProjectModal.content.trim()) || newProjectModal.loading"
@@ -2517,6 +2541,24 @@ createApp({
             finally { nazeModal.value.lipsUploading = false; event.target.value = ''; }
         }
 
+        // Upload video khuôn mặt cho auto lips sync trong modal tạo dự án Địa chính trị
+        async function uploadGeoLipsVideo(event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            newProjectModal.value.lipsUploading = true;
+            try {
+                const fd = new FormData();
+                fd.append('file', file);
+                fd.append('kind', 'video');
+                const res = await fetch('/api/lips-sync/upload', { method: 'POST', body: fd });
+                const r = await res.json();
+                if (!res.ok || r.error) { showToast('❌ ' + (r.error || 'Lỗi upload')); return; }
+                newProjectModal.value.lipsVideo = r.path;
+                showToast('✅ Đã upload ' + (r.name || file.name));
+            } catch (e) { showToast('❌ ' + e.message); }
+            finally { newProjectModal.value.lipsUploading = false; event.target.value = ''; }
+        }
+
         // Thêm file SRT vào danh sách multi (gộp, khử trùng theo tên)
         function nazeSrtAddFiles(fileList) {
             const arr = Array.from(fileList || []).filter(f => f.name.toLowerCase().endsWith('.srt'));
@@ -2630,6 +2672,10 @@ createApp({
             targetLang: 'en',
             days: 3,
             loading: false,
+            lipsAuto: false,
+            lipsVideo: '',
+            lipsGuidance: 2.2,
+            lipsUploading: false,
             country: '',
             countryOptions: [
                 { name: '🌐 Tự động (theo chủ đề)', gl: '', hl: '' },
@@ -2658,17 +2704,19 @@ createApp({
         });
 
         async function submitNewProject() {
-            const { content, keywordsText, sourcesText, country, countryOptions, targetLang, days } = newProjectModal.value;
+            const { content, keywordsText, sourcesText, country, countryOptions, targetLang, days, lipsAuto, lipsVideo, lipsGuidance } = newProjectModal.value;
             const keywords = (keywordsText || '').split(/[\n,]/).map(s => s.trim()).filter(Boolean);
             const sources = (sourcesText || '').split(/[\n,]/).map(s => s.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '')).filter(Boolean);
             if (!keywords.length && !content.trim()) return;
+            if (lipsAuto && !lipsVideo) { alert('❌ Đã bật Auto Lips Sync nhưng chưa chọn video khuôn mặt'); return; }
+            const lips = (lipsAuto && lipsVideo) ? { lipsAuto: true, lipsVideo, lipsGuidance } : {};
             const c = countryOptions.find(o => o.gl === country) || { gl: '', hl: '' };
             newProjectModal.value.loading = true;
             try {
                 const res = await fetch('/api/create-project', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content: content.trim(), keywords, sources, country: { gl: c.gl, hl: c.hl }, targetLang, days })
+                    body: JSON.stringify({ content: content.trim(), keywords, sources, country: { gl: c.gl, hl: c.hl }, targetLang, days, ...lips })
                 });
                 const r = await res.json();
                 if (r.success) {
@@ -2676,6 +2724,8 @@ createApp({
                     newProjectModal.value.content = '';
                     newProjectModal.value.keywordsText = '';
                     newProjectModal.value.sourcesText = '';
+                    newProjectModal.value.lipsAuto = false;
+                    newProjectModal.value.lipsVideo = '';
                     showToast('✅ Đã tạo dự án, đang xử lý...');
                     await loadPosts();
                 } else {
@@ -4642,6 +4692,7 @@ createApp({
         function openFileBrowser(target) {
             const cfg = target === 'audio' ? { ext: 'mp3', label: 'audio (.mp3)' } : { ext: 'mp4', label: 'video (.mp4)' };
             const cur = target === 'nazeVideo' ? nazeModal.value.lipsVideo
+                : target === 'geoVideo' ? newProjectModal.value.lipsVideo
                 : target === 'video' ? lipsSyncModal.value.videoPath : lipsSyncModal.value.audioPath;
             let startDir = '';
             if (cur && cur.includes('/')) startDir = cur.slice(0, cur.lastIndexOf('/'));
@@ -4665,6 +4716,7 @@ createApp({
         function pickEntry(entry) {
             if (entry.isDir) { browseDir(entry.path); return; }
             if (fileBrowser.value.target === 'nazeVideo') nazeModal.value.lipsVideo = entry.path;
+            else if (fileBrowser.value.target === 'geoVideo') newProjectModal.value.lipsVideo = entry.path;
             else if (fileBrowser.value.target === 'video') lipsSyncModal.value.videoPath = entry.path;
             else lipsSyncModal.value.audioPath = entry.path;
             fileBrowser.value.open = false;
@@ -4822,6 +4874,7 @@ createApp({
             openGenre,
             submitNaze,
             uploadNazeLipsVideo,
+            uploadGeoLipsVideo,
             nazeSrtInfo,
             nazeSrtAddFiles,
             nazeSrtRemove,

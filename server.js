@@ -819,7 +819,7 @@ app.post('/api/crawl-vn', async (req, res) => {
 });
 
 app.post('/api/create-project', async (req, res) => {
-    const { content, keywords, sources, country, targetLang, days } = req.body;
+    const { content, keywords, sources, country, targetLang, days, lipsAuto, lipsVideo, lipsGuidance } = req.body;
     // LUỒNG ĐỊA CHÍNH TRỊ: input là mảng từ khóa + mảng domain nguồn. Vẫn nhận content (chủ đề/tiêu đề) làm tuỳ chọn.
     const kwArr = Array.isArray(keywords) ? keywords.map(s => String(s).trim()).filter(Boolean) : [];
     const srcArr = Array.isArray(sources) ? sources.map(s => String(s).trim()).filter(Boolean) : [];
@@ -831,6 +831,8 @@ app.post('/api/create-project', async (req, res) => {
         const targetDir = path.join(MEDIA_DIR, projectId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
         fs.writeFileSync(path.join(targetDir, 'original_content.txt'), (content?.trim()) || kwArr.join('\n'));
+        // Auto lips sync: ghi config để tự chạy sau khi gen audio ngôn ngữ đích (giống luồng naze/drama)
+        if (lipsAuto && lipsVideo) { writeLipsAutoConfig(projectId, { video: lipsVideo, guidanceScale: lipsGuidance }); }
         const cGl = (country && country.gl) || '';
         const cHl = (country && country.hl) || '';
         const procArgs = [
