@@ -74,6 +74,9 @@ export async function initDB() {
     await db.run('ALTER TABLE Post ADD COLUMN mo_bai_audio TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN mo_bai_vi_audio TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN voice_content_type TEXT DEFAULT NULL').catch(() => {});
+    // Địa chính trị (port từ main_v4): target_lang trên Post + source_url trên Asset (tag nguồn tin RSS)
+    await db.run('ALTER TABLE Post ADD COLUMN target_lang TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Asset ADD COLUMN source_url TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN summary TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN summary_vi TEXT DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Post ADD COLUMN summary_audio TEXT DEFAULT NULL').catch(() => {});

@@ -1890,11 +1890,11 @@
                 <h3 class="text-lg font-black text-white">➕ Chọn chủ đề</h3>
                 <button @click="genreChooser.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
             </div>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-3 gap-3">
                 <button @click="openGenre('naze')"
                     class="flex flex-col items-center gap-2 p-6 rounded-xl border border-gray-700 bg-gray-800 hover:bg-cyan-600 hover:border-cyan-500 transition-all group">
                     <span class="text-4xl">❓</span>
-                    <span class="text-[13px] font-black text-white">Naze</span>
+                    <span class="text-[13px] font-black text-white">Tại sao</span>
                     <span class="text-[10px] text-gray-400 group-hover:text-white text-center">Kiến thức / khoa học "Tại sao?"</span>
                 </button>
                 <button @click="openGenre('drama')"
@@ -1902,6 +1902,12 @@
                     <span class="text-4xl">🎭</span>
                     <span class="text-[13px] font-black text-white">Drama</span>
                     <span class="text-[10px] text-gray-400 group-hover:text-white text-center">Kể chuyện vụ việc / hình sự</span>
+                </button>
+                <button @click="openGenre('geo')"
+                    class="flex flex-col items-center gap-2 p-6 rounded-xl border border-gray-700 bg-gray-800 hover:bg-emerald-600 hover:border-emerald-500 transition-all group">
+                    <span class="text-4xl">🌍</span>
+                    <span class="text-[13px] font-black text-white">Địa chính trị</span>
+                    <span class="text-[10px] text-gray-400 group-hover:text-white text-center">Tin thời sự / RSS đa nguồn</span>
                 </button>
             </div>
         </div>
@@ -2051,33 +2057,48 @@
                 </select>
             </div>
 
-            <!-- Nguồn -->
+            <!-- Quốc gia ưu tiên -->
             <div>
-                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Nguồn tin</label>
-                <div class="flex gap-2">
-                    <input v-model="newProjectModal.customSource" type="text" placeholder="Nguồn khác (free text)..."
-                        class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-blue-500">
-                    <button @click="newProjectModal.addCustomSource"
-                        :disabled="!newProjectModal.customSource.trim()"
-                        class="px-4 py-2 rounded-lg text-[11px] font-bold bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed">➕ Thêm</button>
-                </div>
-                <div v-if="newProjectModal.selectedSources.length" class="flex flex-wrap gap-1 mt-2">
-                    <span v-for="src in newProjectModal.selectedSources" :key="src" class="keyword-tag">
-                        {{ src }}<b class="cursor-pointer text-gray-600 hover:text-red-500 ml-1" @click="newProjectModal.toggleSource(src)">×</b>
-                    </span>
-                </div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Quốc gia ưu tiên</label>
+                <select v-model="newProjectModal.country" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-blue-500">
+                    <option v-for="c in newProjectModal.countryOptions" :key="c.gl" :value="c.gl">{{ c.name }}</option>
+                </select>
+                <p class="text-[10px] text-gray-600 mt-1">Ưu tiên báo nước này + quốc tế khi lấy tin RSS. "Tự động" = đoán theo chủ đề.</p>
             </div>
 
-            <!-- Nội dung -->
+            <!-- Số ngày lấy tin (when:Nd) -->
             <div>
-                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Nội dung</label>
-                <textarea v-model="newProjectModal.content" rows="8" placeholder="Dán nội dung bài viết vào đây..."
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Lấy tin trong vòng (ngày)</label>
+                <input type="number" v-model.number="newProjectModal.days" min="1" max="30"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-blue-500" />
+                <p class="text-[10px] text-gray-600 mt-1">Chỉ lấy tin trong N ngày gần nhất (Google News when:Nd). Mặc định 3.</p>
+            </div>
+
+            <!-- Mảng từ khóa -->
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Từ khóa (mỗi dòng 1 từ khóa)</label>
+                <textarea v-model="newProjectModal.keywordsText" rows="4" placeholder="vd:&#10;chính trị Nhật Bản&#10;Takaichi cabinet&#10;Japan election"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-blue-500 resize-none leading-relaxed"></textarea>
+                <p class="text-[10px] text-gray-600 mt-1">Tổ hợp mọi từ khóa × mọi nguồn để lấy tin mới & sát nhất qua Google News.</p>
+            </div>
+
+            <!-- Mảng nguồn (domain) -->
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Nguồn — domain báo (mỗi dòng 1 domain, để trống = mọi nguồn)</label>
+                <textarea v-model="newProjectModal.sourcesText" rows="3" placeholder="vd:&#10;reuters.com&#10;japantimes.co.jp&#10;vnexpress.net"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-blue-500 resize-none leading-relaxed"></textarea>
+            </div>
+
+            <!-- Chủ đề / tiêu đề (tuỳ chọn) -->
+            <div>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Chủ đề / tiêu đề (tuỳ chọn)</label>
+                <textarea v-model="newProjectModal.content" rows="2" placeholder="Tuỳ chọn: chủ đề tổng cho GPT bám vào..."
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-blue-500 resize-none leading-relaxed"></textarea>
             </div>
 
             <div class="flex gap-3 justify-end pt-1">
                 <button @click="newProjectModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
-                <button @click="submitNewProject" :disabled="!newProjectModal.content.trim() || newProjectModal.loading"
+                <button @click="submitNewProject" :disabled="(!newProjectModal.keywordsText.trim() && !newProjectModal.content.trim()) || newProjectModal.loading"
                     class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-emerald-600 hover:bg-emerald-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
                     {{ newProjectModal.loading ? '⏳ Đang tạo...' : '✅ Tạo dự án' }}
                 </button>
@@ -2402,8 +2423,11 @@ const AudioBar = {
     const activeWord = computed(() => {
       if (!started.value) return -1;
       const b = wordBounds.value, c = cur.value;
-      for (let i = 0; i < b.length; i++) if (c < b[i][1]) return i;
-      return b.length - 1;
+      // Từ đang phát = từ CUỐI CÙNG đã bắt đầu (start <= c). Bền với mốc WhisperX chồng/đè nhau
+      // (nếu dùng end-boundary "c < b[i][1]" thì tua tới đầu từ wi có thể rơi vào [start,end] của wi-1 -> sáng nhầm từ trước).
+      let idx = -1;
+      for (let i = 0; i < b.length; i++) { if (b[i][0] <= c) idx = i; }
+      return idx < 0 ? (b.length ? 0 : -1) : idx;
     });
     // Click từ: tua giọng TỚI từ đó rồi DỪNG (không tự chạy tiếp). Từ đó vẫn sáng.
     const seekWord = (wi) => {
@@ -2541,6 +2565,8 @@ createApp({
 
         function openGenre(genre) {
             genreChooser.value.open = false;
+            // Địa chính trị dùng pipeline tin RSS riêng (newProjectModal), không phải luồng naze/drama
+            if (genre === 'geo') { newProjectModal.value.open = true; return; }
             nazeModal.value.genre = genre;
             nazeModal.value.mode = 'text';
             nazeModal.value.open = true;
@@ -2598,11 +2624,26 @@ createApp({
         const newProjectModal = ref({
             open: false,
             content: '',
+            keywordsText: '',
+            sourcesText: '',
             customSource: '',
             targetLang: 'en',
+            days: 3,
             loading: false,
-            selectedSources: ['https://www.storyblocks.com/','https://www.shutterstock.com/','https://www.pexels.com/','https://www.reuters.com/','https://www.reutersconnect.com/','https://apnews.com/','https://www.bloomberg.com/asia','https://www.ft.com/','https://www.bbc.com/','https://edition.cnn.com/','https://www.aljazeera.com/','http://en.kremlin.ru/','https://x.com/Reuters','https://vnexpress.net/','https://www.vietnamplus.vn/','https://dantri.com.vn/','https://thanhnien.vn/'],
-            sourceOptions: ['https://www.storyblocks.com/','https://www.shutterstock.com/','https://www.pexels.com/','https://www.reuters.com/','https://www.reutersconnect.com/','https://apnews.com/','https://www.bloomberg.com/asia','https://www.ft.com/','https://www.bbc.com/','https://edition.cnn.com/','https://www.aljazeera.com/','http://en.kremlin.ru/','https://x.com/Reuters','https://vnexpress.net/','https://www.vietnamplus.vn/','https://dantri.com.vn/','https://thanhnien.vn/'],
+            country: '',
+            countryOptions: [
+                { name: '🌐 Tự động (theo chủ đề)', gl: '', hl: '' },
+                { name: '🇻🇳 Việt Nam', gl: 'VN', hl: 'vi' },
+                { name: '🇯🇵 Nhật Bản', gl: 'JP', hl: 'ja' },
+                { name: '🇨🇳 Trung Quốc', gl: 'CN', hl: 'zh-Hans' },
+                { name: '🇰🇷 Hàn Quốc', gl: 'KR', hl: 'ko' },
+                { name: '🇺🇸 Mỹ', gl: 'US', hl: 'en' },
+                { name: '🇷🇺 Nga', gl: 'RU', hl: 'ru' },
+                { name: '🇫🇷 Pháp', gl: 'FR', hl: 'fr' },
+                { name: '🇩🇪 Đức', gl: 'DE', hl: 'de' },
+                { name: '🇬🇧 Anh', gl: 'GB', hl: 'en' },
+                { name: '🇮🇱 Israel', gl: 'IL', hl: 'en' },
+            ],
             langOptions: [
                 { code: 'en', name: 'Tiếng Anh' },
                 { code: 'ja', name: 'Tiếng Nhật' },
@@ -2614,33 +2655,27 @@ createApp({
                 { code: 'pt', name: 'Tiếng Bồ Đào Nha' },
                 { code: 'ar', name: 'Tiếng Ả Rập' },
             ],
-            toggleSource(src) {
-                const idx = this.selectedSources.indexOf(src);
-                if (idx === -1) this.selectedSources.push(src);
-                else this.selectedSources.splice(idx, 1);
-            },
-            addCustomSource() {
-                const s = this.customSource.trim();
-                if (s && !this.selectedSources.includes(s)) this.selectedSources.push(s);
-                this.customSource = '';
-            }
         });
 
         async function submitNewProject() {
-            const { content, selectedSources, targetLang } = newProjectModal.value;
-            if (!content.trim()) return;
+            const { content, keywordsText, sourcesText, country, countryOptions, targetLang, days } = newProjectModal.value;
+            const keywords = (keywordsText || '').split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+            const sources = (sourcesText || '').split(/[\n,]/).map(s => s.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '')).filter(Boolean);
+            if (!keywords.length && !content.trim()) return;
+            const c = countryOptions.find(o => o.gl === country) || { gl: '', hl: '' };
             newProjectModal.value.loading = true;
             try {
                 const res = await fetch('/api/create-project', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content: content.trim(), sources: selectedSources, targetLang })
+                    body: JSON.stringify({ content: content.trim(), keywords, sources, country: { gl: c.gl, hl: c.hl }, targetLang, days })
                 });
                 const r = await res.json();
                 if (r.success) {
                     newProjectModal.value.open = false;
                     newProjectModal.value.content = '';
-                    newProjectModal.value.selectedSources = [...newProjectModal.value.sourceOptions];
+                    newProjectModal.value.keywordsText = '';
+                    newProjectModal.value.sourcesText = '';
                     showToast('✅ Đã tạo dự án, đang xử lý...');
                     await loadPosts();
                 } else {

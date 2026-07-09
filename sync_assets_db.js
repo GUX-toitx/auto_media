@@ -114,7 +114,7 @@ const withTimeout = (promise, ms, name) => {
     return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
 };
 
-async function runConcurrently(tasks, limit) {
+export async function runConcurrently(tasks, limit) {
     const results = [];
     const executing = new Set();
     for (const task of tasks) {
