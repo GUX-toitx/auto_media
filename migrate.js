@@ -187,6 +187,24 @@ export async function initDB() {
         await db.run(`ALTER TABLE ${t} ADD COLUMN title_vi_wt TEXT DEFAULT NULL`).catch(() => {});
     }
 
+    // Lips Sync jobs (port từ nhánh main_v4): mỗi câu 1 job -> video mp4 lip-sync
+    await db.run(`CREATE TABLE IF NOT EXISTS LipsSyncJob (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_id INTEGER NOT NULL,
+        idx INTEGER NOT NULL,
+        job_id TEXT,
+        status TEXT,
+        content_type TEXT,
+        video_path TEXT,
+        audio_path TEXT,
+        output_path TEXT,
+        guidance_scale REAL,
+        error TEXT,
+        created_at INTEGER,
+        updated_at INTEGER,
+        UNIQUE(post_id, idx)
+    )`).catch(() => {});
+
     // Rename migrations
     await db.run('ALTER TABLE Post RENAME COLUMN title TO project_id').catch(() => {});
     await db.run('ALTER TABLE Post RENAME COLUMN tieu_de TO title').catch(() => {});

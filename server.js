@@ -445,6 +445,15 @@ app.post('/api/download-voice', async (req, res) => {
             }
         }
 
+        // Lips sync outputs (nếu đã chạy) -> thư mục lips_sync/ trong zip
+        const lipsProjectId = post.project_id.replace(/_[a-z]{2}$/, '');
+        const lipsDir = path.join(MEDIA_DIR, lipsProjectId, 'lips_sync');
+        if (fs.existsSync(lipsDir)) {
+            for (const f of fs.readdirSync(lipsDir)) {
+                if (/^\d+\.mp4$/i.test(f)) archive.file(path.join(lipsDir, f), { name: `lips_sync/${f}` });
+            }
+        }
+
         await db.close();
         await archive.finalize();
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1229,11 +1238,12 @@ app.post('/api/create-naze-srt-batch', upload.array('srts', 500), async (req, re
 });
 
 app.post('/api/create-naze-youtube', express.json(), async (req, res) => {
-    const { url, projectId, targetLang } = req.body;
+    const { url, projectId, targetLang, lipsAuto, lipsVideo, lipsGuidance } = req.body;
     if (!url?.trim() || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu URL hoặc projectId' });
     try {
         const targetDir = path.join(MEDIA_DIR, projectId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        if (lipsAuto && lipsVideo) writeLipsAutoConfig(projectId, { video: lipsVideo, guidanceScale: lipsGuidance });
         const args = ['naze_content.js', '--youtube', url.trim(), projectId];
         if (targetLang) args.push(targetLang);
         const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -1245,11 +1255,12 @@ app.post('/api/create-naze-youtube', express.json(), async (req, res) => {
 });
 
 app.post('/api/create-naze', express.json(), async (req, res) => {
-    const { topic, projectId, targetLang, genre, tweetUrls } = req.body;
+    const { topic, projectId, targetLang, genre, tweetUrls, lipsAuto, lipsVideo, lipsGuidance } = req.body;
     if (!topic?.trim() || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu topic hoặc projectId' });
     try {
         const targetDir = path.join(MEDIA_DIR, projectId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        if (lipsAuto && lipsVideo) writeLipsAutoConfig(projectId, { video: lipsVideo, guidanceScale: lipsGuidance });
         const args = ['naze_content.js', topic.trim(), projectId, targetLang || 'vi', genre === 'drama' ? 'drama' : 'naze'];
         const env = { ...process.env };
         // Chỉ drama mới cào X; truyền link tweet dán tay (nếu có) qua env
@@ -1962,6 +1973,285 @@ app.post('/api/debug-screenshot', (req, res) => {
     });
 });
 // ===== END CAPCUT =====
+
+// ===== LIPS SYNC (proxy tới server local http://127.0.0.1:8010) — port từ main_v4 =====
+const LIPS_SYNC_BASE = process.env.LIPS_SYNC_URL || 'http://127.0.0.1:8010';
+app.post('/api/lips-sync/jobs', async (req, res) => {
+    try {
+        const r = await globalThis.fetch(`${LIPS_SYNC_BASE}/jobs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(req.body || {}),
+        });
+        const data = await r.json();
+        res.status(r.status).json(data);
+    } catch (e) {
+        res.status(502).json({ error: 'Không kết nối được lips_sync server: ' + e.message });
+    }
+});
+app.get('/api/lips-sync/jobs/:id', async (req, res) => {
+    try {
+        const r = await globalThis.fetch(`${LIPS_SYNC_BASE}/jobs/${encodeURIComponent(req.params.id)}`);
+        const data = await r.json();
+        res.status(r.status).json(data);
+    } catch (e) {
+        res.status(502).json({ error: 'Không kết nối được lips_sync server: ' + e.message });
+    }
+});
+// Đường dẫn file cấu hình auto lips_sync của 1 project (ghi lúc tạo project nếu bật option)
+function lipsAutoConfigPath(rawProjectId) {
+    const projectId = String(rawProjectId).replace(/_[a-z]{2}$/, '');
+    return path.join(MEDIA_DIR, projectId, 'lips_sync', 'auto.json');
+}
+function readLipsAutoConfig(rawProjectId) {
+    try {
+        const p = lipsAutoConfigPath(rawProjectId);
+        if (!fs.existsSync(p)) return null;
+        return JSON.parse(fs.readFileSync(p, 'utf8'));
+    } catch { return null; }
+}
+// Ghi cấu hình auto lips_sync cho project (chỉ khi bật + có video mặt hợp lệ)
+function writeLipsAutoConfig(rawProjectId, { video, guidanceScale }) {
+    const p = lipsAutoConfigPath(rawProjectId);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    const gs = Number(guidanceScale);
+    const cfg = {
+        enabled: true,
+        video: String(video),
+        contentType: 'content', // luôn chạy trên audio ngôn ngữ đích (target)
+        guidanceScale: Number.isFinite(gs) ? gs : 2.2,
+    };
+    fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
+    return cfg;
+}
+
+// Chạy lips_sync cho TỪNG CÂU của 1 post: tải mp3 mỗi câu, gửi job, output lưu vào <project>/lips_sync/
+// Dùng chung cho endpoint thủ công (/run-post) lẫn auto sau khi tạo audio (/auto-run).
+async function runLipsSyncForPost({ postId, videoPath, contentType: reqCt, force, guidanceScale }) {
+    if (!postId || !videoPath) { const e = new Error('Thiếu postId hoặc videoPath'); e.status = 400; throw e; }
+    if (!fs.existsSync(videoPath)) { const e = new Error('Video không tồn tại: ' + videoPath); e.status = 400; throw e; }
+    const gs = Number(guidanceScale);
+    const guidance = Number.isFinite(gs) ? gs : 2.2;
+
+    const db = await getDb();
+    const post = await db.get('SELECT project_id, voice_content_type FROM Post WHERE id = ?', [postId]);
+    await db.close();
+    if (!post) { const e = new Error('Không tìm thấy post'); e.status = 404; throw e; }
+
+    const contentType = reqCt || post.voice_content_type || 'content';
+    const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
+    const outDir = path.join(MEDIA_DIR, projectId, 'lips_sync');
+    fs.mkdirSync(outDir, { recursive: true });
+
+    const audioList = await getAllAudioUrls(postId, contentType);
+    const jobs = [];
+    for (let i = 0; i < audioList.length; i++) {
+            const idx = i + 1;
+            const audioUrl = audioList[i].audio;
+            const audioPath = path.join(outDir, `${idx}.mp3`);
+            const outputPath = path.join(outDir, `${idx}.mp4`);
+            if (!audioUrl) { jobs.push({ index: idx, audioPath, outputPath, error: 'Không có audio' }); continue; }
+            // Bỏ qua câu đã có mp4 (trừ khi chạy lại từ đầu)
+            if (!force && fs.existsSync(outputPath)) {
+                jobs.push({ index: idx, audioPath, outputPath, status: 'done', skipped: true });
+                continue;
+            }
+            try {
+                const buf = await fetchBunnyAudio(audioUrl);
+                fs.writeFileSync(audioPath, buf);
+                const r = await globalThis.fetch(`${LIPS_SYNC_BASE}/jobs`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ video_path: videoPath, audio_path: audioPath, output_path: outputPath, guidance_scale: guidance }),
+                });
+                const data = await r.json();
+                if (!r.ok || data.error) { jobs.push({ index: idx, audioPath, outputPath, error: data.error || ('HTTP ' + r.status) }); continue; }
+                jobs.push({ index: idx, jobId: data.job_id, status: data.status || 'queued', audioPath, outputPath });
+            } catch (e) {
+                jobs.push({ index: idx, audioPath, outputPath, error: e.message });
+            }
+        }
+
+        // Lưu kết quả vào DB (upsert theo post_id + idx)
+        const now = Date.now();
+        const wdb = await getDb();
+        try {
+            // Xoá row thừa nếu số câu giảm
+            await wdb.run('DELETE FROM LipsSyncJob WHERE post_id = ? AND idx > ?', [postId, audioList.length]);
+            for (const j of jobs) {
+                await wdb.run(
+                    `INSERT INTO LipsSyncJob (post_id, idx, job_id, status, content_type, video_path, audio_path, output_path, guidance_scale, error, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(post_id, idx) DO UPDATE SET
+                        job_id=excluded.job_id, status=excluded.status, content_type=excluded.content_type,
+                        video_path=excluded.video_path, audio_path=excluded.audio_path, output_path=excluded.output_path,
+                        guidance_scale=excluded.guidance_scale, error=excluded.error, updated_at=excluded.updated_at`,
+                    [postId, j.index, j.jobId || null, j.error ? 'error' : (j.status || 'queued'), contentType,
+                     videoPath, j.audioPath, j.outputPath, guidance, j.error || null, now, now]
+                );
+            }
+    } finally { await wdb.close(); }
+
+    return { projectId, outDir, total: audioList.length, jobs };
+}
+
+app.post('/api/lips-sync/run-post', async (req, res) => {
+    try {
+        const out = await runLipsSyncForPost(req.body || {});
+        res.json(out);
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+// Đọc cấu hình auto lips_sync đã lưu lúc tạo project (client kiểm tra trước khi tự chạy)
+app.get('/api/lips-sync/auto/:projectId', (req, res) => {
+    const cfg = readLipsAutoConfig(req.params.projectId);
+    res.json(cfg && cfg.enabled ? cfg : { enabled: false });
+});
+// Tự chạy lips_sync sau khi audio target (content) gen xong — dựa trên auto.json của project
+app.post('/api/lips-sync/auto-run', async (req, res) => {
+    try {
+        const { postId, force } = req.body || {};
+        if (!postId) return res.status(400).json({ error: 'Thiếu postId' });
+        const db = await getDb();
+        const post = await db.get('SELECT project_id FROM Post WHERE id = ?', [postId]);
+        await db.close();
+        if (!post) return res.status(404).json({ error: 'Không tìm thấy post' });
+        const cfg = readLipsAutoConfig(post.project_id);
+        if (!cfg || !cfg.enabled) return res.json({ enabled: false });
+        if (!cfg.video || !fs.existsSync(cfg.video)) {
+            return res.status(400).json({ enabled: true, error: 'Video mặt cho auto lips sync không tồn tại: ' + (cfg.video || '(trống)') });
+        }
+        const out = await runLipsSyncForPost({
+            postId,
+            videoPath: cfg.video,
+            contentType: 'content',
+            force: !!force,
+            guidanceScale: cfg.guidanceScale,
+        });
+        res.json({ enabled: true, ...out });
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+// Kiểm tra trạng thái nhiều job cùng lúc (đồng thời cập nhật DB)
+app.post('/api/lips-sync/status', async (req, res) => {
+    try {
+        const ids = Array.isArray(req.body?.jobIds) ? req.body.jobIds : [];
+        const out = {};
+        const now = Date.now();
+        const db = await getDb();
+        try {
+            for (const id of ids) {
+                if (!id) continue;
+                try {
+                    const r = await globalThis.fetch(`${LIPS_SYNC_BASE}/jobs/${encodeURIComponent(id)}`);
+                    const data = await r.json();
+                    out[id] = data;
+                    if (data && (data.status || data.output_path || data.error)) {
+                        await db.run(
+                            'UPDATE LipsSyncJob SET status = COALESCE(?, status), output_path = COALESCE(?, output_path), error = ?, updated_at = ? WHERE job_id = ?',
+                            [data.status || null, data.output_path || null, data.error || null, now, id]
+                        );
+                    }
+                } catch (e) { out[id] = { error: e.message }; }
+            }
+        } finally { await db.close(); }
+        res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Tải lại kết quả lips_sync đã lưu của 1 post
+app.get('/api/lips-sync/saved/:postId', async (req, res) => {
+    try {
+        const db = await getDb();
+        const rows = await db.all(
+            `SELECT idx AS "index", job_id AS jobId, status, content_type AS contentType,
+                    video_path AS videoPath, audio_path AS audioPath, output_path AS outputPath,
+                    guidance_scale AS guidanceScale, error
+             FROM LipsSyncJob WHERE post_id = ? ORDER BY idx`,
+            [req.params.postId]
+        );
+        const post = await db.get('SELECT project_id FROM Post WHERE id = ?', [req.params.postId]);
+        await db.close();
+
+        const meta = rows.find(r => r.videoPath) || {};
+        const contentType = meta.contentType || 'content';
+        let jobs = rows;
+
+        // Fallback: chưa lưu DB nhưng đã có file mp4 trên đĩa -> vẫn hiển thị
+        if (!jobs.length && post) {
+            const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
+            const dir = path.join(MEDIA_DIR, projectId, 'lips_sync');
+            if (fs.existsSync(dir)) {
+                jobs = fs.readdirSync(dir).filter(f => /^\d+\.mp4$/i.test(f))
+                    .map(f => ({ index: parseInt(f, 10), status: 'done', outputPath: path.join(dir, f) }))
+                    .sort((a, b) => a.index - b.index);
+            }
+        }
+
+        // Gắn URL audio gốc theo idx để client map lips_sync video vào từng câu
+        if (jobs.length) {
+            try {
+                const audioList = await getAllAudioUrls(req.params.postId, contentType);
+                for (const j of jobs) { const a = audioList[j.index - 1]; if (a) j.audio = a.audio; }
+            } catch (_) { }
+        }
+        res.json({
+            jobs,
+            videoPath: meta.videoPath || '',
+            contentType,
+            guidanceScale: meta.guidanceScale ?? 2.2,
+        });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Upload file lên server rồi trả về đường dẫn tuyệt đối để dùng làm input lips_sync
+app.post('/api/lips-sync/upload', upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'Thiếu file' });
+        const destDir = path.join(MEDIA_DIR, 'lips_sync_uploads');
+        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+        const ext = path.extname(req.file.originalname) || (req.body.kind === 'audio' ? '.mp3' : '.mp4');
+        const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+        const destPath = path.join(destDir, fileName);
+        fs.renameSync(req.file.path, destPath);
+        res.json({ path: destPath, name: req.file.originalname });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+// Duyệt file/thư mục trên máy server để chọn input (lấy đường dẫn tuyệt đối)
+app.get('/api/lips-sync/browse', (req, res) => {
+    try {
+        let dir = req.query.dir ? String(req.query.dir) : (process.env.HOME || process.cwd());
+        dir = path.resolve(dir);
+        if (!fs.existsSync(dir)) dir = process.env.HOME || process.cwd();
+        if (!fs.statSync(dir).isDirectory()) dir = path.dirname(dir);
+        const exts = (req.query.ext ? String(req.query.ext).split(',') : [])
+            .map(e => e.trim().toLowerCase()).filter(Boolean);
+        const entries = [];
+        for (const it of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (it.name.startsWith('.')) continue; // bỏ file/thư mục ẩn
+            const full = path.join(dir, it.name);
+            let isDir = it.isDirectory();
+            if (it.isSymbolicLink()) { try { isDir = fs.statSync(full).isDirectory(); } catch { continue; } }
+            if (isDir) { entries.push({ name: it.name, path: full, isDir: true }); continue; }
+            const ext = path.extname(it.name).slice(1).toLowerCase();
+            if (exts.length && !exts.includes(ext)) continue;
+            let size = 0; try { size = fs.statSync(full).size; } catch { }
+            entries.push({ name: it.name, path: full, isDir: false, size });
+        }
+        entries.sort((a, b) => (a.isDir === b.isDir) ? a.name.localeCompare(b.name) : (a.isDir ? -1 : 1));
+        const parent = path.dirname(dir);
+        res.json({ dir, parent: parent === dir ? null : parent, entries });
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+// Stream video output (nằm ngoài thư mục static) để preview, hỗ trợ tua (Range)
+app.get('/api/lips-sync/preview', (req, res) => {
+    const p = req.query.path;
+    if (!p || !fs.existsSync(p)) return res.status(404).send('Not found');
+    res.sendFile(path.resolve(p), (err) => {
+        if (err && !res.headersSent) res.status(404).send('Not found');
+    });
+});
+// ===== END LIPS SYNC =====
 
 app.get('/', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
