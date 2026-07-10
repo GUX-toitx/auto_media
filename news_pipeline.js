@@ -130,7 +130,7 @@ function extractMedia(html, baseUrl) {
 }
 
 // ---------- 4) Điều phối: gom tin + cào media ----------
-export async function collectNews({ keywords = [], sources = [], days = 2, maxArticles = 30, perKeyword = 15, hl = 'en-US', gl = 'US' } = {}) {
+export async function collectNews({ keywords = [], sources = [], days = 2, maxArticles = 30, perKeyword = 15, hl = 'en-US', gl = 'US', seenIds = null, seenTitles = null } = {}) {
     // 4.1 Search tất cả từ khóa (tổ hợp với toàn bộ domain qua site: OR)
     // Giãn nhịp giữa các từ khóa để tránh Google News rate-limit (nhiều từ khóa dồn dập -> bị chặn -> 0 bài)
     const all = [];
@@ -143,11 +143,14 @@ export async function collectNews({ keywords = [], sources = [], days = 2, maxAr
     const seenId = new Set(), seenTitle = new Set(), uniq = [];
     for (const a of all.sort((x, y) => y.ts - x.ts)) {
         const tk = a.title.toLowerCase().slice(0, 60);
-        if (seenId.has(a.articleId) || seenTitle.has(tk)) continue;
+        if (seenId.has(a.articleId) || seenTitle.has(tk)) continue;   // trùng trong CÙNG lần chạy
+        if (seenIds && seenIds.has(a.articleId)) continue;            // đã xử lý ở LẦN CHẠY TRƯỚC (dedup bền)
+        if (seenTitles && seenTitles.has(tk)) continue;
         seenId.add(a.articleId); seenTitle.add(tk); uniq.push(a);
     }
     const picked = uniq.slice(0, maxArticles);
-    console.log(`[news] Tổng ${all.length} bài -> ${uniq.length} bài duy nhất -> lấy ${picked.length} bài mới nhất`);
+    const seenNote = (seenIds || seenTitles) ? ' (đã loại tin xử lý ở lần trước)' : '';
+    console.log(`[news] Tổng ${all.length} bài -> ${uniq.length} bài mới${seenNote} -> lấy ${picked.length} bài`);
 
     // 4.3 Giải mã URL báo gốc (song song nhẹ)
     await Promise.all(picked.map(async (a) => { a.url = await decodeGoogleNewsUrl(a.articleId); }));

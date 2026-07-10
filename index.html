@@ -1466,6 +1466,7 @@
                 <button @click="runLipsSync(false)" :disabled="lipsSyncModal.running || !lipsSyncModal.videoPath" class="bg-pink-700 hover:bg-pink-600 disabled:opacity-40 px-4 py-2.5 rounded-lg font-black text-[11px] uppercase tracking-widest text-white"><span v-if="lipsSyncModal.running" class="animate-spin inline-block mr-1">⏳</span>🚀 Chạy (câu còn thiếu)</button>
                 <button @click="runLipsSync(true)" :disabled="lipsSyncModal.running || !lipsSyncModal.videoPath" class="bg-orange-700 hover:bg-orange-600 disabled:opacity-40 px-4 py-2.5 rounded-lg font-black text-[11px] uppercase tracking-widest text-white" title="Ghi đè toàn bộ mp4">🔁 Chạy lại từ đầu</button>
                 <button @click="checkLipsSyncStatus" :disabled="!lipsSyncModal.jobs.length || lipsSyncModal.checking" class="bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-4 py-2.5 rounded-lg font-black text-[11px] uppercase tracking-widest text-white"><span v-if="lipsSyncModal.checking" class="animate-spin inline-block mr-1">⏳</span>🔄 Check status</button>
+                <button v-if="lipsSyncModal.polling || lipsSyncModal.running" @click="stopLipsSync" :disabled="lipsSyncModal.stopping" class="bg-red-700 hover:bg-red-600 disabled:opacity-40 px-4 py-2.5 rounded-lg font-black text-[11px] uppercase tracking-widest text-white" title="Dừng: huỷ các câu đang chờ (câu đang chạy sẽ xong nốt)"><span v-if="lipsSyncModal.stopping" class="animate-spin inline-block mr-1">⏳</span>⏹ Dừng</button>
                 <span v-if="lipsSyncModal.jobs.length" class="text-[12px] text-gray-400 ml-auto">✅ {{ lipsSyncDone }}/{{ lipsSyncModal.jobs.length }} xong<span v-if="lipsSyncModal.polling" class="animate-pulse ml-1 text-yellow-400">•</span></span>
             </div>
 
@@ -1914,8 +1915,8 @@
     </div>
 
     <!-- NAZE MODAL -->
-    <div v-if="nazeModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="nazeModal.open = false">
-        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[540px] space-y-4">
+    <div v-if="nazeModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" @click.self="nazeModal.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[540px] space-y-4 max-h-[90vh] overflow-y-auto">
             <div class="flex justify-between items-center">
                 <h3 class="text-lg font-black text-white">{{ nazeModal.genre === 'drama' ? '🎭 Tạo dự án Drama' : '❓ Tạo dự án Naze' }}</h3>
                 <button @click="nazeModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
@@ -2007,26 +2008,64 @@
                 <input v-model="nazeModal.projectId" type="text" placeholder="vd: naze_ocean_salt"
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-cyan-500">
             </div>
-            <!-- Auto Lips Sync (chỉ luồng tạo 1 project: text/youtube) -->
-            <div v-if="nazeModal.mode !== 'srt'" class="border border-gray-800 rounded-lg p-3 space-y-2 bg-gray-950/40">
+            <!-- Tạo voice tự động (chỉ luồng tạo 1 project: text/youtube) -->
+            <div v-if="nazeModal.mode !== 'srt'" class="border border-gray-800 rounded-lg p-3 space-y-3 bg-gray-950/40">
                 <label class="flex items-center gap-2 cursor-pointer select-none">
-                    <input type="checkbox" v-model="nazeModal.lipsAuto" class="accent-fuchsia-500 w-4 h-4">
-                    <span class="text-[12px] font-black text-fuchsia-300">👄 Auto Lips Sync sau khi tạo audio target</span>
+                    <input type="checkbox" v-model="nazeModal.voiceAuto" @change="onNazeVoiceToggle" class="accent-purple-500 w-4 h-4">
+                    <span class="text-[12px] font-black text-purple-300">🎙️ Tự động tạo voice sau khi tạo nội dung</span>
                 </label>
-                <p class="text-[9px] text-gray-600 leading-relaxed">Khi audio ngôn ngữ đích (🌍 Target) gen xong sẽ tự chạy lips sync từng câu với video khuôn mặt bên dưới, lưu vào <span class="font-mono">lips_sync/</span>.</p>
-                <div v-if="nazeModal.lipsAuto" class="space-y-2 pt-1">
-                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Video khuôn mặt (.mp4)</label>
-                    <div class="flex gap-2">
-                        <input v-model="nazeModal.lipsVideo" type="text" placeholder="/home/gux/.../face.mp4" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-fuchsia-500">
-                        <button @click="openFileBrowser('nazeVideo')" class="shrink-0 bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded-lg font-bold text-[11px] text-gray-200">📁 Chọn</button>
-                        <label class="shrink-0 bg-indigo-700 hover:bg-indigo-600 px-3 py-2 rounded-lg font-bold text-[11px] text-white cursor-pointer" :class="{'opacity-40 pointer-events-none': nazeModal.lipsUploading}">
-                            <span v-if="nazeModal.lipsUploading" class="animate-spin inline-block mr-1">⏳</span>⬆️ Upload
-                            <input type="file" accept="video/mp4" class="hidden" @change="uploadNazeLipsVideo($event)">
-                        </label>
+                <p class="text-[9px] text-gray-600 leading-relaxed">Khi nội dung dựng xong sẽ tự gen voice bằng params bên dưới (không cần bấm tay).</p>
+                <div v-if="nazeModal.voiceAuto" class="space-y-3 pt-1">
+                    <!-- Loại nội dung -->
+                    <div>
+                        <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Loại nội dung</label>
+                        <select v-model="nazeModal.voiceContentType" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-purple-500">
+                            <option value="content">Target (ngôn ngữ đích)</option>
+                            <option value="content_vi">Tiếng Việt</option>
+                        </select>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Guidance scale</label>
-                        <input v-model.number="nazeModal.lipsGuidance" type="number" step="0.1" min="0" placeholder="2.2" class="w-24 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-[12px] text-gray-200 outline-none focus:border-fuchsia-500">
+                    <!-- Giọng mẫu -->
+                    <div>
+                        <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Giọng mẫu</label>
+                        <select v-model="nazeModal.speakerUuid" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-purple-500">
+                            <option value="">{{ nazeModal.voiceLoading ? '⏳ Đang tải...' : '-- Chọn giọng mẫu --' }}</option>
+                            <option v-for="s in nazeModal.speakers" :key="s.uuid" :value="s.uuid">{{ s.speaker_name }}</option>
+                        </select>
+                        <p class="text-[9px] text-gray-600 mt-1">Danh sách theo ngôn ngữ đích đã chọn ở trên.</p>
+                    </div>
+                    <!-- Từ điển -->
+                    <div>
+                        <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Từ điển</label>
+                        <div class="max-h-[130px] overflow-y-auto bg-gray-800 border border-gray-700 rounded-lg p-2 space-y-1">
+                            <label v-for="d in nazeModal.dictionaries" :key="d.uuid" class="flex items-center gap-2 text-[12px] text-gray-200 cursor-pointer hover:bg-gray-700 rounded px-2 py-1">
+                                <input type="checkbox" :value="d.uuid" v-model="nazeModal.selectedDicts" class="accent-purple-500">
+                                <span>{{ d.name || d.uuid }}</span>
+                            </label>
+                            <p v-if="!nazeModal.dictionaries?.length" class="text-[11px] text-gray-500 italic">Không có từ điển</p>
+                        </div>
+                    </div>
+                    <!-- Lips sync (chỉ khi loại nội dung = Target) -->
+                    <div v-if="nazeModal.voiceContentType === 'content'" class="border border-gray-800 rounded-lg p-3 space-y-2 bg-black/30">
+                        <label class="flex items-center gap-2 cursor-pointer select-none">
+                            <input type="checkbox" v-model="nazeModal.lipsAuto" class="accent-fuchsia-500 w-4 h-4">
+                            <span class="text-[12px] font-black text-fuchsia-300">👄 Lips Sync sau khi tạo voice</span>
+                        </label>
+                        <p class="text-[9px] text-gray-600 leading-relaxed">Sau khi voice target xong sẽ tự chạy lips sync từng câu với video khuôn mặt, lưu vào <span class="font-mono">lips_sync/</span>.</p>
+                        <div v-if="nazeModal.lipsAuto" class="space-y-2 pt-1">
+                            <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Video khuôn mặt (.mp4)</label>
+                            <div class="flex gap-2">
+                                <input v-model="nazeModal.lipsVideo" type="text" placeholder="/home/gux/.../face.mp4" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-fuchsia-500">
+                                <button @click="openFileBrowser('nazeVideo')" class="shrink-0 bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded-lg font-bold text-[11px] text-gray-200">📁 Chọn</button>
+                                <label class="shrink-0 bg-indigo-700 hover:bg-indigo-600 px-3 py-2 rounded-lg font-bold text-[11px] text-white cursor-pointer" :class="{'opacity-40 pointer-events-none': nazeModal.lipsUploading}">
+                                    <span v-if="nazeModal.lipsUploading" class="animate-spin inline-block mr-1">⏳</span>⬆️ Upload
+                                    <input type="file" accept="video/mp4" class="hidden" @change="uploadNazeLipsVideo($event)">
+                                </label>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Guidance scale</label>
+                                <input v-model.number="nazeModal.lipsGuidance" type="number" step="0.1" min="0" placeholder="2.2" class="w-24 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-[12px] text-gray-200 outline-none focus:border-fuchsia-500">
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2042,8 +2081,8 @@
     </div>
 
     <!-- NEW PROJECT MODAL -->
-    <div v-if="newProjectModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="newProjectModal.open = false">
-        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[560px] space-y-4">
+    <div v-if="newProjectModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" @click.self="newProjectModal.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[560px] space-y-4 max-h-[90vh] overflow-y-auto">
             <div class="flex justify-between items-center">
                 <h3 class="text-lg font-black text-white">➕ Tạo mới dự án</h3>
                 <button @click="newProjectModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
@@ -2052,7 +2091,7 @@
             <!-- Ngôn ngữ đích -->
             <div>
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Ngôn ngữ đích</label>
-                <select v-model="newProjectModal.targetLang" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-blue-500">
+                <select v-model="newProjectModal.targetLang" @change="onGeoLangChange" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-blue-500">
                     <option v-for="l in newProjectModal.langOptions" :key="l.code" :value="l.code">{{ l.name }}</option>
                 </select>
             </div>
@@ -2096,26 +2135,64 @@
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-[12px] text-gray-200 outline-none focus:border-blue-500 resize-none leading-relaxed"></textarea>
             </div>
 
-            <!-- Auto Lips Sync (luồng địa chính trị) -->
-            <div class="border border-gray-800 rounded-lg p-3 space-y-2 bg-gray-950/40">
+            <!-- Tạo voice tự động sau khi crawl xong -->
+            <div class="border border-gray-800 rounded-lg p-3 space-y-3 bg-gray-950/40">
                 <label class="flex items-center gap-2 cursor-pointer select-none">
-                    <input type="checkbox" v-model="newProjectModal.lipsAuto" class="accent-fuchsia-500 w-4 h-4">
-                    <span class="text-[12px] font-black text-fuchsia-300">👄 Auto Lips Sync sau khi tạo audio target</span>
+                    <input type="checkbox" v-model="newProjectModal.voiceAuto" @change="onGeoVoiceToggle" class="accent-purple-500 w-4 h-4">
+                    <span class="text-[12px] font-black text-purple-300">🎙️ Tự động tạo voice sau khi crawl xong</span>
                 </label>
-                <p class="text-[9px] text-gray-600 leading-relaxed">Khi audio ngôn ngữ đích (🌍 Target) gen xong sẽ tự chạy lips sync từng câu với video khuôn mặt bên dưới, lưu vào <span class="font-mono">lips_sync/</span>.</p>
-                <div v-if="newProjectModal.lipsAuto" class="space-y-2 pt-1">
-                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Video khuôn mặt (.mp4)</label>
-                    <div class="flex gap-2">
-                        <input v-model="newProjectModal.lipsVideo" type="text" placeholder="/home/gux/.../face.mp4" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-fuchsia-500">
-                        <button @click="openFileBrowser('geoVideo')" class="shrink-0 bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded-lg font-bold text-[11px] text-gray-200">📁 Chọn</button>
-                        <label class="shrink-0 bg-indigo-700 hover:bg-indigo-600 px-3 py-2 rounded-lg font-bold text-[11px] text-white cursor-pointer" :class="{'opacity-40 pointer-events-none': newProjectModal.lipsUploading}">
-                            <span v-if="newProjectModal.lipsUploading" class="animate-spin inline-block mr-1">⏳</span>⬆️ Upload
-                            <input type="file" accept="video/mp4" class="hidden" @change="uploadGeoLipsVideo($event)">
-                        </label>
+                <p class="text-[9px] text-gray-600 leading-relaxed">Sau khi pipeline lấy tin & dựng nội dung xong, hệ thống tự gen voice cho từng bài bằng params bên dưới (không cần bấm tay từng bài).</p>
+                <div v-if="newProjectModal.voiceAuto" class="space-y-3 pt-1">
+                    <!-- Loại nội dung -->
+                    <div>
+                        <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Loại nội dung</label>
+                        <select v-model="newProjectModal.voiceContentType" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-purple-500">
+                            <option value="content">Target (ngôn ngữ đích)</option>
+                            <option value="content_vi">Tiếng Việt</option>
+                        </select>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Guidance scale</label>
-                        <input v-model.number="newProjectModal.lipsGuidance" type="number" step="0.1" min="0" placeholder="2.2" class="w-24 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-[12px] text-gray-200 outline-none focus:border-fuchsia-500">
+                    <!-- Giọng mẫu -->
+                    <div>
+                        <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Giọng mẫu</label>
+                        <select v-model="newProjectModal.speakerUuid" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-purple-500">
+                            <option value="">{{ newProjectModal.voiceLoading ? '⏳ Đang tải...' : '-- Chọn giọng mẫu --' }}</option>
+                            <option v-for="s in newProjectModal.speakers" :key="s.uuid" :value="s.uuid">{{ s.speaker_name }}</option>
+                        </select>
+                        <p class="text-[9px] text-gray-600 mt-1">Danh sách theo ngôn ngữ đích đã chọn ở trên.</p>
+                    </div>
+                    <!-- Từ điển -->
+                    <div>
+                        <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Từ điển</label>
+                        <div class="max-h-[130px] overflow-y-auto bg-gray-800 border border-gray-700 rounded-lg p-2 space-y-1">
+                            <label v-for="d in newProjectModal.dictionaries" :key="d.uuid" class="flex items-center gap-2 text-[12px] text-gray-200 cursor-pointer hover:bg-gray-700 rounded px-2 py-1">
+                                <input type="checkbox" :value="d.uuid" v-model="newProjectModal.selectedDicts" class="accent-purple-500">
+                                <span>{{ d.name || d.uuid }}</span>
+                            </label>
+                            <p v-if="!newProjectModal.dictionaries?.length" class="text-[11px] text-gray-500 italic">Không có từ điển</p>
+                        </div>
+                    </div>
+                    <!-- Lips sync (chỉ khi loại nội dung = Target) -->
+                    <div v-if="newProjectModal.voiceContentType === 'content'" class="border border-gray-800 rounded-lg p-3 space-y-2 bg-black/30">
+                        <label class="flex items-center gap-2 cursor-pointer select-none">
+                            <input type="checkbox" v-model="newProjectModal.lipsAuto" class="accent-fuchsia-500 w-4 h-4">
+                            <span class="text-[12px] font-black text-fuchsia-300">👄 Lips Sync sau khi tạo voice</span>
+                        </label>
+                        <p class="text-[9px] text-gray-600 leading-relaxed">Sau khi voice target của mỗi bài xong sẽ tự chạy lips sync từng câu với video khuôn mặt, lưu vào <span class="font-mono">lips_sync/</span>.</p>
+                        <div v-if="newProjectModal.lipsAuto" class="space-y-2 pt-1">
+                            <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Video khuôn mặt (.mp4)</label>
+                            <div class="flex gap-2">
+                                <input v-model="newProjectModal.lipsVideo" type="text" placeholder="/home/gux/.../face.mp4" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-fuchsia-500">
+                                <button @click="openFileBrowser('geoVideo')" class="shrink-0 bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded-lg font-bold text-[11px] text-gray-200">📁 Chọn</button>
+                                <label class="shrink-0 bg-indigo-700 hover:bg-indigo-600 px-3 py-2 rounded-lg font-bold text-[11px] text-white cursor-pointer" :class="{'opacity-40 pointer-events-none': newProjectModal.lipsUploading}">
+                                    <span v-if="newProjectModal.lipsUploading" class="animate-spin inline-block mr-1">⏳</span>⬆️ Upload
+                                    <input type="file" accept="video/mp4" class="hidden" @change="uploadGeoLipsVideo($event)">
+                                </label>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Guidance scale</label>
+                                <input v-model.number="newProjectModal.lipsGuidance" type="number" step="0.1" min="0" placeholder="2.2" class="w-24 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-[12px] text-gray-200 outline-none focus:border-fuchsia-500">
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2521,7 +2598,7 @@ createApp({
         const previewMode = ref(true);
         const profileModal = ref({ list: [], bulkText: '', cmds: [], addOpen: false, fileName: '' });
 
-        const nazeModal = ref({ open: false, genre: 'naze', mode: 'text', topic: '', projectId: '', targetLang: 'vi', loading: false, srtFile: null, srtTargetFile: null, srtFiles: [], youtubeUrl: '', tweetUrls: '', lipsAuto: false, lipsVideo: '', lipsGuidance: 2.2, lipsUploading: false });
+        const nazeModal = ref({ open: false, genre: 'naze', mode: 'text', topic: '', projectId: '', targetLang: 'vi', loading: false, srtFile: null, srtTargetFile: null, srtFiles: [], youtubeUrl: '', tweetUrls: '', voiceAuto: false, voiceContentType: 'content', speakerUuid: '', selectedDicts: [], speakers: [], dictionaries: [], voiceLoading: false, lipsAuto: false, lipsVideo: '', lipsGuidance: 2.2, lipsUploading: false });
 
         // Upload video khuôn mặt cho auto lips sync ngay trong modal tạo project
         async function uploadNazeLipsVideo(event) {
@@ -2541,7 +2618,7 @@ createApp({
             finally { nazeModal.value.lipsUploading = false; event.target.value = ''; }
         }
 
-        // Upload video khuôn mặt cho auto lips sync trong modal tạo dự án Địa chính trị
+        // Upload video khuôn mặt cho lips sync trong modal tạo dự án Địa chính trị
         async function uploadGeoLipsVideo(event) {
             const file = event.target.files?.[0];
             if (!file) return;
@@ -2615,12 +2692,21 @@ createApp({
         }
 
         async function submitNaze() {
-            const { mode, genre, topic, targetLang, youtubeUrl, srtFile, srtTargetFile, lipsAuto, lipsVideo, lipsGuidance } = nazeModal.value;
+            const { mode, genre, topic, targetLang, youtubeUrl, srtFile, srtTargetFile,
+                    voiceAuto, voiceContentType, speakerUuid, selectedDicts, lipsAuto, lipsVideo, lipsGuidance } = nazeModal.value;
             const projectId = nazeModal.value.projectId.trim() || ('naze_' + Date.now());
-            if (lipsAuto && !lipsVideo) { alert('❌ Đã bật Auto Lips Sync nhưng chưa chọn video khuôn mặt'); return; }
-            // Chỉ áp dụng auto lips sync cho luồng tạo 1 project (text/youtube), không phải SRT batch nhiều project
-            const lips = (lipsAuto && lipsVideo && mode !== 'srt')
-                ? { lipsAuto: true, lipsVideo, lipsGuidance } : {};
+            // Auto voice + lips chỉ cho luồng 1 project (text/youtube), không phải SRT batch nhiều project
+            const canVoice = voiceAuto && mode !== 'srt';
+            if (canVoice && !speakerUuid) { alert('❌ Đã bật Tự động tạo voice nhưng chưa chọn giọng mẫu'); return; }
+            const wantLips = canVoice && voiceContentType === 'content' && lipsAuto;
+            if (wantLips && !lipsVideo) { alert('❌ Đã bật Lips Sync nhưng chưa chọn video khuôn mặt'); return; }
+            const voice = canVoice ? {
+                voiceAuto: true,
+                voiceContentType,
+                speakerUuid,
+                dictionaryUuids: selectedDicts,
+                ...(wantLips ? { lipsAuto: true, lipsVideo, lipsGuidance } : {})
+            } : {};
             nazeModal.value.loading = true;
             try {
                 let res;
@@ -2629,7 +2715,7 @@ createApp({
                     const tweetUrls = (nazeModal.value.tweetUrls || '').split(/[\n,]+/).map(s => s.trim()).filter(Boolean).join(',');
                     res = await fetch('/api/create-naze', { method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ topic, projectId, targetLang, genre, tweetUrls, ...lips }) });
+                        body: JSON.stringify({ topic, projectId, targetLang, genre, tweetUrls, ...voice }) });
                 } else if (mode === 'srt') {
                     const info = nazeSrtInfo.value;
                     if (!info.valid) { alert('❌ File chưa hợp lệ:\n' + (info.errors.join('\n') || 'Chưa đủ cặp file')); nazeModal.value.loading = false; return; }
@@ -2641,7 +2727,7 @@ createApp({
                     if (!youtubeUrl.trim()) return;
                     res = await fetch('/api/create-naze-youtube', { method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url: youtubeUrl, projectId, targetLang, ...lips }) });
+                        body: JSON.stringify({ url: youtubeUrl, projectId, targetLang, ...voice }) });
                 }
                 if (!res.ok) { const t = await res.text(); throw new Error(`HTTP ${res.status}: ${t.slice(0,100)}`); }
                 const r = await res.json();
@@ -2654,9 +2740,12 @@ createApp({
                     nazeModal.value.srtFiles = [];
                     nazeModal.value.youtubeUrl = '';
                     nazeModal.value.tweetUrls = '';
+                    nazeModal.value.voiceAuto = false;
+                    nazeModal.value.speakerUuid = '';
+                    nazeModal.value.selectedDicts = [];
                     nazeModal.value.lipsAuto = false;
                     nazeModal.value.lipsVideo = '';
-                    showToast(r.count ? `✅ Đã xếp hàng ${r.count} project, xử lý lần lượt...` : '✅ Đang xử lý, vui lòng chờ...');
+                    showToast(r.count ? `✅ Đã xếp hàng ${r.count} project, xử lý lần lượt...` : (canVoice ? '✅ Đang xử lý, xong sẽ tự tạo voice' + (wantLips ? ' + lips' : '') + '...' : '✅ Đang xử lý, vui lòng chờ...'));
                     await loadPosts();
                 } else { alert('❌ ' + (r.error || 'Lỗi')); }
             } catch (e) { alert('❌ ' + e.message); }
@@ -2672,6 +2761,13 @@ createApp({
             targetLang: 'en',
             days: 3,
             loading: false,
+            voiceAuto: false,
+            voiceContentType: 'content',
+            speakerUuid: '',
+            selectedDicts: [],
+            speakers: [],
+            dictionaries: [],
+            voiceLoading: false,
             lipsAuto: false,
             lipsVideo: '',
             lipsGuidance: 2.2,
@@ -2703,20 +2799,60 @@ createApp({
             ],
         });
 
+        // Nạp giọng mẫu (theo ngôn ngữ đích) + từ điển cho option auto voice — dùng chung geo & naze/drama
+        async function loadAutoVoiceOptions(modal) {
+            modal.value.voiceLoading = true;
+            try {
+                const lang = modal.value.targetLang || 'en';
+                const [sr, dr] = await Promise.all([
+                    fetch('/api/reference-speakers?lang=' + encodeURIComponent(lang)),
+                    fetch('/api/dictionaries')
+                ]);
+                modal.value.speakers = await sr.json();
+                modal.value.dictionaries = await dr.json();
+            } catch (e) { showToast('❌ Lỗi tải giọng mẫu/từ điển: ' + e.message); }
+            finally { modal.value.voiceLoading = false; }
+        }
+        // geo (New Project)
+        function onGeoVoiceToggle() {
+            if (newProjectModal.value.voiceAuto && !newProjectModal.value.speakers.length) loadAutoVoiceOptions(newProjectModal);
+        }
+        function onGeoLangChange() {
+            if (newProjectModal.value.voiceAuto) { newProjectModal.value.speakerUuid = ''; loadAutoVoiceOptions(newProjectModal); }
+        }
+        // naze/drama
+        function onNazeVoiceToggle() {
+            if (nazeModal.value.voiceAuto && !nazeModal.value.speakers.length) loadAutoVoiceOptions(nazeModal);
+        }
+        // Đổi ngôn ngữ đích (nút hoặc gõ tay) → nạp lại giọng mẫu nếu đang bật auto voice
+        watch(() => nazeModal.value.targetLang, () => {
+            if (nazeModal.value.voiceAuto) { nazeModal.value.speakerUuid = ''; loadAutoVoiceOptions(nazeModal); }
+        });
+
         async function submitNewProject() {
-            const { content, keywordsText, sourcesText, country, countryOptions, targetLang, days, lipsAuto, lipsVideo, lipsGuidance } = newProjectModal.value;
+            const { content, keywordsText, sourcesText, country, countryOptions, targetLang, days,
+                    voiceAuto, voiceContentType, speakerUuid, selectedDicts, lipsAuto, lipsVideo, lipsGuidance } = newProjectModal.value;
             const keywords = (keywordsText || '').split(/[\n,]/).map(s => s.trim()).filter(Boolean);
             const sources = (sourcesText || '').split(/[\n,]/).map(s => s.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '')).filter(Boolean);
             if (!keywords.length && !content.trim()) return;
-            if (lipsAuto && !lipsVideo) { alert('❌ Đã bật Auto Lips Sync nhưng chưa chọn video khuôn mặt'); return; }
-            const lips = (lipsAuto && lipsVideo) ? { lipsAuto: true, lipsVideo, lipsGuidance } : {};
+            // Auto voice: validate params
+            if (voiceAuto && !speakerUuid) { alert('❌ Đã bật Tự động tạo voice nhưng chưa chọn giọng mẫu'); return; }
+            const wantLips = voiceAuto && voiceContentType === 'content' && lipsAuto;
+            if (wantLips && !lipsVideo) { alert('❌ Đã bật Lips Sync nhưng chưa chọn video khuôn mặt'); return; }
+            const voice = voiceAuto ? {
+                voiceAuto: true,
+                voiceContentType,
+                speakerUuid,
+                dictionaryUuids: selectedDicts,
+                ...(wantLips ? { lipsAuto: true, lipsVideo, lipsGuidance } : {})
+            } : {};
             const c = countryOptions.find(o => o.gl === country) || { gl: '', hl: '' };
             newProjectModal.value.loading = true;
             try {
                 const res = await fetch('/api/create-project', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content: content.trim(), keywords, sources, country: { gl: c.gl, hl: c.hl }, targetLang, days, ...lips })
+                    body: JSON.stringify({ content: content.trim(), keywords, sources, country: { gl: c.gl, hl: c.hl }, targetLang, days, ...voice })
                 });
                 const r = await res.json();
                 if (r.success) {
@@ -2724,9 +2860,12 @@ createApp({
                     newProjectModal.value.content = '';
                     newProjectModal.value.keywordsText = '';
                     newProjectModal.value.sourcesText = '';
+                    newProjectModal.value.voiceAuto = false;
+                    newProjectModal.value.speakerUuid = '';
+                    newProjectModal.value.selectedDicts = [];
                     newProjectModal.value.lipsAuto = false;
                     newProjectModal.value.lipsVideo = '';
-                    showToast('✅ Đã tạo dự án, đang xử lý...');
+                    showToast(voiceAuto ? '✅ Đã tạo dự án. Sau khi crawl xong sẽ tự tạo voice' + (wantLips ? ' + lips sync' : '') + '...' : '✅ Đã tạo dự án, đang xử lý...');
                     await loadPosts();
                 } else {
                     alert('❌ ' + (r.error || 'Tạo thất bại'));
@@ -4572,7 +4711,7 @@ createApp({
         }
 
         // ===== LIPS SYNC (port từ main_v4): lặp từng câu -> job, lưu vào lips_sync/ của dự án =====
-        const lipsSyncModal = ref({ open: false, videoPath: '', contentType: 'content', guidanceScale: 2.2, jobs: [], previewPath: '', running: false, checking: false, polling: false, uploadingVideo: false });
+        const lipsSyncModal = ref({ open: false, videoPath: '', contentType: 'content', guidanceScale: 2.2, jobs: [], previewPath: '', running: false, checking: false, polling: false, uploadingVideo: false, stopping: false });
         const lipsSyncDone = computed(() => lipsSyncModal.value.jobs.filter(j => j.status === 'done').length);
         async function uploadLipsSyncFile(kind, event) {
             const file = event.target.files?.[0];
@@ -4594,7 +4733,7 @@ createApp({
         function stopLipsSyncPoll() { if (lipsSyncPollTimer) { clearInterval(lipsSyncPollTimer); lipsSyncPollTimer = null; } lipsSyncModal.value.polling = false; }
         async function openLipsSyncModal() {
             stopLipsSyncPoll();
-            lipsSyncModal.value = { open: true, videoPath: lipsSyncModal.value.videoPath || '', contentType: 'content', guidanceScale: lipsSyncModal.value.guidanceScale ?? 2.2, jobs: [], previewPath: '', running: false, checking: false, polling: false, uploadingVideo: false };
+            lipsSyncModal.value = { open: true, videoPath: lipsSyncModal.value.videoPath || '', contentType: 'content', guidanceScale: lipsSyncModal.value.guidanceScale ?? 2.2, jobs: [], previewPath: '', running: false, checking: false, polling: false, uploadingVideo: false, stopping: false };
             if (!activePostId.value) return;
             // Tải lại kết quả đã lưu trong DB
             try {
@@ -4662,6 +4801,28 @@ createApp({
         }
         function previewLipsSync(job) {
             lipsSyncModal.value.previewPath = job.outputPath;
+        }
+        // Dừng lips sync: huỷ câu đang chờ trên server + dừng poll. Câu đang chạy sẽ xong nốt.
+        async function stopLipsSync() {
+            const m = lipsSyncModal.value;
+            if (!activePostId.value) return;
+            m.stopping = true;
+            try {
+                const res = await fetch('/api/lips-sync/stop', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ postId: activePostId.value }),
+                });
+                const r = await res.json();
+                if (!res.ok || r.error) { showToast('❌ ' + (r.error || 'Lỗi dừng lips sync')); return; }
+                stopLipsSyncPoll();
+                // Cập nhật UI: câu đang chờ -> cancelled; câu đang chạy giữ nguyên
+                for (const j of m.jobs) {
+                    if (j.jobId && j.status !== 'done' && j.status !== 'error' && !(r.running || []).includes(j.jobId)) j.status = 'cancelled';
+                }
+                const runningLeft = (r.running || []).length;
+                showToast(`⏹ Đã dừng: huỷ ${r.cancelled} câu đang chờ` + (runningLeft ? `, ${runningLeft} câu đang chạy sẽ xong nốt` : ''));
+            } catch (e) { showToast('❌ ' + e.message); }
+            finally { m.stopping = false; }
         }
         // Nạp map lips_sync (audioUrl -> video) để hiển thị trong từng câu (nút 👄 trên audio-bar)
         async function loadLipsSyncIndex(postId) {
@@ -4823,7 +4984,7 @@ createApp({
             retryDownloadVoice,
             aligning,
             alignWords,
-            lipsSyncModal, lipsSyncDone, uploadLipsSyncFile, openLipsSyncModal, runLipsSync, checkLipsSyncStatus, previewLipsSync,
+            lipsSyncModal, lipsSyncDone, uploadLipsSyncFile, openLipsSyncModal, runLipsSync, checkLipsSyncStatus, previewLipsSync, stopLipsSync,
             fileBrowser, fmtBytes, openFileBrowser, browseDir, pickEntry,
             submitCreateVoice,
             genAudio,
@@ -4879,6 +5040,9 @@ createApp({
             nazeSrtAddFiles,
             nazeSrtRemove,
             submitNewProject,
+            onGeoVoiceToggle,
+            onGeoLangChange,
+            onNazeVoiceToggle,
         };
     }
 }).component('audio-bar', AudioBar).mount('#app');

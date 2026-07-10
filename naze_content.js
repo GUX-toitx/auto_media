@@ -515,6 +515,13 @@ except Exception as e:
     }
     console.log(`[naze] ✅ Đã lưu ${rawSentences.length} câu vào DB`);
 
+    // Kịch bản đã xong → kích hoạt gen voice (+lips) NGAY, chạy song song với crawl ảnh/video bên dưới.
+    try {
+        const http = await import('http');
+        http.default.request({ hostname: 'localhost', port: process.env.PORT || 3000, path: '/api/auto-voice/run', method: 'POST', headers: { 'Content-Type': 'application/json' } }, () => {})
+            .end(JSON.stringify({ projectId }));
+    } catch (_) {}
+
     // Cấu hình cào X (chỉ genre drama) — sinh keyword tiếng Nhật 1 LẦN từ toàn bộ vụ việc
     const X_PROFILE = process.env.X_PROFILE || 'chrome-profile-4';
     const X_TWEET_URLS = process.env.NAZE_TWEET_URLS || '';
@@ -595,12 +602,10 @@ except Exception as e:
             }
         };
 
-        // Chạy tuần tự, sync DB ngay sau mỗi keyword
+        // Chạy tuần tự TỪNG CÁI 1 (ảnh xong rồi video) — tránh nhiều Puppeteer/tải đua nhau
         for (const kw of keywords) {
-            await Promise.allSettled([
-                fetchFromGoogleImageBot(kw, 'image', imgDir, IMAGES_PER_KEYWORD).then(n => console.log(`      [${kw}] ${n} images`)).catch(e => console.error(`      [${kw}] img loi: ${e.message}`)),
-                fetchFromStoryblocksBot(kw, 'video', vidDir, 4).then(n => console.log(`      [${kw}] ${n} videos`)).catch(() => {}),
-            ]);
+            await fetchFromGoogleImageBot(kw, 'image', imgDir, IMAGES_PER_KEYWORD).then(n => console.log(`      [${kw}] ${n} images`)).catch(e => console.error(`      [${kw}] img loi: ${e.message}`));
+            await fetchFromStoryblocksBot(kw, 'video', vidDir, 4).then(n => console.log(`      [${kw}] ${n} videos`)).catch(() => {});
             await syncDir(imgDir, 'image', ['.jpg', '.jpeg', '.png', '.webp']);
             await syncDir(vidDir, 'video', ['.mp4', '.mov']);
         }
@@ -637,6 +642,12 @@ except Exception as e:
 
     await db.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]);
     await db.close();
+    // Báo hoàn tất (dashboard SSE + Slack) — status:null = crawl xong
+    try {
+        const http = await import('http');
+        http.default.request({ hostname: 'localhost', port: process.env.PORT || 3000, path: '/api/crawl-status/notify', method: 'POST', headers: { 'Content-Type': 'application/json' } }, () => {})
+            .end(JSON.stringify({ postTitle: projectId, status: null }));
+    } catch (_) {}
     console.log('\n[naze] ✅ Hoàn thành!');
 }
 

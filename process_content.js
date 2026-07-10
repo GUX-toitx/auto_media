@@ -37,6 +37,7 @@ const countryGl = getArg('--country');   // quốc gia ưu tiên (gl) cho Google
 const countryHl = getArg('--clang');     // ngôn ngữ địa phương (hl)
 const daysArg = parseInt(getArg('--days'), 10);
 const newsDays = Number.isFinite(daysArg) && daysArg > 0 ? daysArg : 3;   // cửa sổ tin "when:Nd" (mặc định 3)
+const seenFile = getArg('--seenFile');   // (monitor sheet) file JSON lưu tin đã xử lý → dedup xuyên lần chạy
 
 // LUỒNG MỚI: input là MẢNG TỪ KHÓA + MẢNG DOMAIN NGUỒN (JSON). Tổ hợp tất cả qua Google News.
 function parseArr(raw) { try { const v = JSON.parse(raw); return Array.isArray(v) ? v.map(s => String(s).trim()).filter(Boolean) : []; } catch { return raw ? raw.split(/[|,\n]/).map(s => s.trim()).filter(Boolean) : []; } }
@@ -829,6 +830,12 @@ async function saveToDb(projectId, result) {
         hook_target: result.hook_target
     }, null, 2));
 
+    // Kịch bản đã xong → kích hoạt gen voice (+lips) NGAY, song song với crawl media bên dưới.
+    try {
+        http.request({ hostname: 'localhost', port: PORT, path: '/api/auto-voice/run', method: 'POST', headers: { 'Content-Type': 'application/json' } }, () => {})
+            .end(JSON.stringify({ projectId }));
+    } catch (_) {}
+
     // Crawl media cho tất cả sections và paragraphs — TỪ ẢNH/VIDEO ĐÃ CÀO TRONG BÀI BÁO
     {
         // Gom toàn bộ media cào được từ các bài (mỗi item gắn tiêu đề bài để khớp token theo đoạn)
@@ -880,7 +887,7 @@ async function saveToDb(projectId, result) {
                 }
             };
             const lp = liveSync();
-            await runConcurrently(tasks, 2);   // 2 (mỗi cái lại bung nhiều provider) — tránh quá nhiều browser stealth cùng lúc
+            await runConcurrently(tasks, Math.max(1, parseInt(process.env.CRAWL_CONCURRENCY || '1', 10) || 1));   // mặc định 1 = tuần tự
             downloading = false;
             await lp;
             await syncStock(vFolder, 'video', ins);   // sync lần cuối
@@ -1005,18 +1012,39 @@ async function saveToDb(projectId, result) {
 }
 
 try {
+    // Dedup xuyên lần chạy (monitor sheet): nạp tin đã xử lý ở các lần trước
+    const seenIds = new Set(), seenTitles = new Set();
+    if (seenFile && fs.existsSync(seenFile)) {
+        try { const j = JSON.parse(fs.readFileSync(seenFile, 'utf8')); (j.ids || []).forEach(x => seenIds.add(x)); (j.titles || []).forEach(x => seenTitles.add(x)); } catch {}
+    }
     // 1) Thu thập tin mới & sát nhất (Google News theo từ khóa × domain nguồn) + cào HẾT ảnh/video trong bài
     console.log(`[process_content] Thu thập tin: ${keywords.length} từ khóa × ${sourceDomains.length} nguồn`);
     const bundle = await collectNews({
         keywords, sources: sourceDomains,
         hl: countryHl || 'vi', gl: countryGl || 'VN',   // mặc định bản VN (khớp từ khóa tiếng Việt); chọn quốc gia thì theo đó
         days: newsDays, maxArticles: 30, perKeyword: 15,
+        seenIds: seenFile ? seenIds : null, seenTitles: seenFile ? seenTitles : null,
     });
+    // Monitor: không có tin mới -> thoát (exit 2), KHÔNG tạo project, KHÔNG tốn GPT
+    if (seenFile && !bundle.articles.length) {
+        console.log('[geo-result] ' + JSON.stringify({ new: 0, projectId: null }));
+        console.log('[process_content] Không có tin mới -> bỏ qua.');
+        process.exit(2);
+    }
     // 2) Đưa title cho GPT-5 xào kịch bản
     const result = await analyzeWithGPT5(topic, bundle.titles, sources);
     console.log(`[process_content] GPT-5 trả về ${result.luan_diem?.length || 0} luận điểm`);
     result._articles = bundle.articles;   // media đã cào để gán vào paragraph/section
     await saveToDb(projectId, result);
+    // Lưu tin đã xử lý (theo articleId + tiêu đề) để lần sau không crawl trùng
+    if (seenFile) {
+        for (const a of bundle.articles) { if (a.articleId) seenIds.add(a.articleId); if (a.title) seenTitles.add(a.title.toLowerCase().slice(0, 60)); }
+        try {
+            fs.mkdirSync(path.dirname(seenFile), { recursive: true });
+            fs.writeFileSync(seenFile, JSON.stringify({ ids: [...seenIds].slice(-3000), titles: [...seenTitles].slice(-3000) }));
+        } catch (e) { console.error('[process_content] Ghi seenFile lỗi:', e.message); }
+        console.log('[geo-result] ' + JSON.stringify({ new: bundle.articles.length, projectId }));
+    }
     process.exit(0);
 } catch (e) {
     console.error('[process_content] LỖI:', e.message);

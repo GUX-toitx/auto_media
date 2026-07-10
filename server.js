@@ -20,6 +20,21 @@ import { generateSeoTitle } from './seoTitle.js';
 import { translateTitle } from './translateTitle.js';
 import archiver from 'archiver';
 import { downloadWithYtDlp } from './ytDlpDownloader.js'; // Nhúng con Bot vừa viết
+import { GoogleSpreadsheet } from 'google-spreadsheet';
+import { JWT } from 'google-auth-library';
+import crypto from 'crypto';
+import os from 'os';
+
+// IP LAN của máy (cho người cùng mạng truy cập) — ưu tiên 192.168.*, rồi 10.*, tránh docker 172.17/172.18.
+function getLanIp() {
+    try {
+        const addrs = [];
+        const ifaces = os.networkInterfaces();
+        for (const name of Object.keys(ifaces || {})) for (const i of ifaces[name] || []) if (i.family === 'IPv4' && !i.internal) addrs.push(i.address);
+        return addrs.find(a => a.startsWith('192.168.')) || addrs.find(a => a.startsWith('10.'))
+            || addrs.find(a => /^172\.(1[6-9]|2\d|3[01])\./.test(a) && !/^172\.1[78]\./.test(a)) || addrs[0] || 'localhost';
+    } catch { return 'localhost'; }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -463,11 +478,28 @@ const BUNNY_BASE_URL = process.env.BUNNYCDN_BASE_URL;
 const BUNNY_ACCESS_KEY = process.env.BUNNYCDN_ACCESS_KEY;
 const BUNNY_AUDIO_DIR = process.env.BUNNYCDN_AUDIO_DIR || 'sentences';
 
-async function fetchBunnyAudio(audioPath) {
+async function fetchBunnyAudio(audioPath, { retries = 4, timeoutMs = 30000 } = {}) {
     const url = audioPath.startsWith('http') ? audioPath : `${BUNNY_BASE_URL}/${audioPath}`;
-    const res = await fetch(url, { headers: { AccessKey: BUNNY_ACCESS_KEY } });
-    if (!res.ok) throw new Error(`Bunny fetch failed: ${res.status} ${url}`);
-    return Buffer.from(await res.arrayBuffer());
+    let lastErr;
+    // Mạng tới CDN hay chập chờn ("fetch failed") → retry với backoff + timeout mỗi lần.
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        const ac = new AbortController();
+        const t = setTimeout(() => ac.abort(), timeoutMs);
+        try {
+            const res = await fetch(url, { headers: { AccessKey: BUNNY_ACCESS_KEY }, signal: ac.signal });
+            if (res.ok) return Buffer.from(await res.arrayBuffer());
+            // 4xx (trừ 429) = hỏng hẳn (URL sai/hết hạn) → dừng luôn, không retry
+            if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+                throw new Error(`Bunny fetch failed: ${res.status} ${url}`);
+            }
+            lastErr = new Error(`HTTP ${res.status}`);   // 5xx/429 → retry
+        } catch (e) {
+            if (/Bunny fetch failed: 4/.test(e.message)) throw e;   // 4xx: không retry
+            lastErr = e;   // lỗi mạng / timeout → retry
+        } finally { clearTimeout(t); }
+        if (attempt < retries) await new Promise(r => setTimeout(r, 500 * attempt));
+    }
+    throw new Error(`Tải audio thất bại sau ${retries} lần (mạng chập chờn tới CDN): ${lastErr?.message || 'fetch failed'}`);
 }
 
 app.post('/api/download-audio/individual', async (req, res) => {
@@ -721,7 +753,7 @@ app.post('/api/create-voice', async (req, res) => {
 
 // API: Kích hoạt crawl toàn bộ media cho 1 post
 app.post('/api/crawl-all', async (req, res) => {
-    const { postId } = req.body;
+    const { postId, force } = req.body;   // force=true → crawl lại HẾT; mặc định chỉ crawl cảnh còn THIẾU (0 asset)
     res.json({ success: true, message: 'Đang crawl...' });
     (async () => {
         const { fetchAndDownloadStock } = await import('./sync_assets_db.js').catch(() => ({}));
@@ -747,6 +779,7 @@ app.post('/api/crawl-all', async (req, res) => {
         for (const section of ['hook', 'summary', 'conclusion']) {
             const kws = await db.all('SELECT content FROM Keyword WHERE post_id = ? AND section = ?', [postId, section]);
             if (!kws.length) continue;
+            if (!force) { const c = await db.get('SELECT COUNT(*) c FROM Asset WHERE post_id = ? AND section = ?', [postId, section]); if (c.c > 0) continue; }   // đã có ảnh → bỏ qua
             const vF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_videos', section);
             const iF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', section);
             [vF, iF].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
@@ -764,6 +797,7 @@ app.post('/api/crawl-all', async (req, res) => {
             const gid = String(para.order);
             const kws = await db.all('SELECT content FROM Keyword WHERE paragraph_id = ?', [para.id]);
             if (!kws.length) continue;
+            if (!force) { const c = await db.get('SELECT COUNT(*) c FROM Asset WHERE paragraph_id = ?', [para.id]); if (c.c > 0) continue; }   // cảnh đã có ảnh → bỏ qua, chỉ crawl cảnh thiếu
             const vF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_videos', gid);
             const iF = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', gid);
             [vF, iF].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
@@ -778,7 +812,31 @@ app.post('/api/crawl-all', async (req, res) => {
         await db.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]);
         await db.close();
         console.log(`[crawl-all] ✅ Xong post ${postId}`);
+        // Giống pipeline hoàn tất: dashboard SSE + Slack + tự tạo voice (+lips) nếu project có cấu hình
+        pushCrawlStatus(post.project_id, null);
+        announceSlack(post.project_id);
+        orchestrateAutoVoice(projectId).catch(e => console.error('[crawl-all] auto voice lỗi:', e.message));
     })().catch(e => console.error('[crawl-all]', e.message));
+});
+
+// Gen voice (+lips) cho 1 post NGAY khi content sẵn sàng — KHÔNG cần chờ crawl ảnh/video xong.
+// Pipeline gọi ngay sau khi lưu kịch bản (song song với crawl media). Idempotent (đã có voice thì bỏ qua).
+app.post('/api/auto-voice/run', async (req, res) => {
+    const { projectId, postId } = req.body || {};
+    res.json({ success: true });
+    (async () => {
+        const pid = String(projectId || '').trim();
+        const cfg = pid ? readVoiceAutoConfig(pid) : null;
+        if (!cfg || !cfg.enabled) return;                    // project không bật auto voice → thôi
+        const db = await getDb();
+        const post = postId
+            ? await db.get('SELECT id, target_lang FROM Post WHERE id = ?', [postId])
+            : await db.get('SELECT id, target_lang FROM Post WHERE project_id = ? OR project_id LIKE ? ORDER BY id DESC LIMIT 1', [pid, `${pid}\_%`]);
+        await db.close();
+        if (!post) return;
+        console.log(`[auto-voice/run] Gen voice sớm cho post ${post.id} (${pid})`);
+        await autoGenVoiceForPost(pid, post, cfg);
+    })().catch(e => console.error('[auto-voice/run] lỗi:', e.message));
 });
 
 // API: Crawl từ nguồn Việt Nam
@@ -819,7 +877,8 @@ app.post('/api/crawl-vn', async (req, res) => {
 });
 
 app.post('/api/create-project', async (req, res) => {
-    const { content, keywords, sources, country, targetLang, days, lipsAuto, lipsVideo, lipsGuidance } = req.body;
+    const { content, keywords, sources, country, targetLang, days,
+            voiceAuto, voiceContentType, speakerUuid, dictionaryUuids, lipsAuto, lipsVideo, lipsGuidance } = req.body;
     // LUỒNG ĐỊA CHÍNH TRỊ: input là mảng từ khóa + mảng domain nguồn. Vẫn nhận content (chủ đề/tiêu đề) làm tuỳ chọn.
     const kwArr = Array.isArray(keywords) ? keywords.map(s => String(s).trim()).filter(Boolean) : [];
     const srcArr = Array.isArray(sources) ? sources.map(s => String(s).trim()).filter(Boolean) : [];
@@ -831,8 +890,15 @@ app.post('/api/create-project', async (req, res) => {
         const targetDir = path.join(MEDIA_DIR, projectId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
         fs.writeFileSync(path.join(targetDir, 'original_content.txt'), (content?.trim()) || kwArr.join('\n'));
-        // Auto lips sync: ghi config để tự chạy sau khi gen audio ngôn ngữ đích (giống luồng naze/drama)
-        if (lipsAuto && lipsVideo) { writeLipsAutoConfig(projectId, { video: lipsVideo, guidanceScale: lipsGuidance }); }
+        // Auto voice: lưu cấu hình để orchestrator tự chạy sau khi crawl xong
+        if (voiceAuto && speakerUuid) {
+            writeVoiceAutoConfig(projectId, {
+                speakerUuid,
+                contentType: voiceContentType,
+                dictionaryUuids,
+                lips: (lipsAuto && lipsVideo) ? { video: lipsVideo, guidanceScale: lipsGuidance } : null,
+            });
+        }
         const cGl = (country && country.gl) || '';
         const cHl = (country && country.hl) || '';
         const procArgs = [
@@ -849,6 +915,11 @@ app.post('/api/create-project', async (req, res) => {
         const crawlProcess = spawn('node', procArgs, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
         crawlProcess.stdout.on('data', d => process.stdout.write(`[process_content] ${d}`));
         crawlProcess.stderr.on('data', d => process.stderr.write(`[process_content] ${d}`));
+        // Sau khi crawl xong (thành công) → tự tạo voice (+lips) nếu project bật auto voice
+        crawlProcess.on('exit', (code) => {
+            if (code !== 0) { if (voiceAuto) console.warn(`[auto-voice] Pipeline lỗi (code ${code}), bỏ qua auto voice cho ${projectId}`); return; }
+            orchestrateAutoVoice(projectId).catch(e => console.error('[auto-voice] Orchestrate lỗi:', e.message));
+        });
         crawlProcess.unref();
         res.json({ success: true, projectId });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1249,29 +1320,39 @@ app.post('/api/create-naze-srt-batch', upload.array('srts', 500), async (req, re
 });
 
 app.post('/api/create-naze-youtube', express.json(), async (req, res) => {
-    const { url, projectId, targetLang, lipsAuto, lipsVideo, lipsGuidance } = req.body;
+    const { url, projectId, targetLang, voiceAuto, voiceContentType, speakerUuid, dictionaryUuids, lipsAuto, lipsVideo, lipsGuidance } = req.body;
     if (!url?.trim() || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu URL hoặc projectId' });
     try {
         const targetDir = path.join(MEDIA_DIR, projectId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-        if (lipsAuto && lipsVideo) writeLipsAutoConfig(projectId, { video: lipsVideo, guidanceScale: lipsGuidance });
+        if (voiceAuto && speakerUuid) {
+            writeVoiceAutoConfig(projectId, { speakerUuid, contentType: voiceContentType, dictionaryUuids,
+                lips: (lipsAuto && lipsVideo) ? { video: lipsVideo, guidanceScale: lipsGuidance } : null });
+        }
         const args = ['naze_content.js', '--youtube', url.trim(), projectId];
         if (targetLang) args.push(targetLang);
         const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
         child.stdout.on('data', d => process.stdout.write(`[naze] ${d}`));
         child.stderr.on('data', d => process.stderr.write(`[naze] ${d}`));
+        child.on('exit', (code) => {
+            if (code !== 0) { if (voiceAuto) console.warn(`[auto-voice] naze pipeline lỗi (code ${code}), bỏ qua ${projectId}`); return; }
+            orchestrateAutoVoice(projectId).catch(e => console.error('[auto-voice] Orchestrate lỗi:', e.message));
+        });
         child.unref();
         res.json({ success: true, projectId });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/create-naze', express.json(), async (req, res) => {
-    const { topic, projectId, targetLang, genre, tweetUrls, lipsAuto, lipsVideo, lipsGuidance } = req.body;
+    const { topic, projectId, targetLang, genre, tweetUrls, voiceAuto, voiceContentType, speakerUuid, dictionaryUuids, lipsAuto, lipsVideo, lipsGuidance } = req.body;
     if (!topic?.trim() || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu topic hoặc projectId' });
     try {
         const targetDir = path.join(MEDIA_DIR, projectId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-        if (lipsAuto && lipsVideo) writeLipsAutoConfig(projectId, { video: lipsVideo, guidanceScale: lipsGuidance });
+        if (voiceAuto && speakerUuid) {
+            writeVoiceAutoConfig(projectId, { speakerUuid, contentType: voiceContentType, dictionaryUuids,
+                lips: (lipsAuto && lipsVideo) ? { video: lipsVideo, guidanceScale: lipsGuidance } : null });
+        }
         const args = ['naze_content.js', topic.trim(), projectId, targetLang || 'vi', genre === 'drama' ? 'drama' : 'naze'];
         const env = { ...process.env };
         // Chỉ drama mới cào X; truyền link tweet dán tay (nếu có) qua env
@@ -1279,6 +1360,10 @@ app.post('/api/create-naze', express.json(), async (req, res) => {
         const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'], env });
         child.stdout.on('data', d => process.stdout.write(`[naze] ${d}`));
         child.stderr.on('data', d => process.stderr.write(`[naze] ${d}`));
+        child.on('exit', (code) => {
+            if (code !== 0) { if (voiceAuto) console.warn(`[auto-voice] naze pipeline lỗi (code ${code}), bỏ qua ${projectId}`); return; }
+            orchestrateAutoVoice(projectId).catch(e => console.error('[auto-voice] Orchestrate lỗi:', e.message));
+        });
         child.unref();
         res.json({ success: true, projectId });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -2036,6 +2121,97 @@ function writeLipsAutoConfig(rawProjectId, { video, guidanceScale }) {
     return cfg;
 }
 
+// ===== Auto voice (luồng Địa chính trị): lưu cấu hình + tự gen voice sau khi crawl xong =====
+// Cấu hình lưu ở <project>/voice_auto.json (KHÔNG dùng cột DB → an toàn với schema dùng chung nhiều nhánh)
+function voiceAutoConfigPath(rawProjectId) {
+    const projectId = String(rawProjectId).replace(/_[a-z]{2}$/, '');
+    return path.join(MEDIA_DIR, projectId, 'voice_auto.json');
+}
+function readVoiceAutoConfig(rawProjectId) {
+    try {
+        const p = voiceAutoConfigPath(rawProjectId);
+        if (!fs.existsSync(p)) return null;
+        return JSON.parse(fs.readFileSync(p, 'utf8'));
+    } catch { return null; }
+}
+function writeVoiceAutoConfig(rawProjectId, { speakerUuid, contentType, dictionaryUuids, lips }) {
+    const p = voiceAutoConfigPath(rawProjectId);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    const ct = contentType === 'content_vi' ? 'content_vi' : 'content';
+    const cfg = {
+        enabled: true,
+        speakerUuid: String(speakerUuid),
+        contentType: ct,
+        dictionaryUuids: Array.isArray(dictionaryUuids) ? dictionaryUuids : [],
+        // lips chỉ áp dụng khi voice là ngôn ngữ đích (content)
+        lips: (ct === 'content' && lips && lips.video)
+            ? { enabled: true, video: String(lips.video), guidanceScale: Number.isFinite(Number(lips.guidanceScale)) ? Number(lips.guidanceScale) : 2.2 }
+            : { enabled: false },
+    };
+    fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
+    return cfg;
+}
+
+// Chờ 1 batch TTS gen xong (checkAndSaveVoice là single-shot → tự poll). Lưu URL audio vào DB khi status OK.
+function waitBatchDone(batchUuid, postId, contentType, { intervalMs = 5000, timeoutMs = 20 * 60 * 1000 } = {}) {
+    return new Promise((resolve) => {
+        const start = Date.now();
+        const tick = async () => {
+            try {
+                const r = await checkAndSaveVoice(batchUuid, postId, contentType);
+                if (r && r.status === 'OK') return resolve(true);
+            } catch (e) { console.error('[auto-voice] poll lỗi:', e.message); }
+            if (Date.now() - start > timeoutMs) { console.warn('[auto-voice] timeout batch', batchUuid); return resolve(false); }
+            setTimeout(tick, intervalMs);
+        };
+        tick();
+    });
+}
+
+// Tự gen voice cho 1 post rồi (tuỳ chọn) chạy lips sync — dùng params đã lưu lúc tạo project.
+async function autoGenVoiceForPost(projectId, post, cfg) {
+    // Idempotent: nếu post ĐÃ có voice (audio_uuid) → bỏ qua, tránh gen trùng khi nhiều trigger (content-ready + exit + crawl-all).
+    try { const d0 = await getDb(); const cur = await d0.get('SELECT audio_uuid FROM Post WHERE id = ?', [post.id]); await d0.close(); if (cur && cur.audio_uuid) { console.log(`[auto-voice] post ${post.id} đã có voice → bỏ qua`); return; } } catch {}
+    const projectDir = path.join(MEDIA_DIR, projectId);
+    const lang = post.target_lang || 'en';
+    const contentType = cfg.contentType || 'content';
+    console.log(`[auto-voice] Gen voice post ${post.id} (lang=${lang}, ct=${contentType})`);
+    const result = await generateAudios(projectDir, post.id, lang, cfg.speakerUuid, contentType, cfg.dictionaryUuids || [], null);
+    const db = await getDb();
+    await db.run('UPDATE Post SET audio_uuid = ?, voice_content_type = ? WHERE id = ?', [result.batch_uuid, contentType, post.id]);
+    await db.close();
+    await updateBatchStatus(result.batch_uuid);
+    const ok = await waitBatchDone(result.batch_uuid, post.id, contentType);
+    if (!ok) { console.warn('[auto-voice] Voice chưa xong, bỏ qua lips post', post.id); return; }
+    console.log(`[auto-voice] Voice xong post ${post.id}`);
+    // Lips sync: chỉ với target (content) + có cấu hình video khuôn mặt
+    if (contentType === 'content' && cfg.lips && cfg.lips.enabled && cfg.lips.video) {
+        try {
+            await runLipsSyncForPost({ postId: post.id, videoPath: cfg.lips.video, contentType: 'content', guidanceScale: cfg.lips.guidanceScale });
+            console.log(`[auto-voice] Đã gửi job lips sync post ${post.id}`);
+        } catch (e) { console.error('[auto-voice] Lips sync lỗi post ' + post.id + ':', e.message); }
+    }
+}
+
+// Điều phối: sau khi pipeline crawl xong, gen voice (+lips) cho mọi post của project đã hoàn tất.
+async function orchestrateAutoVoice(projectId) {
+    const cfg = readVoiceAutoConfig(projectId);
+    if (!cfg || !cfg.enabled) return;
+    const db = await getDb();
+    const posts = await db.all(
+        'SELECT id, target_lang FROM Post WHERE (project_id = ? OR project_id LIKE ?) AND status IS NULL',
+        [projectId, `${projectId}\_%`]
+    );
+    await db.close();
+    if (!posts.length) { console.warn('[auto-voice] Không có post nào hoàn tất cho', projectId); return; }
+    console.log(`[auto-voice] Bắt đầu tự tạo voice cho ${posts.length} post của ${projectId}`);
+    for (const post of posts) {
+        try { await autoGenVoiceForPost(projectId, post, cfg); }
+        catch (e) { console.error('[auto-voice] Lỗi post ' + post.id + ':', e.message); }
+    }
+    console.log(`[auto-voice] Hoàn tất auto voice cho ${projectId}`);
+}
+
 // Chạy lips_sync cho TỪNG CÂU của 1 post: tải mp3 mỗi câu, gửi job, output lưu vào <project>/lips_sync/
 // Dùng chung cho endpoint thủ công (/run-post) lẫn auto sau khi tạo audio (/auto-run).
 async function runLipsSyncForPost({ postId, videoPath, contentType: reqCt, force, guidanceScale }) {
@@ -2167,6 +2343,41 @@ app.post('/api/lips-sync/status', async (req, res) => {
         res.json(out);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Dừng lips_sync của 1 post: huỷ các job đang chờ trên server inference + đánh dấu 'cancelled' trong DB.
+// Job đang chạy (đang inference) không cắt được giữa chừng nên sẽ chạy nốt câu đó.
+app.post('/api/lips-sync/stop', async (req, res) => {
+    const { postId } = req.body || {};
+    if (!postId) return res.status(400).json({ error: 'Thiếu postId' });
+    try {
+        const db = await getDb();
+        // Các job còn dang dở (chưa xong/ chưa lỗi/ chưa huỷ)
+        const rows = await db.all(
+            "SELECT job_id AS jobId FROM LipsSyncJob WHERE post_id = ? AND job_id IS NOT NULL AND status NOT IN ('done','error','cancelled')",
+            [postId]
+        );
+        const jobIds = rows.map(r => r.jobId).filter(Boolean);
+        let running = [];
+        // Best-effort: gọi server inference huỷ job đang chờ (không có cũng không sao)
+        try {
+            const r = await globalThis.fetch(`${LIPS_SYNC_BASE}/jobs/cancel`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ job_ids: jobIds }),
+            });
+            const data = await r.json().catch(() => ({}));
+            running = Array.isArray(data.running) ? data.running : [];
+        } catch (e) { console.warn('[lips-sync/stop] Không gọi được cancel :8010:', e.message); }
+        // Đánh dấu cancelled cho các job KHÔNG phải đang chạy (job đang chạy để nó chạy nốt)
+        const now = Date.now();
+        let cancelled = 0;
+        for (const jid of jobIds) {
+            if (running.includes(jid)) continue;
+            await db.run("UPDATE LipsSyncJob SET status = 'cancelled', updated_at = ? WHERE job_id = ?", [now, jid]);
+            cancelled++;
+        }
+        await db.close();
+        res.json({ ok: true, cancelled, running });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Tải lại kết quả lips_sync đã lưu của 1 post
 app.get('/api/lips-sync/saved/:postId', async (req, res) => {
     try {
@@ -2293,10 +2504,387 @@ app.get('/api/crawl-status/stream', (req, res) => {
     req.on('close', () => sseClients.delete(res));
 });
 
+// Gửi thông báo Slack (Incoming Webhook). Không có SLACK_WEBHOOK_URL → im lặng bỏ qua.
+const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || '';
+async function postSlack(text) {
+    if (!SLACK_WEBHOOK_URL) return;
+    try {
+        await globalThis.fetch(SLACK_WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+    } catch (e) { console.error('[slack] gửi lỗi:', e.message); }
+}
+
+// Bắn Slack "crawl xong" cho 1 project (tra tên bài cho đẹp). Dùng chung: notify endpoint + crawl-all.
+async function announceSlack(postTitle) {
+    let name = postTitle;
+    try {
+        const db = await getDb();
+        const post = await db.get('SELECT COALESCE(title, project_id) AS title FROM Post WHERE project_id = ? OR title = ? ORDER BY id DESC LIMIT 1', [postTitle, postTitle]);
+        await db.close();
+        if (post?.title) name = post.title;
+    } catch {}
+    const url = `http://${getLanIp()}:${PORT}`;
+    await postSlack(`✅ Dự án đã crawl xong: *${name}* (\`${postTitle}\`)\n🔗 Mở (cùng mạng LAN): ${url}`);
+}
+
 app.post('/api/crawl-status/notify', (req, res) => {
     const { postTitle, status } = req.body;
     pushCrawlStatus(postTitle, status);
+    // status === null = pipeline crawl XONG → bắn Slack
+    if (status === null || status === 'done') announceSlack(postTitle);
     res.json({ success: true });
 });
+
+// ============================================================
+// GOOGLE SHEET → tự tạo dự án naze/drama (poll mỗi 2 phút, KHÔNG cần bấm tay)
+// Tab 'naze_drama'. Cột: Trạng thái | genre | topic | targetLang | projectId | tweetUrls
+//                        | speakerUuid | voiceContentType | dictionaryUuids | lipsVideo | lipsGuidance | note
+// Dòng QUEUE/trống → PROCESSING → tạo project (+auto voice nếu có speakerUuid) → DONE/ERROR.
+// (Địa chính trị khác nhiều → làm sau, dùng tab riêng.)
+// ============================================================
+const SHEET_ID = process.env.NAZE_SHEET_ID || '1K596bCoqZcNx0hvZbJitwHhIYTANpgsI8KqrWsvkRSs';
+const SHEET_TAB = 'naze_drama';
+// Header TIẾNG VIỆT (thân thiện). Poller map giá trị tiếng Việt → nội bộ.
+const SHEET_COL = {
+    status: 'Trạng thái', genre: 'Thể loại', topic: 'Chủ đề / Nội dung', lang: 'Ngôn ngữ đích',
+    projectId: 'Mã dự án', tweets: 'Link tweet (drama)',
+    voiceOn: 'Tạo giọng đọc?', speaker: 'Giọng đọc', voiceType: 'Loại giọng', dict: 'Từ điển',
+    lipsOn: 'Lips sync?', lipsVideo: 'Video khuôn mặt (lips)', lipsGuidance: 'Độ mạnh lips',
+    srtSrc: 'File SRT (nguồn)', srtTgt: 'File SRT (đích)', note: 'Ghi chú',
+};
+const SHEET_HEADERS = [SHEET_COL.status, SHEET_COL.genre, SHEET_COL.topic, SHEET_COL.lang, SHEET_COL.projectId, SHEET_COL.tweets,
+    SHEET_COL.voiceOn, SHEET_COL.speaker, SHEET_COL.voiceType, SHEET_COL.dict,
+    SHEET_COL.lipsOn, SHEET_COL.lipsVideo, SHEET_COL.lipsGuidance,
+    SHEET_COL.srtSrc, SHEET_COL.srtTgt, SHEET_COL.note];
+const SHEET_POLL_MS = 2 * 60 * 1000;
+const MAX_SHEET_JOBS = 2;   // số project tạo đồng thời tối đa từ sheet
+const SHEET_FILE_DIR = process.env.SHEET_FILE_DIR || '/home/gux/Downloads';   // thư mục quét file mp4/srt cho dropdown
+const SHEET_SPEAKER_LANGS = (process.env.SHEET_SPEAKER_LANGS || 'vi,ja').split(',').map(s => s.trim()).filter(Boolean);   // ngôn ngữ giọng đọc cho dropdown
+let sheetSpeakerMap = {};   // TÊN giọng → UUID (đa ngôn ngữ), build khi refresh dropdown
+
+// --- Map giá trị tiếng Việt (dropdown) → giá trị nội bộ ---
+const SHEET_LANG_MAP = { 'tiếng việt': 'vi', 'việt': 'vi', 'tiếng anh': 'en', 'anh': 'en', 'tiếng nhật': 'ja', 'nhật': 'ja', 'tiếng hàn': 'ko', 'hàn': 'ko', 'tiếng trung': 'zh', 'trung': 'zh', 'tiếng pháp': 'fr', 'pháp': 'fr', 'tiếng tây ban nha': 'es', 'tây ban nha': 'es' };
+function sheetMapLang(v) { const t = (v || '').trim(); if (!t) return 'vi'; return SHEET_LANG_MAP[t.toLowerCase()] || t; }
+function sheetMapGenre(v) { const t = (v || '').trim().toLowerCase(); if (t.includes('drama')) return 'drama'; if (t.includes('naze') || t.includes('tại sao') || t.includes('tai sao')) return 'naze'; return t; }
+function sheetMapContentType(v) { const t = (v || '').trim().toLowerCase(); if (!t) return 'content'; if (t.includes('việt') || t.includes('viet') || t === 'content_vi') return 'content_vi'; return 'content'; }
+// Placeholder dropdown '(không dùng...)' đều bắt đầu bằng '(' → chỉ strip đúng placeholder, không đụng path/tên thật.
+function sheetCleanLips(v) { const t = (v || '').trim(); return (!t || t.startsWith('(')) ? '' : t; }
+function sheetIsYes(v) { return ['có', 'co', 'yes', 'x', 'true', '1', 'on'].includes((v || '').trim().toLowerCase()); }
+// "Giọng đọc" là TÊN giọng (dropdown) → tra UUID theo ngôn ngữ; nếu đã là UUID thì giữ nguyên; '(không...)'/trống = không voice
+async function sheetResolveSpeaker(v, lang) {
+    const t = (v || '').trim();
+    if (!t || t.startsWith('(')) return '';
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/i.test(t)) return t;   // đã là UUID
+    if (sheetSpeakerMap[t]) return sheetSpeakerMap[t];                 // map đa ngôn ngữ (build khi refresh)
+    try { const r = await getReferenceSpeakers(lang); const m = (r?.data || []).find(s => (s.speaker_name || '').trim() === t); return m ? m.uuid : ''; }
+    catch { return ''; }
+}
+
+let sheetAuth = null;
+try {
+    const creds = JSON.parse(fs.readFileSync(path.join(__dirname, 'google_sheet.json'), 'utf8'));
+    sheetAuth = new JWT({ email: creds.client_email, key: creds.private_key, scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
+} catch (e) { console.warn('[naze-sheet] Không đọc được google_sheet.json → tắt sync sheet:', e.message); }
+
+let sheetTickRunning = false;
+let activeSheetJobs = 0;
+
+// Tạo project naze/drama + chờ pipeline xong rồi orchestrate auto voice. Trả về true nếu thành công.
+// srt = { src, tgt } → chạy chế độ --srt (import phụ đề, không cần GPT sinh nội dung).
+function createNazeProjectAndWait({ topic, projectId, targetLang, genre, tweetUrls, voice, srt }) {
+    return new Promise((resolve) => {
+        try {
+            const targetDir = path.join(MEDIA_DIR, projectId);
+            if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+            if (voice && voice.speakerUuid) {
+                writeVoiceAutoConfig(projectId, { speakerUuid: voice.speakerUuid, contentType: voice.contentType, dictionaryUuids: voice.dictionaryUuids, lips: voice.lips });
+            }
+            let args;
+            if (srt && srt.src) {
+                // naze_content.js --srt <src> <projectId> [<srtĐích>] <lang>
+                args = ['naze_content.js', '--srt', srt.src, projectId];
+                if (srt.tgt) args.push(srt.tgt);
+                args.push(targetLang || 'vi');
+            } else {
+                args = ['naze_content.js', topic.trim(), projectId, targetLang || 'vi', genre === 'drama' ? 'drama' : 'naze'];
+            }
+            const env = { ...process.env };
+            if (genre === 'drama' && tweetUrls) env.NAZE_TWEET_URLS = tweetUrls;
+            const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'], env });
+            child.stdout.on('data', d => process.stdout.write(`[naze-sheet] ${d}`));
+            child.stderr.on('data', d => process.stderr.write(`[naze-sheet] ${d}`));
+            child.on('exit', async (code) => {
+                if (code !== 0) return resolve(false);
+                try { await orchestrateAutoVoice(projectId); } catch (e) { console.error('[naze-sheet] orchestrate lỗi:', e.message); }
+                resolve(true);
+            });
+            child.on('error', (e) => { console.error('[naze-sheet] spawn lỗi:', e.message); resolve(false); });
+        } catch (e) { console.error('[naze-sheet] createNaze lỗi:', e.message); resolve(false); }
+    });
+}
+
+// Cập nhật trạng thái 1 dòng theo projectId (reload sheet để tránh row cũ lệch index sau vài phút)
+async function setSheetRowStatus(projectId, status, note) {
+    try {
+        const doc = new GoogleSpreadsheet(SHEET_ID, sheetAuth);
+        await doc.loadInfo();
+        const sheet = doc.sheetsByTitle[SHEET_TAB];
+        if (!sheet) return;
+        const rows = await sheet.getRows();
+        const row = rows.find(r => (r.get(SHEET_COL.projectId) || '').trim() === projectId);
+        if (!row) return;
+        row.set(SHEET_COL.status, status);
+        if (note !== undefined) row.set(SHEET_COL.note, note);
+        await row.save();
+    } catch (e) { console.error('[naze-sheet] update status lỗi:', e.message); }
+}
+
+// Làm mới dropdown (giọng đọc / video mp4 / file srt) cho CẢ tab naze lẫn geo — chỉ gọi API khi danh sách đổi.
+let lastDropdownSig = '';
+async function refreshSheetDropdowns(doc) {
+    try {
+        const scan = (ext) => { try { return fs.readdirSync(SHEET_FILE_DIR).filter(f => f.toLowerCase().endsWith(ext)).sort().slice(0, 50).map(f => path.join(SHEET_FILE_DIR, f)); } catch { return []; } };
+        const mp4s = scan('.mp4');
+        const srts = scan('.srt');
+        // Giọng đọc đa ngôn ngữ (mặc định vi + ja) → tên duy nhất + map tên→UUID
+        const speakers = [];
+        const map = {};
+        for (const lg of SHEET_SPEAKER_LANGS) {
+            try {
+                const r = await getReferenceSpeakers(lg);
+                for (const s of (r?.data || [])) {
+                    const nm = (s.speaker_name || '').trim();
+                    if (nm && !map[nm]) { map[nm] = s.uuid; speakers.push(nm); }
+                }
+            } catch {}
+        }
+        if (speakers.length) sheetSpeakerMap = map;          // cập nhật map khi lấy được (kể cả khi sig chưa đổi)
+        const sig = JSON.stringify({ mp4s, srts, speakers });
+        if (sig === lastDropdownSig) return;                 // không đổi → khỏi gọi API
+        const dv = (sheetId, col, values) => ({ setDataValidation: {
+            range: { sheetId, startRowIndex: 1, endRowIndex: 1000, startColumnIndex: col, endColumnIndex: col + 1 },
+            rule: { condition: { type: 'ONE_OF_LIST', values: values.map(v => ({ userEnteredValue: String(v) })) }, strict: false, showCustomUi: true },
+        } });
+        const requests = [];
+        // Tab naze — cột 0-index: speaker=7, lipsVideo=11, srtSrc=13, srtTgt=14
+        const nz = doc.sheetsByTitle[SHEET_TAB];
+        if (nz) {
+            requests.push(dv(nz.sheetId, 11, [...mp4s, '(không dùng lips)']), dv(nz.sheetId, 13, [...srts, '(không dùng SRT)']), dv(nz.sheetId, 14, [...srts, '(không dùng SRT)']));
+            if (speakers.length) requests.push(dv(nz.sheetId, 7, [...speakers, '(không tạo voice)']));
+        }
+        // Tab geo — cột 0-index: speaker=4, lipsVideo=8
+        const geo = doc.sheetsByTitle[GEO_SHEET_TAB];
+        if (geo) {
+            requests.push(dv(geo.sheetId, 8, [...mp4s, '(không dùng lips)']));
+            if (speakers.length) requests.push(dv(geo.sheetId, 4, [...speakers, '(không tạo voice)']));
+        }
+        if (!requests.length) return;
+        await sheetAuth.request({ url: `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, method: 'POST', data: { requests } });
+        lastDropdownSig = sig;
+        console.log(`[sheet] Cập nhật dropdown (naze+geo) theo ${SHEET_FILE_DIR}: ${mp4s.length} mp4, ${srts.length} srt, ${speakers.length} giọng.`);
+    } catch (e) { console.error('[sheet] refresh dropdown lỗi:', e.message); }
+}
+
+async function sheetPollTick() {
+    if (!sheetAuth || sheetTickRunning) return;
+    sheetTickRunning = true;
+    try {
+        const doc = new GoogleSpreadsheet(SHEET_ID, sheetAuth);
+        await doc.loadInfo();
+        let sheet = doc.sheetsByTitle[SHEET_TAB];
+        if (!sheet) {
+            sheet = await doc.addSheet({ title: SHEET_TAB, headerValues: SHEET_HEADERS });
+            console.log(`[naze-sheet] Đã tạo tab '${SHEET_TAB}' — điền dữ liệu để tự tạo dự án.`);
+        }
+        await refreshSheetDropdowns(doc);                    // đồng bộ dropdown (naze+geo) với file hiện có mỗi nhịp
+        const rows = await sheet.getRows();
+        for (const row of rows) {
+            if (activeSheetJobs >= MAX_SHEET_JOBS) break;
+            const status = (row.get(SHEET_COL.status) || '').trim().toUpperCase();
+            if (status && status !== 'QUEUE') continue;          // chỉ xử lý trống hoặc QUEUE (MẪU/DONE/... bỏ qua)
+            const topic = (row.get(SHEET_COL.topic) || '').trim();
+            const srtSrc = sheetCleanLips(row.get(SHEET_COL.srtSrc));   // dùng chung cleaner ('(không...)'/trống → '')
+            const srtTgt = sheetCleanLips(row.get(SHEET_COL.srtTgt));
+            const isSrt = !!srtSrc;
+            if (!isSrt && !topic) continue;                       // dòng trống thật → bỏ qua (cần topic HOẶC file SRT)
+            // SRT là luồng naze (import phụ đề). Chỉ validate genre cho luồng thường.
+            let genre = 'naze';
+            if (!isSrt) {
+                genre = sheetMapGenre(row.get(SHEET_COL.genre));
+                if (genre !== 'naze' && genre !== 'drama') {
+                    row.set(SHEET_COL.status, 'ERROR'); row.set(SHEET_COL.note, "Thể loại phải là 'Tại sao' hoặc 'Drama'"); await row.save(); continue;
+                }
+            } else if (!fs.existsSync(srtSrc)) {
+                row.set(SHEET_COL.status, 'ERROR'); row.set(SHEET_COL.note, 'File SRT (nguồn) không tồn tại: ' + srtSrc); await row.save(); continue;
+            }
+            const projectId = (row.get(SHEET_COL.projectId) || '').trim() || ('naze_' + Date.now());
+            const targetLang = sheetMapLang(row.get(SHEET_COL.lang));
+            const tweetUrls = (row.get(SHEET_COL.tweets) || '').trim();
+            // Giọng đọc & Lips sync là TUỲ CHỌN Có/Không — chỉ khi 'Có' mới đọc giá trị.
+            const voiceOn = sheetIsYes(row.get(SHEET_COL.voiceOn));
+            const lipsOn = sheetIsYes(row.get(SHEET_COL.lipsOn));
+            const errRow = async (msg) => { row.set(SHEET_COL.status, 'ERROR'); row.set(SHEET_COL.note, msg); await row.save(); };
+            let voice = null;
+            if (voiceOn) {
+                const speakerUuid = await sheetResolveSpeaker(row.get(SHEET_COL.speaker), targetLang);
+                if (!speakerUuid) { await errRow('Đã chọn Tạo giọng đọc = Có nhưng chưa chọn Giọng đọc hợp lệ'); continue; }
+                const voiceContentType = sheetMapContentType(row.get(SHEET_COL.voiceType));
+                const dictionaryUuids = (row.get(SHEET_COL.dict) || '').split(',').map(s => s.trim()).filter(Boolean);
+                let lips = null;
+                if (lipsOn) {
+                    if (voiceContentType !== 'content') { await errRow('Lips sync chỉ chạy khi Loại giọng = Target (ngôn ngữ đích)'); continue; }
+                    const lipsVideo = sheetCleanLips(row.get(SHEET_COL.lipsVideo));
+                    if (!lipsVideo) { await errRow('Đã chọn Lips sync = Có nhưng chưa chọn Video khuôn mặt'); continue; }
+                    lips = { video: lipsVideo, guidanceScale: parseFloat(row.get(SHEET_COL.lipsGuidance)) || 2.2 };
+                }
+                voice = { speakerUuid, contentType: voiceContentType, dictionaryUuids, lips };
+            } else if (lipsOn) {
+                await errRow('Muốn Lips sync thì phải bật Tạo giọng đọc = Có'); continue;
+            }
+            // Đánh dấu đang triển khai + ghi projectId NGAY (để tick sau bỏ qua + tra cứu khi xong)
+            row.set(SHEET_COL.projectId, projectId);
+            row.set(SHEET_COL.status, 'PROCESSING');
+            row.set(SHEET_COL.note, '');
+            await row.save();
+            console.log(`[naze-sheet] ▶ Tạo ${isSrt ? 'SRT' : genre} '${projectId}': ${isSrt ? srtSrc : topic.slice(0, 50)}`);
+            activeSheetJobs++;
+            createNazeProjectAndWait({ topic, projectId, targetLang, genre, tweetUrls, voice, srt: isSrt ? { src: srtSrc, tgt: srtTgt } : null })
+                .then(ok => setSheetRowStatus(projectId, ok ? 'DONE' : 'ERROR', ok ? '' : 'Pipeline lỗi (xem log server)'))
+                .catch(() => setSheetRowStatus(projectId, 'ERROR', 'Lỗi không xác định'))
+                .finally(() => { activeSheetJobs--; });
+        }
+    } catch (e) { console.error('[naze-sheet] poll lỗi:', e.message); }
+    finally { sheetTickRunning = false; }
+}
+
+if (sheetAuth && process.env.NAZE_SHEET_SYNC !== 'off') {
+    setInterval(sheetPollTick, SHEET_POLL_MS);
+    sheetPollTick();
+    console.log(`[naze-sheet] Bật đồng bộ Google Sheet tab '${SHEET_TAB}' mỗi ${SHEET_POLL_MS / 1000}s (tắt: NAZE_SHEET_SYNC=off).`);
+}
+
+// ============================================================
+// GOOGLE SHEET → monitor ĐỊA CHÍNH TRỊ (poll mỗi 2 phút)
+// Tab 'dia_chinh_tri'. Mỗi dòng = 1 chủ đề theo dõi liên tục (KHÔNG đánh DONE).
+// Cột: Chủ đề | Nguồn | Bật? | Lần chạy gần nhất | Tin mới lần gần nhất | Tổng tin đã lấy | Ghi chú
+// Mỗi lần: crawl Google News RSS Nhật (gl=JP,hl=ja) when:1d, LỌC tin đã xử lý (rss_seen/<hash>.json),
+// nếu có tin MỚI → xào 1 project (proj_<ts>) qua process_content.js; không có tin mới → bỏ qua.
+// ============================================================
+const GEO_SHEET_TAB = 'dia_chinh_tri';
+const GEO_COL = { topic: 'Chủ đề', sources: 'Nguồn', on: 'Bật?', lastRun: 'Lần chạy gần nhất', lastNew: 'Tin mới lần gần nhất', total: 'Tổng tin đã lấy', note: 'Ghi chú' };
+// Cột voice/lips DÙNG CHUNG header với tab naze (SHEET_COL) → tái dùng helper map/validate.
+const GEO_SHEET_HEADERS = [GEO_COL.topic, GEO_COL.sources, GEO_COL.on,
+    SHEET_COL.voiceOn, SHEET_COL.speaker, SHEET_COL.voiceType, SHEET_COL.dict,
+    SHEET_COL.lipsOn, SHEET_COL.lipsVideo, SHEET_COL.lipsGuidance,
+    GEO_COL.lastRun, GEO_COL.lastNew, GEO_COL.total, GEO_COL.note];
+const GEO_POLL_MS = 2 * 60 * 1000;
+const MAX_GEO_JOBS = 1;                            // geo nặng (RSS+FlareSolverr+GPT-5) → chạy 1 lúc
+const GEO_SEEN_DIR = path.join(__dirname, 'rss_seen');
+let geoTickRunning = false;
+let activeGeoJobs = 0;
+const geoRunning = new Set();                      // key chủ đề đang chạy (chống chồng khi run > 2 phút)
+const geoSeenPath = (topic) => path.join(GEO_SEEN_DIR, crypto.createHash('md5').update(topic).digest('hex').slice(0, 12) + '.json');
+const nowVN = () => new Date().toLocaleString('vi-VN');
+
+// Chạy 1 lần monitor cho 1 chủ đề: spawn process_content.js (JP RSS, when:1d, dedup theo seenFile). Trả {code,new,projectId}.
+function runGeoMonitor({ topic, sources, voice }) {
+    return new Promise((resolve) => {
+        try {
+            const projectId = 'proj_' + Date.now();   // process_content.js tự tạo thư mục project khi saveToDb (chỉ khi có tin mới)
+            const args = ['process_content.js', '--projectId', projectId,
+                '--keywords', JSON.stringify([topic]), '--sources', JSON.stringify(sources),
+                '--country', 'JP', '--clang', 'ja', '--targetLang', 'vi',
+                '--days', '1', '--content', topic, '--seenFile', geoSeenPath(topic)];
+            let out = '';
+            const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+            child.stdout.on('data', d => { out += d.toString(); process.stdout.write(`[geo-sheet] ${d}`); });
+            child.stderr.on('data', d => process.stderr.write(`[geo-sheet] ${d}`));
+            child.on('exit', (code) => {
+                let res = { new: 0, projectId: null };
+                const m = out.match(/\[geo-result\]\s*(\{.*\})/);
+                if (m) { try { res = JSON.parse(m[1]); } catch {} }
+                // Có tin mới (project vừa tạo) + bật voice → gen voice (+lips) như tab naze
+                if (code === 0 && voice && voice.speakerUuid) {
+                    try { writeVoiceAutoConfig(projectId, voice); } catch (e) { console.error('[geo-sheet] writeVoiceAutoConfig lỗi:', e.message); }
+                    orchestrateAutoVoice(projectId).catch(e => console.error('[geo-sheet] orchestrate lỗi:', e.message));
+                }
+                resolve({ code, ...res });
+            });
+            child.on('error', (e) => { console.error('[geo-sheet] spawn lỗi:', e.message); resolve({ code: 1, new: 0, projectId: null }); });
+        } catch (e) { console.error('[geo-sheet] run lỗi:', e.message); resolve({ code: 1, new: 0, projectId: null }); }
+    });
+}
+
+// Cập nhật 1 dòng geo theo Chủ đề (reload để tránh row cũ lệch index)
+async function setGeoRow(topic, fields) {
+    try {
+        const doc = new GoogleSpreadsheet(SHEET_ID, sheetAuth);
+        await doc.loadInfo();
+        const sheet = doc.sheetsByTitle[GEO_SHEET_TAB];
+        if (!sheet) return;
+        const rows = await sheet.getRows();
+        const row = rows.find(r => (r.get(GEO_COL.topic) || '').trim() === topic);
+        if (!row) return;
+        for (const [k, v] of Object.entries(fields)) row.set(k, v);
+        await row.save();
+    } catch (e) { console.error('[geo-sheet] update row lỗi:', e.message); }
+}
+
+async function geoSheetTick() {
+    if (!sheetAuth || geoTickRunning) return;
+    geoTickRunning = true;
+    try {
+        const doc = new GoogleSpreadsheet(SHEET_ID, sheetAuth);
+        await doc.loadInfo();
+        const sheet = doc.sheetsByTitle[GEO_SHEET_TAB];
+        if (!sheet) { await doc.addSheet({ title: GEO_SHEET_TAB, headerValues: GEO_SHEET_HEADERS }); console.log(`[geo-sheet] Đã tạo tab '${GEO_SHEET_TAB}'.`); return; }
+        const rows = await sheet.getRows();
+        for (const row of rows) {
+            if (activeGeoJobs >= MAX_GEO_JOBS) break;
+            const topic = (row.get(GEO_COL.topic) || '').trim();
+            if (!topic) continue;
+            const on = (row.get(GEO_COL.on) || '').trim().toLowerCase();
+            if (['không', 'khong', 'no', 'off', 'tắt', 'tat'].includes(on)) continue;   // tạm dừng (trống = bật)
+            const key = geoSeenPath(topic);
+            if (geoRunning.has(key)) continue;                                           // đang chạy dở → bỏ qua nhịp này
+            // Nhiều nguồn: mỗi nguồn 1 dòng (hoặc phẩy). Bỏ http/path/www → domain thuần cho site: filter.
+            const sources = (row.get(GEO_COL.sources) || '').split(/[\n,]/).map(s => s.trim().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '')).filter(Boolean);
+            const prevTotal = parseInt(row.get(GEO_COL.total)) || 0;
+            // Voice + lips (tuỳ chọn, giống tab naze). Bật voice mà chưa chọn giọng hợp lệ → vẫn crawl, chỉ bỏ voice.
+            let voice = null;
+            if (sheetIsYes(row.get(SHEET_COL.voiceOn))) {
+                const speakerUuid = await sheetResolveSpeaker(row.get(SHEET_COL.speaker), 'vi');
+                if (speakerUuid) {
+                    const voiceContentType = sheetMapContentType(row.get(SHEET_COL.voiceType));
+                    const dictionaryUuids = (row.get(SHEET_COL.dict) || '').split(',').map(s => s.trim()).filter(Boolean);
+                    let lips = null;
+                    if (sheetIsYes(row.get(SHEET_COL.lipsOn)) && voiceContentType === 'content') {
+                        const lipsVideo = sheetCleanLips(row.get(SHEET_COL.lipsVideo));
+                        if (lipsVideo) lips = { video: lipsVideo, guidanceScale: parseFloat(row.get(SHEET_COL.lipsGuidance)) || 2.2 };
+                    }
+                    voice = { speakerUuid, contentType: voiceContentType, dictionaryUuids, lips };
+                } else {
+                    console.warn(`[geo-sheet] '${topic}': bật Tạo giọng đọc nhưng chưa chọn Giọng đọc hợp lệ → bỏ qua voice.`);
+                }
+            }
+            geoRunning.add(key); activeGeoJobs++;
+            setGeoRow(topic, { [GEO_COL.note]: '⏳ Đang crawl...', [GEO_COL.lastRun]: nowVN() });
+            console.log(`[geo-sheet] ▶ '${topic}' (nguồn: ${sources.join(',') || 'tất cả'}${voice ? ', +voice' + (voice.lips ? '+lips' : '') : ''})`);
+            runGeoMonitor({ topic, sources, voice })
+                .then(res => {
+                    if (res.code === 0) setGeoRow(topic, { [GEO_COL.lastRun]: nowVN(), [GEO_COL.lastNew]: res.new, [GEO_COL.total]: prevTotal + (res.new || 0), [GEO_COL.note]: `✅ ${res.new} tin mới → ${res.projectId || ''}` });
+                    else if (res.code === 2) setGeoRow(topic, { [GEO_COL.lastRun]: nowVN(), [GEO_COL.lastNew]: 0, [GEO_COL.note]: 'Không có tin mới' });
+                    else setGeoRow(topic, { [GEO_COL.lastRun]: nowVN(), [GEO_COL.note]: '❌ Lỗi (xem log server)' });
+                })
+                .finally(() => { geoRunning.delete(key); activeGeoJobs--; });
+        }
+    } catch (e) { console.error('[geo-sheet] poll lỗi:', e.message); }
+    finally { geoTickRunning = false; }
+}
+
+if (sheetAuth && process.env.GEO_SHEET_SYNC !== 'off') {
+    setInterval(geoSheetTick, GEO_POLL_MS);
+    geoSheetTick();
+    console.log(`[geo-sheet] Bật monitor Địa chính trị tab '${GEO_SHEET_TAB}' mỗi ${GEO_POLL_MS / 1000}s (RSS Nhật, when:1d).`);
+}
 
 app.listen(PORT, () => console.log(`🚀 http://localhost:${PORT}`));

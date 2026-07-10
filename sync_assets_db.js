@@ -114,6 +114,9 @@ const withTimeout = (promise, ms, name) => {
     return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
 };
 
+// Số việc crawl/tải chạy SONG SONG. Mặc định 1 = tuần tự (từng cái 1) — tránh nhiều Puppeteer đua nhau ("context destroyed").
+const CRAWL_CONC = Math.max(1, parseInt(process.env.CRAWL_CONCURRENCY || '1', 10) || 1);
+
 export async function runConcurrently(tasks, limit) {
     const results = [];
     const executing = new Set();
@@ -148,7 +151,7 @@ export async function fetchAndDownloadStock(keyword, type, targetDir, countPerSo
         } catch (e) { console.log(`      [${p.name}] Lỗi: ${e.message}`); return 0; }
     });
 
-    const results = await runConcurrently(tasks, 10);
+    const results = await runConcurrently(tasks, CRAWL_CONC);
     let total = 0;
     for (const r of results) if (r.status === 'fulfilled') total += (r.value || 0);
     console.log(`   -> [${type.toUpperCase()}] "${keyword}" xong: ${total} ${type}`);
@@ -251,7 +254,7 @@ async function main() {
                 }
             };
             const syncPromise = liveSyncSection();
-            await runConcurrently(mediaTasks, 4);
+            await runConcurrently(mediaTasks, CRAWL_CONC);
             downloading = false;
             await syncPromise;
             await syncAssetsToDB(db, vFolder, 'video', null, null, project_id, section, post_id, section);
@@ -304,7 +307,7 @@ async function main() {
                     }
                 };
                 const syncPromise = syncSection();
-                await runConcurrently(mediaTasks, 4);
+                await runConcurrently(mediaTasks, CRAWL_CONC);
                 downloading = false;
                 await syncPromise;
                 await syncAssetsToDB(db, vFolder, 'video', null, null, project_id, section, post_id, section);
@@ -353,7 +356,7 @@ async function main() {
                     }
                 };
                 const syncPromise = liveSyncTask();
-                await runConcurrently(mediaTasks, 4);
+                await runConcurrently(mediaTasks, CRAWL_CONC);
                 downloading = false;
                 await syncPromise;
 
