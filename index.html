@@ -4612,9 +4612,20 @@ createApp({
 
         // SSE: lắng nghe crawl status
         const sse = new EventSource('/api/crawl-status/stream');
+        // Nạp lại assets post đang mở, gộp nhiều cảnh dồn dập thành 1 lần (debounce) để đỡ giật
+        let sceneReloadTimer = null;
+        function scheduleSceneReload() {
+            if (sceneReloadTimer) return;
+            sceneReloadTimer = setTimeout(() => { sceneReloadTimer = null; reloadCurrentPost(); }, 600);
+        }
         sse.onmessage = (e) => {
-            const { postTitle, status } = JSON.parse(e.data);
+            const { postTitle, status, scene } = JSON.parse(e.data);
             const post = posts.value.find(p => p.title === postTitle || p.title.startsWith(postTitle + '_'));
+            // Crawl xong 1 CẢNH → hiện dần: nạp lại assets của post đang mở (không đổi trạng thái)
+            if (scene) {
+                if (post && activePostId.value === post.id) scheduleSceneReload();
+                return;
+            }
             if (post) {
                 post.status = status;
                 // Nếu status trống (tức là đã cào xong) thì reload lại một lần cuối cho chắc cốp

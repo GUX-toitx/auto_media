@@ -789,6 +789,7 @@ app.post('/api/crawl-all', async (req, res) => {
             }
             await syncDir(vF, 'video', (rel, t) => db.run('INSERT INTO Asset (post_id, section, type, file_path) VALUES (?, ?, ?, ?)', [postId, section, t, rel]));
             await syncDir(iF, 'image', (rel, t) => db.run('INSERT INTO Asset (post_id, section, type, file_path) VALUES (?, ?, ?, ?)', [postId, section, t, rel]));
+            pushCrawlScene(post.project_id);   // xong 1 section → hiện ngay
         }
 
         // Paragraphs
@@ -807,6 +808,7 @@ app.post('/api/crawl-all', async (req, res) => {
             }
             await syncDir(vF, 'video', (rel, t) => db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [para.id, t, rel]));
             await syncDir(iF, 'image', (rel, t) => db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [para.id, t, rel]));
+            pushCrawlScene(post.project_id);   // xong 1 đoạn → hiện ngay
         }
 
         await db.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]);
@@ -2134,19 +2136,21 @@ function readVoiceAutoConfig(rawProjectId) {
         return JSON.parse(fs.readFileSync(p, 'utf8'));
     } catch { return null; }
 }
-function writeVoiceAutoConfig(rawProjectId, { speakerUuid, contentType, dictionaryUuids, lips }) {
+function writeVoiceAutoConfig(rawProjectId, { speakerUuid, contentType, dictionaryUuids, lips, viSpeakerUuid }) {
     const p = voiceAutoConfigPath(rawProjectId);
     fs.mkdirSync(path.dirname(p), { recursive: true });
     const ct = contentType === 'content_vi' ? 'content_vi' : 'content';
     const cfg = {
         enabled: true,
-        speakerUuid: String(speakerUuid),
+        speakerUuid: String(speakerUuid || ''),
         contentType: ct,
         dictionaryUuids: Array.isArray(dictionaryUuids) ? dictionaryUuids : [],
         // lips chỉ áp dụng khi voice là ngôn ngữ đích (content)
         lips: (ct === 'content' && lips && lips.video)
             ? { enabled: true, video: String(lips.video), guidanceScale: Number.isFinite(Number(lips.guidanceScale)) ? Number(lips.guidanceScale) : 2.2 }
             : { enabled: false },
+        // Voice tiếng Việt phụ (tuỳ chọn) → tạo thêm content_vi bằng giọng này
+        viSpeakerUuid: viSpeakerUuid ? String(viSpeakerUuid) : '',
     };
     fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
     return cfg;
@@ -2173,23 +2177,41 @@ async function autoGenVoiceForPost(projectId, post, cfg) {
     // Idempotent: nếu post ĐÃ có voice (audio_uuid) → bỏ qua, tránh gen trùng khi nhiều trigger (content-ready + exit + crawl-all).
     try { const d0 = await getDb(); const cur = await d0.get('SELECT audio_uuid FROM Post WHERE id = ?', [post.id]); await d0.close(); if (cur && cur.audio_uuid) { console.log(`[auto-voice] post ${post.id} đã có voice → bỏ qua`); return; } } catch {}
     const projectDir = path.join(MEDIA_DIR, projectId);
-    const lang = post.target_lang || 'en';
-    const contentType = cfg.contentType || 'content';
-    console.log(`[auto-voice] Gen voice post ${post.id} (lang=${lang}, ct=${contentType})`);
-    const result = await generateAudios(projectDir, post.id, lang, cfg.speakerUuid, contentType, cfg.dictionaryUuids || [], null);
-    const db = await getDb();
-    await db.run('UPDATE Post SET audio_uuid = ?, voice_content_type = ? WHERE id = ?', [result.batch_uuid, contentType, post.id]);
-    await db.close();
-    await updateBatchStatus(result.batch_uuid);
-    const ok = await waitBatchDone(result.batch_uuid, post.id, contentType);
-    if (!ok) { console.warn('[auto-voice] Voice chưa xong, bỏ qua lips post', post.id); return; }
-    console.log(`[auto-voice] Voice xong post ${post.id}`);
-    // Lips sync: chỉ với target (content) + có cấu hình video khuôn mặt
-    if (contentType === 'content' && cfg.lips && cfg.lips.enabled && cfg.lips.video) {
+
+    // ===== 1) VOICE CHÍNH (nếu có speakerUuid) =====
+    const primaryCt = cfg.speakerUuid ? (cfg.contentType === 'content_vi' ? 'content_vi' : 'content') : null;
+    if (cfg.speakerUuid) {
+        const lang = primaryCt === 'content_vi' ? 'vi' : (post.target_lang || 'en');
+        console.log(`[auto-voice] Gen voice chính post ${post.id} (lang=${lang}, ct=${primaryCt})`);
+        const result = await generateAudios(projectDir, post.id, lang, cfg.speakerUuid, primaryCt, cfg.dictionaryUuids || [], null);
+        const db = await getDb();
+        await db.run('UPDATE Post SET audio_uuid = ?, voice_content_type = ? WHERE id = ?', [result.batch_uuid, primaryCt, post.id]);
+        await db.close();
+        await updateBatchStatus(result.batch_uuid);
+        const ok = await waitBatchDone(result.batch_uuid, post.id, primaryCt);
+        if (ok) {
+            console.log(`[auto-voice] Voice chính xong post ${post.id}`);
+            // Lips sync: chỉ với target (content) + có cấu hình video khuôn mặt
+            if (primaryCt === 'content' && cfg.lips && cfg.lips.enabled && cfg.lips.video) {
+                try {
+                    await runLipsSyncForPost({ postId: post.id, videoPath: cfg.lips.video, contentType: 'content', guidanceScale: cfg.lips.guidanceScale });
+                    console.log(`[auto-voice] Đã gửi job lips sync post ${post.id}`);
+                } catch (e) { console.error('[auto-voice] Lips sync lỗi post ' + post.id + ':', e.message); }
+            }
+        } else console.warn('[auto-voice] Voice chính chưa xong post', post.id);
+    }
+
+    // ===== 2) VOICE TIẾNG VIỆT PHỤ (tuỳ chọn) — chỉ khi voice chính KHÔNG phải content_vi (tránh trùng) =====
+    if (cfg.viSpeakerUuid && primaryCt !== 'content_vi') {
         try {
-            await runLipsSyncForPost({ postId: post.id, videoPath: cfg.lips.video, contentType: 'content', guidanceScale: cfg.lips.guidanceScale });
-            console.log(`[auto-voice] Đã gửi job lips sync post ${post.id}`);
-        } catch (e) { console.error('[auto-voice] Lips sync lỗi post ' + post.id + ':', e.message); }
+            console.log(`[auto-voice] Gen thêm voice tiếng Việt post ${post.id}`);
+            const rvi = await generateAudios(projectDir, post.id, 'vi', cfg.viSpeakerUuid, 'content_vi', [], null);
+            // Nếu KHÔNG có voice chính thì audio_uuid chưa được set → lưu theo VN để idempotent
+            if (!cfg.speakerUuid) { const db = await getDb(); await db.run('UPDATE Post SET audio_uuid = ?, voice_content_type = ? WHERE id = ?', [rvi.batch_uuid, 'content_vi', post.id]); await db.close(); }
+            await updateBatchStatus(rvi.batch_uuid);
+            const okVi = await waitBatchDone(rvi.batch_uuid, post.id, 'content_vi');
+            console.log(okVi ? `[auto-voice] Voice tiếng Việt xong post ${post.id}` : `[auto-voice] Voice tiếng Việt chưa xong post ${post.id}`);
+        } catch (e) { console.error('[auto-voice] Voice tiếng Việt lỗi post ' + post.id + ':', e.message); }
     }
 }
 
@@ -2485,11 +2507,92 @@ app.use(express.static(MEDIA_DIR, {
         res.setHeader('Accept-Ranges', 'bytes'); // Cho phép trình duyệt yêu cầu từng đoạn video để tua
     }
 }));
+
+// ============================================================
+// TRANG QUẢN LÝ FILE trong thư mục Downloads (SHEET_FILE_DIR)
+// Cho team thêm/xóa file SRT/MP4... từ xa, không cần chép tay vào máy.
+// ============================================================
+const MEDIA_UPLOAD_DIR = process.env.SHEET_FILE_DIR || '/home/gux/Downloads';
+// Chỉ cho phép các đuôi này (an toàn, tránh upload file thực thi)
+const MEDIA_UPLOAD_EXTS = new Set(['.srt', '.vtt', '.txt', '.mp4', '.mov', '.mkv', '.webm', '.mp3', '.wav', '.m4a', '.jpg', '.jpeg', '.png', '.webp']);
+// Tên file an toàn: chỉ lấy basename, chặn path traversal
+function safeMediaName(name) {
+    const base = path.basename(String(name || '')).replace(/[\\/]/g, '');
+    if (!base || base === '.' || base === '..') return null;
+    return base;
+}
+
+app.get('/media-upload', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.sendFile(path.join(__dirname, 'media-upload.html'));
+});
+
+// Liệt kê file trong thư mục Downloads (kèm size + thời gian sửa + danh sách đuôi)
+app.get('/api/media-files', (req, res) => {
+    try {
+        const entries = fs.readdirSync(MEDIA_UPLOAD_DIR, { withFileTypes: true });
+        const files = [];
+        const exts = new Set();
+        for (const e of entries) {
+            if (!e.isFile()) continue;
+            const ext = path.extname(e.name).toLowerCase();
+            let size = 0, mtime = 0;
+            try { const st = fs.statSync(path.join(MEDIA_UPLOAD_DIR, e.name)); size = st.size; mtime = st.mtimeMs; } catch {}
+            files.push({ name: e.name, ext: ext || '(khác)', size, mtime });
+            exts.add(ext || '(khác)');
+        }
+        files.sort((a, b) => b.mtime - a.mtime);   // mới nhất lên đầu
+        res.json({ dir: MEDIA_UPLOAD_DIR, files, exts: [...exts].sort() });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Upload 1 hoặc nhiều file vào Downloads (giữ nguyên tên gốc, tránh ghi đè bằng hậu tố _1, _2...)
+app.post('/api/media-files/upload', upload.array('files', 100), async (req, res) => {
+    try {
+        if (!req.files || !req.files.length) return res.status(400).json({ error: 'Không có file nào' });
+        const saved = [];
+        for (const file of req.files) {
+            const name = safeMediaName(file.originalname);
+            const ext = name ? path.extname(name).toLowerCase() : '';
+            if (!name || !MEDIA_UPLOAD_EXTS.has(ext)) { try { fs.unlinkSync(file.path); } catch {} continue; }
+            // Tránh ghi đè: nếu trùng tên thì thêm hậu tố
+            let dest = path.join(MEDIA_UPLOAD_DIR, name);
+            if (fs.existsSync(dest)) {
+                const stem = name.slice(0, name.length - ext.length);
+                let i = 1;
+                do { dest = path.join(MEDIA_UPLOAD_DIR, `${stem}_${i}${ext}`); i++; } while (fs.existsSync(dest));
+            }
+            fs.renameSync(file.path, dest);
+            saved.push(path.basename(dest));
+        }
+        res.json({ success: true, saved });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Xóa 1 file trong Downloads
+app.delete('/api/media-files', (req, res) => {
+    try {
+        const name = safeMediaName(req.query.name || (req.body && req.body.name));
+        if (!name) return res.status(400).json({ error: 'Tên file không hợp lệ' });
+        const target = path.join(MEDIA_UPLOAD_DIR, name);
+        if (!fs.existsSync(target)) return res.status(404).json({ error: 'File không tồn tại' });
+        fs.unlinkSync(target);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // SSE clients
 const sseClients = new Set();
 
 export function pushCrawlStatus(postTitle, status) {
     const data = JSON.stringify({ postTitle, status });
+    for (const client of sseClients) {
+        client.write(`data: ${data}\n\n`);
+    }
+}
+
+// Crawl xong 1 CẢNH (section/paragraph) → báo dashboard nạp lại assets để hiện DẦN, không đợi hết.
+export function pushCrawlScene(postTitle) {
+    const data = JSON.stringify({ postTitle, scene: true });
     for (const client of sseClients) {
         client.write(`data: ${data}\n\n`);
     }
@@ -2527,7 +2630,9 @@ async function announceSlack(postTitle) {
 }
 
 app.post('/api/crawl-status/notify', (req, res) => {
-    const { postTitle, status } = req.body;
+    const { postTitle, status, scene } = req.body;
+    // scene=true → crawl xong 1 cảnh, chỉ báo dashboard nạp lại assets (KHÔNG đổi status, KHÔNG Slack)
+    if (scene) { pushCrawlScene(postTitle); return res.json({ success: true }); }
     pushCrawlStatus(postTitle, status);
     // status === null = pipeline crawl XONG → bắn Slack
     if (status === null || status === 'done') announceSlack(postTitle);
@@ -2538,7 +2643,7 @@ app.post('/api/crawl-status/notify', (req, res) => {
 // GOOGLE SHEET → tự tạo dự án naze/drama (poll mỗi 2 phút, KHÔNG cần bấm tay)
 // Tab 'naze_drama'. Cột: Trạng thái | genre | topic | targetLang | projectId | tweetUrls
 //                        | speakerUuid | voiceContentType | dictionaryUuids | lipsVideo | lipsGuidance | note
-// Dòng QUEUE/trống → PROCESSING → tạo project (+auto voice nếu có speakerUuid) → DONE/ERROR.
+// Dòng QUEUE → PROCESSING → tạo project (+auto voice nếu có speakerUuid) → DONE/ERROR. (Ô trống bị bỏ qua.)
 // (Địa chính trị khác nhiều → làm sau, dùng tab riêng.)
 // ============================================================
 const SHEET_ID = process.env.NAZE_SHEET_ID || '1K596bCoqZcNx0hvZbJitwHhIYTANpgsI8KqrWsvkRSs';
@@ -2550,13 +2655,16 @@ const SHEET_COL = {
     voiceOn: 'Tạo giọng đọc?', speaker: 'Giọng đọc', voiceType: 'Loại giọng', dict: 'Từ điển',
     lipsOn: 'Lips sync?', lipsVideo: 'Video khuôn mặt (lips)', lipsGuidance: 'Độ mạnh lips',
     srtSrc: 'File SRT (nguồn)', srtTgt: 'File SRT (đích)', note: 'Ghi chú',
+    speakerVi: 'Giọng đọc (tiếng Việt)',   // TUỲ CHỌN: chọn → tạo thêm voice tiếng Việt (content_vi) song song voice chính
 };
+// speakerVi ĐẶT CUỐI để không xô lệch index dropdown các cột cũ (speaker=7, lipsVideo=11, srtSrc=13, srtTgt=14)
 const SHEET_HEADERS = [SHEET_COL.status, SHEET_COL.genre, SHEET_COL.topic, SHEET_COL.lang, SHEET_COL.projectId, SHEET_COL.tweets,
     SHEET_COL.voiceOn, SHEET_COL.speaker, SHEET_COL.voiceType, SHEET_COL.dict,
     SHEET_COL.lipsOn, SHEET_COL.lipsVideo, SHEET_COL.lipsGuidance,
-    SHEET_COL.srtSrc, SHEET_COL.srtTgt, SHEET_COL.note];
+    SHEET_COL.srtSrc, SHEET_COL.srtTgt, SHEET_COL.note, SHEET_COL.speakerVi];
+const SHEET_COL_SPEAKER_VI_IDX = SHEET_HEADERS.indexOf(SHEET_COL.speakerVi);   // 0-index cột giọng Việt (cho dropdown)
 const SHEET_POLL_MS = 2 * 60 * 1000;
-const MAX_SHEET_JOBS = 2;   // số project tạo đồng thời tối đa từ sheet
+const MAX_SHEET_JOBS = parseInt(process.env.MAX_SHEET_JOBS) || 1;   // số project naze/drama chạy đồng thời (mặc định 1 = tuần tự, từng dòng một)
 const SHEET_FILE_DIR = process.env.SHEET_FILE_DIR || '/home/gux/Downloads';   // thư mục quét file mp4/srt cho dropdown
 const SHEET_SPEAKER_LANGS = (process.env.SHEET_SPEAKER_LANGS || 'vi,ja').split(',').map(s => s.trim()).filter(Boolean);   // ngôn ngữ giọng đọc cho dropdown
 let sheetSpeakerMap = {};   // TÊN giọng → UUID (đa ngôn ngữ), build khi refresh dropdown
@@ -2595,8 +2703,8 @@ function createNazeProjectAndWait({ topic, projectId, targetLang, genre, tweetUr
         try {
             const targetDir = path.join(MEDIA_DIR, projectId);
             if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-            if (voice && voice.speakerUuid) {
-                writeVoiceAutoConfig(projectId, { speakerUuid: voice.speakerUuid, contentType: voice.contentType, dictionaryUuids: voice.dictionaryUuids, lips: voice.lips });
+            if (voice && (voice.speakerUuid || voice.viSpeakerUuid)) {
+                writeVoiceAutoConfig(projectId, { speakerUuid: voice.speakerUuid, contentType: voice.contentType, dictionaryUuids: voice.dictionaryUuids, lips: voice.lips, viSpeakerUuid: voice.viSpeakerUuid });
             }
             let args;
             if (srt && srt.src) {
@@ -2647,6 +2755,7 @@ async function refreshSheetDropdowns(doc) {
         const srts = scan('.srt');
         // Giọng đọc đa ngôn ngữ (mặc định vi + ja) → tên duy nhất + map tên→UUID
         const speakers = [];
+        const viSpeakers = [];   // riêng giọng tiếng Việt cho cột 'Giọng đọc (tiếng Việt)'
         const map = {};
         for (const lg of SHEET_SPEAKER_LANGS) {
             try {
@@ -2654,11 +2763,12 @@ async function refreshSheetDropdowns(doc) {
                 for (const s of (r?.data || [])) {
                     const nm = (s.speaker_name || '').trim();
                     if (nm && !map[nm]) { map[nm] = s.uuid; speakers.push(nm); }
+                    if (lg === 'vi' && nm && !viSpeakers.includes(nm)) viSpeakers.push(nm);
                 }
             } catch {}
         }
         if (speakers.length) sheetSpeakerMap = map;          // cập nhật map khi lấy được (kể cả khi sig chưa đổi)
-        const sig = JSON.stringify({ mp4s, srts, speakers });
+        const sig = JSON.stringify({ mp4s, srts, speakers, viSpeakers });
         if (sig === lastDropdownSig) return;                 // không đổi → khỏi gọi API
         const dv = (sheetId, col, values) => ({ setDataValidation: {
             range: { sheetId, startRowIndex: 1, endRowIndex: 1000, startColumnIndex: col, endColumnIndex: col + 1 },
@@ -2670,6 +2780,7 @@ async function refreshSheetDropdowns(doc) {
         if (nz) {
             requests.push(dv(nz.sheetId, 11, [...mp4s, '(không dùng lips)']), dv(nz.sheetId, 13, [...srts, '(không dùng SRT)']), dv(nz.sheetId, 14, [...srts, '(không dùng SRT)']));
             if (speakers.length) requests.push(dv(nz.sheetId, 7, [...speakers, '(không tạo voice)']));
+            if (viSpeakers.length && SHEET_COL_SPEAKER_VI_IDX >= 0) requests.push(dv(nz.sheetId, SHEET_COL_SPEAKER_VI_IDX, [...viSpeakers, '(không tạo voice VN)']));
         }
         // Tab geo — cột 0-index: speaker=4, lipsVideo=8
         const geo = doc.sheetsByTitle[GEO_SHEET_TAB];
@@ -2695,12 +2806,20 @@ async function sheetPollTick() {
             sheet = await doc.addSheet({ title: SHEET_TAB, headerValues: SHEET_HEADERS });
             console.log(`[naze-sheet] Đã tạo tab '${SHEET_TAB}' — điền dữ liệu để tự tạo dự án.`);
         }
+        // Tab cũ chưa có cột 'Giọng đọc (tiếng Việt)' → thêm header (append cuối, không đụng dữ liệu cột cũ)
+        try {
+            await sheet.loadHeaderRow();
+            if (!sheet.headerValues.includes(SHEET_COL.speakerVi)) {
+                await sheet.setHeaderRow(SHEET_HEADERS);
+                console.log(`[naze-sheet] Đã thêm cột '${SHEET_COL.speakerVi}' vào tab '${SHEET_TAB}'.`);
+            }
+        } catch (e) { console.error('[naze-sheet] ensure header lỗi:', e.message); }
         await refreshSheetDropdowns(doc);                    // đồng bộ dropdown (naze+geo) với file hiện có mỗi nhịp
         const rows = await sheet.getRows();
         for (const row of rows) {
             if (activeSheetJobs >= MAX_SHEET_JOBS) break;
             const status = (row.get(SHEET_COL.status) || '').trim().toUpperCase();
-            if (status && status !== 'QUEUE') continue;          // chỉ xử lý trống hoặc QUEUE (MẪU/DONE/... bỏ qua)
+            if (status !== 'QUEUE') continue;          // CHỈ xử lý đúng QUEUE (trống/MẪU/DONE/... bỏ qua)
             const topic = (row.get(SHEET_COL.topic) || '').trim();
             const srtSrc = sheetCleanLips(row.get(SHEET_COL.srtSrc));   // dùng chung cleaner ('(không...)'/trống → '')
             const srtTgt = sheetCleanLips(row.get(SHEET_COL.srtTgt));
@@ -2739,6 +2858,16 @@ async function sheetPollTick() {
                 voice = { speakerUuid, contentType: voiceContentType, dictionaryUuids, lips };
             } else if (lipsOn) {
                 await errRow('Muốn Lips sync thì phải bật Tạo giọng đọc = Có'); continue;
+            }
+            // Giọng đọc tiếng Việt (TUỲ CHỌN, ĐỘC LẬP với 'Tạo giọng đọc?') → tạo thêm 1 voice content_vi song song
+            const viRaw = (row.get(SHEET_COL.speakerVi) || '').trim();
+            if (viRaw && !viRaw.startsWith('(')) {
+                const viSpeakerUuid = await sheetResolveSpeaker(viRaw, 'vi');
+                if (!viSpeakerUuid) { await errRow('Đã chọn Giọng đọc (tiếng Việt) nhưng không hợp lệ'); continue; }
+                if (!(voice && voice.contentType === 'content_vi')) {   // voice chính đã là VN thì khỏi tạo trùng
+                    voice = voice || { speakerUuid: '', contentType: 'content', dictionaryUuids: [], lips: null };
+                    voice.viSpeakerUuid = viSpeakerUuid;
+                }
             }
             // Đánh dấu đang triển khai + ghi projectId NGAY (để tick sau bỏ qua + tra cứu khi xong)
             row.set(SHEET_COL.projectId, projectId);
@@ -2790,8 +2919,11 @@ function runGeoMonitor({ topic, sources, voice }) {
     return new Promise((resolve) => {
         try {
             const projectId = 'proj_' + Date.now();   // process_content.js tự tạo thư mục project khi saveToDb (chỉ khi có tin mới)
+            // Ô 'Chủ đề' có thể chứa NHIỀU keyword (mỗi dòng / phẩy 1 keyword) → tách ra để search TỪNG cái,
+            // không dồn thành 1 query dài dính liền (dồn lại thì gần như 0 bài).
+            const geoKeywords = topic.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
             const args = ['process_content.js', '--projectId', projectId,
-                '--keywords', JSON.stringify([topic]), '--sources', JSON.stringify(sources),
+                '--keywords', JSON.stringify(geoKeywords.length ? geoKeywords : [topic]), '--sources', JSON.stringify(sources),
                 '--country', 'JP', '--clang', 'ja', '--targetLang', 'vi',
                 '--days', '1', '--content', topic, '--seenFile', geoSeenPath(topic)];
             let out = '';

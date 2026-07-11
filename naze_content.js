@@ -250,7 +250,7 @@ async function getKeywordsFromGPT(sentence) {
             messages: [
                 {
                     role: 'system',
-                    content: 'You are an image search expert. Given a science/educational sentence, return exactly 6 specific English image search queries for stock photo sites. Focus on visual concepts, nature, science diagrams, real phenomena. Return ONLY a raw JSON array. Example: ["ocean salt crystals closeup", "salt minerals underwater", "ocean water evaporation"]'
+                    content: 'You are an image search expert. Given a science/educational sentence, return exactly 6 specific Japanese image search queries for stock photo sites. Focus on visual concepts, nature, science diagrams, real phenomena. Write every query in Japanese. Return ONLY a raw JSON array. Example: ["海の塩の結晶 クローズアップ", "水中の塩の鉱物", "海水の蒸発"]'
                 },
                 { role: 'user', content: sentence }
             ],
@@ -638,6 +638,13 @@ except Exception as e:
                 console.log(`    [X] ${manifest.length} bài → block X (section='x')`);
             } catch (e) { console.error(`    [X] lỗi: ${e.message}`); }
         }
+
+        // Xong 1 đoạn → báo dashboard hiện ngay assets (crawl tới đâu hiện tới đó)
+        try {
+            const http = await import('http');
+            http.default.request({ hostname: 'localhost', port: process.env.PORT || 3000, path: '/api/crawl-status/notify', method: 'POST', headers: { 'Content-Type': 'application/json' } }, () => {})
+                .end(JSON.stringify({ postTitle: projectId, scene: true }));
+        } catch (_) {}
     }
 
     await db.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]);
