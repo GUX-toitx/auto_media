@@ -2617,7 +2617,8 @@ async function postSlack(text) {
 }
 
 // Bắn Slack "crawl xong" cho 1 project (tra tên bài cho đẹp). Dùng chung: notify endpoint + crawl-all.
-async function announceSlack(postTitle) {
+// missingScenes: mảng số cảnh không lấy được ảnh → cảnh báo để bấm crawl bù.
+async function announceSlack(postTitle, missingScenes) {
     let name = postTitle;
     try {
         const db = await getDb();
@@ -2626,16 +2627,19 @@ async function announceSlack(postTitle) {
         if (post?.title) name = post.title;
     } catch {}
     const url = `http://${getLanIp()}:${PORT}`;
-    await postSlack(`✅ Dự án đã crawl xong: *${name}* (\`${postTitle}\`)\n🔗 Mở (cùng mạng LAN): ${url}`);
+    const warn = (Array.isArray(missingScenes) && missingScenes.length)
+        ? `\n⚠️ ${missingScenes.length} cảnh thiếu ảnh: ${missingScenes.join(', ')} — nên bấm "crawl media" để cào bù.`
+        : '';
+    await postSlack(`✅ Dự án đã crawl xong: *${name}* (\`${postTitle}\`)${warn}\n🔗 Mở (cùng mạng LAN): ${url}`);
 }
 
 app.post('/api/crawl-status/notify', (req, res) => {
-    const { postTitle, status, scene } = req.body;
+    const { postTitle, status, scene, missingScenes } = req.body;
     // scene=true → crawl xong 1 cảnh, chỉ báo dashboard nạp lại assets (KHÔNG đổi status, KHÔNG Slack)
     if (scene) { pushCrawlScene(postTitle); return res.json({ success: true }); }
     pushCrawlStatus(postTitle, status);
-    // status === null = pipeline crawl XONG → bắn Slack
-    if (status === null || status === 'done') announceSlack(postTitle);
+    // status === null = pipeline crawl XONG → bắn Slack (kèm cảnh thiếu ảnh nếu có)
+    if (status === null || status === 'done') announceSlack(postTitle, missingScenes);
     res.json({ success: true });
 });
 

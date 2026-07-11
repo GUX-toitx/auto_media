@@ -13,6 +13,7 @@ import { fetchFromBellingcatBot } from './bellingcatCrawler.js';
 import { fetchFromApnewsBot } from './apnewsCrawler.js';
 import { fetchFromAlJazeeraBot } from './aljazeeraCrawler.js';
 import { fetchFromGoogleImageBot } from './googleImageCrawler.js';
+import { fetchFromBingImageBot } from './bingImageCrawler.js';
 import { claimNextStockPath } from './stockNaming.js';
 
 const MEDIA_DIR = process.env.MEDIA_DIR;
@@ -139,6 +140,7 @@ export async function fetchAndDownloadStock(keyword, type, targetDir, countPerSo
         { name: 'Storyblocks (Bot)', fetcher: fetchFromStoryblocksBot },
         { name: 'Pexels', fetcher: fetchFromPexels },
         { name: 'Google Image (Bot)', fetcher: fetchFromGoogleImageBot },
+        { name: 'Bing Image (Bot)', fetcher: fetchFromBingImageBot },
     ];
 
     console.log(`   -> [${type.toUpperCase()}] Tìm "${keyword}" | Mỗi nguồn: ${countPerSource}`);

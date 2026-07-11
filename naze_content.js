@@ -5,6 +5,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import { fetchFromStoryblocksBot } from './storyblocksCrawler.js';
 import { fetchFromGoogleImageBot } from './googleImageCrawler.js';
+import { crawlKeywordImageRotate } from './imageCrawlRotate.js';   // xen kẽ Bing/Google + thử nốt nguồn kia
 import { crawlX } from './x_crawler.js';
 import { fetchIPv4 as fetch } from './fetchIPv4.js';
 import { claimNextStockPath } from './stockNaming.js';
@@ -68,6 +69,25 @@ async function fetchImages(keyword, targetDir, count) {
         fetchFromGoogleImageBot(keyword, 'image', targetDir, count),
     ]);
     return results.reduce((sum, r) => sum + (r.status === 'fulfilled' ? (r.value || 0) : 0), 0);
+}
+
+// Đếm số keyword đã cào để XOAY VÒNG nguồn (idx chẵn: Bing trước; idx lẻ: Google trước) → cân tải, tránh 1 nguồn bị chặn cả loạt.
+let imgRotateIdx = 0;
+
+// Cào ảnh cho 1 keyword: xen kẽ Bing/Google (nguồn chính 0 thì thử nốt nguồn kia),
+// cả hai vẫn 0 → FALLBACK Pexels/Pixabay để cảnh không bị trống.
+async function crawlImagesForKeyword(kw, dir, count) {
+    let got = 0;
+    try { got = await crawlKeywordImageRotate(kw, dir, imgRotateIdx++, count); }
+    catch (e) { console.error(`      [${kw}] rotate img lỗi: ${e.message}`); }
+    if (got > 0) return got;
+    // Cả Bing lẫn Google đều 0 (bị chặn) → dùng nguồn dự phòng
+    console.log(`      [${kw}] Bing+Google 0 ảnh → fallback Pexels/Pixabay`);
+    let fb = 0;
+    try { fb += await fetchFromPexels(kw, dir, count); } catch (e) { console.error(`      [${kw}] Pexels lỗi: ${e.message}`); }
+    try { fb += await fetchFromPixabay(kw, dir, count); } catch (e) { console.error(`      [${kw}] Pixabay lỗi: ${e.message}`); }
+    console.log(`      [${kw}] fallback lấy ${fb} ảnh`);
+    return fb;
 }
 
 
@@ -533,6 +553,7 @@ except Exception as e:
     }
 
     // Crawl ảnh
+    const emptyScenes = [];   // cảnh không lấy được ảnh nào (kể cả sau retry + fallback) → báo khi xong
     for (const { index, text, paragraphId } of paragraphIds) {
         console.log(`\n[${index}/${paragraphIds.length}] "${text.slice(0, 60)}..."`);
         let keywords;
@@ -604,11 +625,15 @@ except Exception as e:
 
         // Chạy tuần tự TỪNG CÁI 1 (ảnh xong rồi video) — tránh nhiều Puppeteer/tải đua nhau
         for (const kw of keywords) {
-            await fetchFromGoogleImageBot(kw, 'image', imgDir, IMAGES_PER_KEYWORD).then(n => console.log(`      [${kw}] ${n} images`)).catch(e => console.error(`      [${kw}] img loi: ${e.message}`));
+            const n = await crawlImagesForKeyword(kw, imgDir, IMAGES_PER_KEYWORD);   // Google + retry + fallback
+            console.log(`      [${kw}] tổng ${n} ảnh`);
             await fetchFromStoryblocksBot(kw, 'video', vidDir, 4).then(n => console.log(`      [${kw}] ${n} videos`)).catch(() => {});
             await syncDir(imgDir, 'image', ['.jpg', '.jpeg', '.png', '.webp']);
             await syncDir(vidDir, 'video', ['.mp4', '.mov']);
         }
+        // Cảnh vẫn trống ảnh (Google chặn + fallback cũng tịt) → ghi nhận để báo lại
+        const imgLeft = readdirSync(imgDir).filter(f => ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(f).toLowerCase())).length;
+        if (imgLeft === 0) { emptyScenes.push(index); console.warn(`    ⚠️ Cảnh ${index} KHÔNG có ảnh nào sau retry + fallback`); }
 
         // ===== Cào X (Twitter) — CHỈ genre drama, chạy 1 LẦN, lưu ở block riêng section='x' =====
         if (genre === 'drama' && index === 1 && (xKeywords.length || X_TWEET_URLS.trim())) {
@@ -649,11 +674,12 @@ except Exception as e:
 
     await db.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]);
     await db.close();
-    // Báo hoàn tất (dashboard SSE + Slack) — status:null = crawl xong
+    if (emptyScenes.length) console.warn(`[naze] ⚠️ ${emptyScenes.length} cảnh thiếu ảnh: ${emptyScenes.join(', ')}`);
+    // Báo hoàn tất (dashboard SSE + Slack) — status:null = crawl xong. Kèm cảnh thiếu ảnh (nếu có).
     try {
         const http = await import('http');
         http.default.request({ hostname: 'localhost', port: process.env.PORT || 3000, path: '/api/crawl-status/notify', method: 'POST', headers: { 'Content-Type': 'application/json' } }, () => {})
-            .end(JSON.stringify({ postTitle: projectId, status: null }));
+            .end(JSON.stringify({ postTitle: projectId, status: null, missingScenes: emptyScenes }));
     } catch (_) {}
     console.log('\n[naze] ✅ Hoàn thành!');
 }

@@ -24,37 +24,60 @@
 
     /* Dropzone */
     .drop {
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+        width: 100%; box-sizing: border-box;
         border: 2px dashed var(--border); border-radius: 12px; padding: 28px 16px;
         text-align: center; background: var(--panel); transition: .15s; cursor: pointer; margin-bottom: 18px;
     }
     .drop.hover { border-color: var(--accent); background: var(--panel-2); }
     .drop strong { color: var(--accent); }
-    .drop .hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
+    .drop .hint { color: var(--muted); font-size: 13px; margin: 0; }
     #fileInput { display: none; }
 
     /* Filter bar */
     .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
     .filters { display: flex; gap: 6px; flex-wrap: wrap; }
     .chip {
+        display: inline-flex; align-items: center; gap: 5px;
         border: 1px solid var(--border); background: var(--panel); color: var(--text);
         padding: 5px 12px; border-radius: 999px; font-size: 13px; cursor: pointer; transition: .12s;
     }
     .chip:hover { border-color: var(--accent); }
     .chip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-    .chip .cnt { opacity: .7; margin-left: 4px; font-size: 12px; }
+    .chip .chip-ico { font-size: 14px; line-height: 1; }
+    .chip .cnt { opacity: .7; font-size: 12px; }
     .grow { flex: 1; }
     .btn {
         border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
         padding: 6px 12px; border-radius: 8px; font-size: 13px; cursor: pointer;
     }
     .btn:hover { border-color: var(--accent); }
+    .btn-danger { border-color: var(--danger); color: var(--danger); }
+    .btn-danger:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
     #search {
         border: 1px solid var(--border); background: var(--panel); color: var(--text);
         padding: 6px 10px; border-radius: 8px; font-size: 13px; min-width: 160px;
     }
 
-    /* File list */
-    .list { display: flex; flex-direction: column; gap: 8px; }
+    /* Accordion theo ngày */
+    .list { display: flex; flex-direction: column; gap: 10px; }
+    .day-group { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--panel); }
+    .day-head {
+        display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+        cursor: pointer; user-select: none; background: var(--panel-2);
+    }
+    .day-head:hover { background: var(--border); }
+    .day-head .chev { font-size: 12px; color: var(--muted); transition: transform .15s; flex-shrink: 0; }
+    .day-group.collapsed .chev { transform: rotate(-90deg); }
+    .day-head .day-title { font-weight: 600; font-size: 14px; }
+    .day-head .day-cnt { color: var(--muted); font-size: 12px; }
+    .day-head .day-del {
+        margin-left: auto; border: 1px solid var(--danger); background: transparent; color: var(--danger);
+        padding: 4px 10px; border-radius: 8px; font-size: 12px; cursor: pointer; flex-shrink: 0;
+    }
+    .day-head .day-del:hover { background: var(--danger); color: #fff; }
+    .day-body { display: flex; flex-direction: column; gap: 8px; padding: 10px; }
+    .day-group.collapsed .day-body { display: none; }
     .row {
         display: flex; align-items: center; gap: 12px; background: var(--panel);
         border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
@@ -119,6 +142,8 @@ const ICONS = {
 };
 let allFiles = [];
 let activeExt = 'all';
+const activeDay = 'all';     // đã bỏ hàng lọc theo ngày (accordion tự nhóm theo ngày) → luôn 'all'
+const expandedDays = new Set();    // ngày đang mở (mặc định rỗng = thu gọn hết)
 
 const $ = s => document.querySelector(s);
 const toast = (msg, kind) => {
@@ -137,6 +162,12 @@ const fmtDate = ms => {
     const p = n => String(n).padStart(2, '0');
     return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
+// Khoá ngày local 'YYYY-MM-DD' từ mốc thời gian (để nhóm theo ngày)
+const dayKey = ms => {
+    const d = new Date(ms);
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
 
 async function load() {
     try {
@@ -150,43 +181,96 @@ async function load() {
     } catch (e) { toast('Lỗi tải danh sách: ' + e.message, 'err'); }
 }
 
+// Lọc file theo các tiêu chí đang chọn. Bỏ qua 1 chiều bằng cách truyền 'all' để đếm chéo cho khớp.
+function applyFilters(files, { ext = activeExt, day = activeDay, useSearch = true } = {}) {
+    const q = useSearch ? $('#search').value.trim().toLowerCase() : '';
+    return files.filter(f =>
+        (ext === 'all' || f.ext === ext) &&
+        (day === 'all' || dayKey(f.mtime) === day) &&
+        (!q || f.name.toLowerCase().includes(q))
+    );
+}
+
+function applyAndRender() { renderFilters(); renderList(); }
+
+// Thứ tự ưu tiên các đuôi hay dùng lên đầu, còn lại xếp abc
+const FILTER_PRIORITY = ['.srt', '.mp4', '.mp3'];
 function renderFilters() {
+    // Count theo đuôi TRÊN tập đã lọc theo NGÀY (bỏ chiều ext) → khớp danh sách hiển thị
+    const base = applyFilters(allFiles, { ext: 'all', useSearch: false });
     const counts = {};
-    for (const f of allFiles) counts[f.ext] = (counts[f.ext] || 0) + 1;
-    const exts = Object.keys(counts).sort();
+    for (const f of base) counts[f.ext] = (counts[f.ext] || 0) + 1;
+    const exts = Object.keys(counts).sort((a, b) => {
+        const ia = FILTER_PRIORITY.indexOf(a), ib = FILTER_PRIORITY.indexOf(b);
+        if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+        return a.localeCompare(b);
+    });
     const box = $('#filters');
     box.innerHTML = '';
-    const mk = (key, label, cnt) => {
+    const mk = (key, icon, label, cnt) => {
         const b = document.createElement('button');
         b.className = 'chip' + (activeExt === key ? ' active' : '');
-        b.innerHTML = label + `<span class="cnt">${cnt}</span>`;
-        b.onclick = () => { activeExt = key; renderFilters(); renderList(); };
+        b.innerHTML = `<span class="chip-ico">${icon}</span>${label}<span class="cnt">${cnt}</span>`;
+        b.onclick = () => { activeExt = key; applyAndRender(); };
         box.appendChild(b);
     };
-    mk('all', 'Tất cả', allFiles.length);
-    for (const ext of exts) mk(ext, ext.replace('.', '') || 'khác', counts[ext]);
+    mk('all', '🗂️', 'Tất cả', base.length);
+    for (const ext of exts) mk(ext, ICONS[ext] || '📦', ext.replace('.', '') || 'khác', counts[ext]);
 }
 
 function renderList() {
-    const q = $('#search').value.trim().toLowerCase();
-    let files = allFiles;
-    if (activeExt !== 'all') files = files.filter(f => f.ext === activeExt);
-    if (q) files = files.filter(f => f.name.toLowerCase().includes(q));
+    const files = applyFilters(allFiles);
     const list = $('#list');
-    if (!files.length) { list.innerHTML = '<div class="empty">Không có file nào.</div>'; return; }
     list.innerHTML = '';
+    if (!files.length) { list.innerHTML = '<div class="empty">Không có file nào.</div>'; return; }
+
+    // Nhóm theo ngày (files đã sắp mtime giảm dần → ngày mới nhất lên trước)
+    const groups = [];
+    const byKey = {};
     for (const f of files) {
-        const row = document.createElement('div');
-        row.className = 'row';
-        row.innerHTML = `
-            <div class="ico">${ICONS[f.ext] || '📦'}</div>
-            <div class="meta">
-                <div class="name">${escapeHtml(f.name)}</div>
-                <div class="sub"><span class="tag">${(f.ext || '').replace('.', '') || 'khác'}</span> · ${fmtSize(f.size)} · ${fmtDate(f.mtime)}</div>
-            </div>
-            <button class="del">🗑 Xóa</button>`;
-        row.querySelector('.del').onclick = () => del(f.name);
-        list.appendChild(row);
+        const k = dayKey(f.mtime);
+        if (!byKey[k]) { byKey[k] = []; groups.push(k); }
+        byKey[k].push(f);
+    }
+
+    for (const k of groups) {
+        const items = byKey[k];
+        const collapsed = !expandedDays.has(k);
+        const group = document.createElement('div');
+        group.className = 'day-group' + (collapsed ? ' collapsed' : '');
+
+        const head = document.createElement('div');
+        head.className = 'day-head';
+        head.innerHTML = `
+            <span class="chev">▼</span>
+            <span class="day-title">📅 ${dayLabel(k)}</span>
+            <span class="day-cnt">${items.length} file</span>
+            <button class="day-del">🗑 Xóa hết ngày này</button>`;
+        head.onclick = (e) => {
+            if (e.target.closest('.day-del')) return;   // bấm nút xóa thì không toggle
+            if (expandedDays.has(k)) expandedDays.delete(k); else expandedDays.add(k);
+            group.classList.toggle('collapsed');
+        };
+        head.querySelector('.day-del').onclick = () => deleteFilesForDay(k);
+        group.appendChild(head);
+
+        const body = document.createElement('div');
+        body.className = 'day-body';
+        for (const f of items) {
+            const row = document.createElement('div');
+            row.className = 'row';
+            row.innerHTML = `
+                <div class="ico">${ICONS[f.ext] || '📦'}</div>
+                <div class="meta">
+                    <div class="name">${escapeHtml(f.name)}</div>
+                    <div class="sub"><span class="tag">${(f.ext || '').replace('.', '') || 'khác'}</span> · ${fmtSize(f.size)} · ${fmtDate(f.mtime)}</div>
+                </div>
+                <button class="del">🗑 Xóa</button>`;
+            row.querySelector('.del').onclick = () => del(f.name);
+            body.appendChild(row);
+        }
+        group.appendChild(body);
+        list.appendChild(group);
     }
 }
 
@@ -201,6 +285,38 @@ async function del(name) {
         toast('Đã xóa: ' + name, 'ok');
         load();
     } catch (e) { toast('Xóa lỗi: ' + e.message, 'err'); }
+}
+
+// Nhãn ngày đang chọn cho nút xóa
+function dayLabel(key) {
+    const p = n => String(n).padStart(2, '0');
+    const t = new Date(); t.setHours(0, 0, 0, 0);
+    const today = `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`;
+    const y = new Date(t.getTime() - 86400000);
+    const yk = `${y.getFullYear()}-${p(y.getMonth() + 1)}-${p(y.getDate())}`;
+    if (key === today) return 'hôm nay';
+    if (key === yk) return 'hôm qua';
+    const [Y, M, D] = key.split('-');
+    return `${D}/${M}`;
+}
+
+// Xóa mọi file của 1 ngày (tôn trọng filter đuôi + tìm kiếm đang bật)
+async function deleteFilesForDay(dayK) {
+    const files = applyFilters(allFiles, { day: dayK });
+    if (!files.length) return;
+    if (!confirm(`Xóa ${files.length} file của ngày ${dayLabel(dayK)}? Không thể hoàn tác.`)) return;
+    let ok = 0, fail = 0;
+    for (const f of files) {
+        try {
+            const r = await fetch('/api/media-files?name=' + encodeURIComponent(f.name), { method: 'DELETE' });
+            const data = await r.json();
+            if (data.error) throw new Error(data.error);
+            ok++;
+        } catch { fail++; }
+        toast(`Đang xóa… ${ok}/${files.length}`);
+    }
+    toast(`Đã xóa ${ok} file${fail ? `, lỗi ${fail}` : ''}`, fail ? 'err' : 'ok');
+    load();
 }
 
 async function uploadFiles(fileList) {
