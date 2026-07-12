@@ -20,8 +20,8 @@ const MEDIA_DIR = process.env.MEDIA_DIR;
 const DB_PATH = path.join(process.env.DB_DIR, 'media_system.sqlite');
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
 const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY;
-const VIDEOS_PER_SOURCE = 4;
-const IMAGES_PER_SOURCE = 4;
+const VIDEOS_PER_SOURCE = 2;
+const IMAGES_PER_SOURCE = 2;
 
 const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -137,8 +137,8 @@ export async function fetchAndDownloadStock(keyword, type, targetDir, countPerSo
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
     const providers = [
-        { name: 'Storyblocks (Bot)', fetcher: fetchFromStoryblocksBot },
-        { name: 'Pexels', fetcher: fetchFromPexels },
+        // { name: 'Storyblocks (Bot)', fetcher: fetchFromStoryblocksBot },
+        // { name: 'Pexels', fetcher: fetchFromPexels },
         { name: 'Google Image (Bot)', fetcher: fetchFromGoogleImageBot },
         { name: 'Bing Image (Bot)', fetcher: fetchFromBingImageBot },
     ];
