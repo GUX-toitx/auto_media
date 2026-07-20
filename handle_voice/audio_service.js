@@ -28,12 +28,15 @@ async function api(endpoint, options = {}) {
     return res;
 }
 
-async function createBatch(batchName, sentences, lang, speakerUuid, dictionaryUuids = []) {
+// speed: tốc độ đọc (ttsmin). 1 = bình thường; <1 chậm, >1 nhanh. Kẹp về [0.5, 2] cho an toàn.
+function clampSpeed(v) { const n = Number(v); return Number.isFinite(n) ? Math.min(2, Math.max(0.5, n)) : 1; }
+
+async function createBatch(batchName, sentences, lang, speakerUuid, dictionaryUuids = [], speed = 1) {
     const form = new FormData();
     form.append('batch_name', batchName);
     form.append('language', lang || 'en');
     form.append('pitch', 1);
-    form.append('speed', 1);
+    form.append('speed', clampSpeed(speed));
     form.append('volume', 1);
     form.append('silence_duration', 1);
     form.append('exaggeration', 0.5);
@@ -109,7 +112,7 @@ export async function getReferenceSpeakers(lang) {
     return api(`/user/reference-speaker?page=0&limit=-1&condition=${encodeURIComponent(condition)}`).then(r => r.json());
 }
 
-export async function generateAudios(projectDir, postId, lang, speakerUuid, contentType = 'content', dictionaryUuids = [], textsFromDOM = null) {
+export async function generateAudios(projectDir, postId, lang, speakerUuid, contentType = 'content', dictionaryUuids = [], textsFromDOM = null, speed = 1) {
     const projectName = path.basename(projectDir);
     const db = await getDb();
 
@@ -157,7 +160,7 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid, cont
 
     const batchName = `${projectName}_${lang}`;
     try {
-        const createRes = await createBatch(batchName, texts, lang, speakerUuid, dictionaryUuids);
+        const createRes = await createBatch(batchName, texts, lang, speakerUuid, dictionaryUuids, speed);
         const batchUuid = createRes.data?.uuid || createRes.uuid;
         const batchSentences = createRes.data?.sentences || [];
 

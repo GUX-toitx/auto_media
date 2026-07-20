@@ -1,4 +1,4 @@
-import { fetchIPv4 as fetch } from './fetchIPv4.js';
+import { fetchIPv4 as fetch } from './src/lib/fetchIPv4.js';
 import dns from 'dns';
 dns.setDefaultResultOrder('ipv4first');
 import 'dotenv/config';
@@ -13,13 +13,28 @@ import multer from 'multer';
 
 import { getLanguages, getReferenceSpeakers, getDictionary, getMe, sendToQueue, getSentenceStatus, updateSentence, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio, getAllAudioUrls } from './handle_voice/audio_service.js';
 import { alignPost } from './handle_voice/align_service.js';
-import { processAll } from './video_service.js';
-import { generateFlowImage } from './browser.js';
-import { crawlX } from './x_crawler.js';
-import { generateSeoTitle } from './seoTitle.js';
-import { translateTitle } from './translateTitle.js';
+import { processAll } from './src/services/video_service.js';
+import { generateFlowImage } from './src/services/browser.js';
+import { crawlX } from './src/x/x_crawler.js';
+import { generateSeoTitle } from './src/services/seoTitle.js';
+import { translateTitle } from './src/services/translateTitle.js';
 import archiver from 'archiver';
-import { downloadWithYtDlp } from './ytDlpDownloader.js'; // Nhúng con Bot vừa viết
+import { downloadWithYtDlp } from './src/services/ytDlpDownloader.js'; // Nhúng con Bot vừa viết
+import { ensureThumb } from './src/services/thumbs.js';
+import { proxyPathFor, proxyReady, ensureProxy, warmProxies, hasNvenc } from './src/lib/proxies.js';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+// ffmpeg/ffprobe PHẢI chạy async: execSync khoá event loop của Node, tức là suốt lúc cắt/crop
+// (vài giây) server không phục vụ được gì — thumbnail, video, API đều đứng. Đó là lý do chọn/trim video thấy lâu.
+const execFileP = promisify(execFile);
+const runFfmpeg = (args) => execFileP('ffmpeg', args, { maxBuffer: 32 * 1024 * 1024 });
+async function ffprobeDuration(file) {
+    try {
+        const { stdout } = await execFileP('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file]);
+        return parseFloat(String(stdout).trim()) || 0;
+    } catch { return 0; }
+}
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { JWT } from 'google-auth-library';
 import crypto from 'crypto';
@@ -49,11 +64,25 @@ app.use(express.json()); // BẮT BUỘC PHẢI CÓ DÒNG NÀY Ở ĐÂY
 const DB_PATH = path.join(DB_DIR, 'media_system.sqlite');
 const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 
+// Mã dự án theo NGÀY GIỜ (giờ địa phương): <prefix>YYYY-MM-DD_HH-MM-SS — vd proj_2026-07-16_13-43-40.
+// Ngăn cách cho dễ đọc. Có cả GIÂY để 2 dự án tạo trong cùng 1 phút không trùng mã
+// (project_id là UNIQUE + là tên thư mục → trùng phút sẽ đè/gộp dữ liệu).
+// GIỮ tiền tố 'proj_' (geo) / 'naze_' (naze,drama): UI nhận diện thể loại theo tiền tố này.
+// KẾT THÚC bằng giây (2 chữ SỐ) → không dính regex /_([a-z]{2})$/ nhận diện hậu tố ngôn ngữ (_vi/_en).
+function stampId(prefix) {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return `${prefix}${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;
+}
+
 // API: Lấy danh sách posts
 app.get('/api/posts', async (req, res) => {
     try {
         const db = await getDb();
-        const posts = await db.all('SELECT id, project_id, status, audio_uuid, COALESCE(title, project_id) AS title, voice_content_type FROM Post ORDER BY id DESC');
+        // genre có thể NULL với post do nhánh khác tạo (dùng chung DB) → suy ra từ project_id để không lọt khỏi menu
+        const posts = await db.all(`SELECT id, project_id, status, audio_uuid, COALESCE(title, project_id) AS title, voice_content_type,
+                                           COALESCE(genre, CASE WHEN project_id LIKE 'proj_%' THEN 'geo' ELSE 'naze' END) AS genre
+                                    FROM Post ORDER BY id DESC`);
         await db.close();
         res.json(posts);
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -192,6 +221,17 @@ app.get('/api/posts/:postId', async (req, res) => {
 
         await db.close();
         res.json({ ...post, projectId, paragraphs, sections });
+
+        // Mở project = encode nền proxy 480p cho toàn bộ video của nó, để lúc bấm xem là có sẵn.
+        // Asset video nằm rải ở nhiều tầng (section / paragraph / detail / sentence) nên duyệt cả cây.
+        const vids = new Set();
+        (function collect(node) {
+            if (Array.isArray(node)) return node.forEach(collect);
+            if (!node || typeof node !== 'object') return;
+            if (typeof node.relativePath === 'string' && /\.(mp4|mov|mkv|webm|avi)$/i.test(node.relativePath)) vids.add(node.relativePath);
+            Object.values(node).forEach(collect);
+        })({ paragraphs, sections });
+        warmProxies(MEDIA_DIR, [...vids], `post:${post.id}`);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -316,7 +356,7 @@ app.post('/api/generate-media', (req, res) => {
             }
             await db.close();
             // Import và crawl trực tiếp
-            const { fetchAndDownloadStock } = await import('./sync_assets_db.js').catch(() => ({}));
+            const { fetchAndDownloadStock } = await import('./src/workers/sync_assets_db.js').catch(() => ({}));
             if (!fetchAndDownloadStock) {
                 console.error('[generate-media section] Không import được fetchAndDownloadStock');
                 return;
@@ -354,7 +394,7 @@ app.post('/api/generate-media', (req, res) => {
     console.log(`[HỆ THỐNG] Từ khóa: ${kwTexts.join(', ')}`);
 
     const pythonProcess = spawn('node', [
-        'craw_sub.js',
+        'src/workers/craw_sub.js',
         '--mode', 'single',
         '--videoId', videoId,
         '--paragraphId', String(groupId),
@@ -734,9 +774,9 @@ app.get('/api/dictionaries', async (req, res) => {
 
 app.post('/api/create-voice', async (req, res) => {
     try {
-        const { videoId, postId, lang, speakerUuid, contentType, dictionaryUuids, texts } = req.body;
+        const { videoId, postId, lang, speakerUuid, contentType, dictionaryUuids, texts, speed } = req.body;
         const projectDir = path.join(MEDIA_DIR, videoId);
-        const result = await generateAudios(projectDir, postId, lang, speakerUuid, contentType, dictionaryUuids, texts || null);
+        const result = await generateAudios(projectDir, postId, lang, speakerUuid, contentType, dictionaryUuids, texts || null, speed);
 
         // Lưu batchUuid vào bảng Post
         const db = await getDb();
@@ -756,7 +796,35 @@ app.post('/api/crawl-all', async (req, res) => {
     const { postId, force } = req.body;   // force=true → crawl lại HẾT; mặc định chỉ crawl cảnh còn THIẾU (0 asset)
     res.json({ success: true, message: 'Đang crawl...' });
     (async () => {
-        const { fetchAndDownloadStock } = await import('./sync_assets_db.js').catch(() => ({}));
+        const db0 = await getDb();
+        const p0 = await db0.get('SELECT id, project_id, genre FROM Post WHERE id = ?', [postId]);
+        await db0.close();
+        if (!p0) return;
+
+        // Project ĐỊA CHÍNH TRỊ → crawl lại bằng ĐÚNG pipeline của nó (process_content.js --mediaOnly):
+        // tin từ RSS gốc/Google News → cào ảnh/video trong bài báo thật → stock (Google/Bing) bổ sung.
+        // Luồng stock thuần bên dưới chỉ dành cho project không phải geo.
+        if (p0.genre === 'geo') {
+            const args = ['src/workers/process_content.js', '--mediaOnly', '--postId', String(postId)];
+            if (force) args.push('--force');
+            console.log(`[crawl-all] post ${postId} là geo → chạy lại pipeline tin (${force ? 'toàn bộ' : 'bù cảnh thiếu'})`);
+            const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+            child.stdout.on('data', d => process.stdout.write(`[crawl-all/geo] ${d}`));
+            child.stderr.on('data', d => process.stderr.write(`[crawl-all/geo] ${d}`));
+            child.on('exit', async (code) => {
+                console.log(`[crawl-all/geo] post ${postId} xong (code ${code})`);
+                // Xong bình thường: process_content đã tự POST /api/crawl-status/notify (status=null) → SSE + Slack.
+                // Chỉ cần dọn khi nó chết giữa chừng, kẻo Post kẹt status 'crawling' mãi.
+                if (code !== 0) {
+                    try { const d = await getDb(); await d.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]); await d.close(); } catch (_) { }
+                    pushCrawlStatus(p0.project_id, null);
+                }
+                orchestrateAutoVoice(p0.project_id.replace(/_[a-z]{2}$/, '')).catch(e => console.error('[crawl-all/geo] auto voice lỗi:', e.message));
+            });
+            return;
+        }
+
+        const { fetchAndDownloadStock } = await import('./src/workers/sync_assets_db.js').catch(() => ({}));
         if (!fetchAndDownloadStock) return;
         const db = await getDb();
         const post = await db.get('SELECT id, project_id FROM Post WHERE id = ?', [postId]);
@@ -847,7 +915,7 @@ app.post('/api/crawl-vn', async (req, res) => {
     if (!keyword?.trim()) return res.status(400).json({ error: 'Thiếu keyword' });
     res.json({ success: true, message: 'Đang crawl nguồn Việt Nam...' });
     (async () => {
-        const { fetchFromVnBot } = await import('./vnCrawler.js');
+        const { fetchFromVnBot } = await import('./src/crawlers/vnCrawler.js');
         const db = await getDb();
         const subDir = section || gid;
         const vFolder = path.join(MEDIA_DIR, videoId, 'assets', '_raw_videos', subDir);
@@ -879,16 +947,18 @@ app.post('/api/crawl-vn', async (req, res) => {
 });
 
 app.post('/api/create-project', async (req, res) => {
-    const { content, keywords, sources, country, targetLang, days,
-            voiceAuto, voiceContentType, speakerUuid, dictionaryUuids, lipsAuto, lipsVideo, lipsGuidance } = req.body;
+    const { content, keywords, sources, xAccounts, country, targetLang, days,
+            voiceAuto, voiceContentType, speakerUuid, dictionaryUuids, lipsAuto, lipsVideo, lipsGuidance, voiceSpeed } = req.body;
     // LUỒNG ĐỊA CHÍNH TRỊ: input là mảng từ khóa + mảng domain nguồn. Vẫn nhận content (chủ đề/tiêu đề) làm tuỳ chọn.
     const kwArr = Array.isArray(keywords) ? keywords.map(s => String(s).trim()).filter(Boolean) : [];
     const srcArr = Array.isArray(sources) ? sources.map(s => String(s).trim()).filter(Boolean) : [];
+    // Account X (tuỳ chọn): username thuần, bỏ @ và URL
+    const xArr = Array.isArray(xAccounts) ? xAccounts.map(s => String(s).trim().replace(/^@/, '').replace(/^https?:\/\/(x|twitter)\.com\//i, '').split(/[/?]/)[0]).filter(Boolean) : [];
     const daysNum = parseInt(days, 10);
-    const newsDays = Number.isFinite(daysNum) && daysNum > 0 ? daysNum : 3;   // cửa sổ tin (when:Nd)
+    const newsDays = Number.isFinite(daysNum) && daysNum > 0 ? daysNum : 1;   // cửa sổ tin (when:Nd)
     if (!kwArr.length && !content?.trim()) return res.status(400).json({ error: 'Thiếu từ khóa (keywords) hoặc nội dung' });
     try {
-        const projectId = 'proj_' + Date.now();
+        const projectId = stampId('proj_');
         const targetDir = path.join(MEDIA_DIR, projectId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
         fs.writeFileSync(path.join(targetDir, 'original_content.txt'), (content?.trim()) || kwArr.join('\n'));
@@ -899,12 +969,13 @@ app.post('/api/create-project', async (req, res) => {
                 contentType: voiceContentType,
                 dictionaryUuids,
                 lips: (lipsAuto && lipsVideo) ? { video: lipsVideo, guidanceScale: lipsGuidance } : null,
+                speed: voiceSpeed,
             });
         }
         const cGl = (country && country.gl) || '';
         const cHl = (country && country.hl) || '';
         const procArgs = [
-            'process_content.js',
+            'src/workers/process_content.js',
             '--projectId', projectId,
             '--keywords', JSON.stringify(kwArr),
             '--sources', JSON.stringify(srcArr),
@@ -914,6 +985,7 @@ app.post('/api/create-project', async (req, res) => {
             '--days', String(newsDays)
         ];
         if (content?.trim()) { procArgs.push('--content', content.trim()); }
+        if (xArr.length) { procArgs.push('--xAccounts', JSON.stringify(xArr)); }
         const crawlProcess = spawn('node', procArgs, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
         crawlProcess.stdout.on('data', d => process.stdout.write(`[process_content] ${d}`));
         crawlProcess.stderr.on('data', d => process.stderr.write(`[process_content] ${d}`));
@@ -1184,12 +1256,7 @@ app.post('/api/toggle', async (req, res) => {
             const existing = await db.get('SELECT duration, type, post_id, section FROM Asset WHERE file_path = ?', [relativePath]);
             let duration = existing?.duration || null;
             if (!duration && existing?.type === 'video') {
-                try {
-                    const { execSync } = await import('child_process');
-                    const fullPath = path.join(MEDIA_DIR, relativePath);
-                    const out = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${fullPath}"`);
-                    duration = parseFloat(out.toString().trim());
-                } catch (e) {}
+                duration = await ffprobeDuration(path.join(MEDIA_DIR, relativePath)) || null;
             }
             if (existing?.post_id && existing?.section) {
                 // Section asset: chỉ update selected/order, giữ post_id/section
@@ -1222,8 +1289,11 @@ app.post('/api/reorder-assets', async (req, res) => {
 
 const upload = multer({ dest: path.join(MEDIA_DIR, '_tmp_uploads') });
 // API: Tạo mới dự án từ nội dung
+// Tạo project từ 2 file SRT (gốc + đích). genre='drama' → cào X + lưu đúng thể loại
+// (đây là đầu vào DUY NHẤT của drama trên UI: 2 file SRT thay cho ô "thông tin vụ việc" cũ).
 app.post('/api/create-naze-srt', upload.fields([{ name: 'srt', maxCount: 1 }, { name: 'srtTarget', maxCount: 1 }]), async (req, res) => {
-    const { projectId, targetLang } = req.body;
+    const { projectId, targetLang, genre, tweetUrls,
+        voiceAuto, voiceContentType, speakerUuid, dictionaryUuids, lipsAuto, lipsVideo, lipsGuidance, voiceSpeed } = req.body;
     const srtFile = req.files?.srt?.[0];
     if (!srtFile || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu file SRT hoặc projectId' });
     try {
@@ -1236,12 +1306,30 @@ app.post('/api/create-naze-srt', upload.fields([{ name: 'srt', maxCount: 1 }, { 
             srtTargetPath = path.join(targetDir, 'input_target.srt');
             fs.renameSync(req.files.srtTarget[0].path, srtTargetPath);
         }
-        const args = ['naze_content.js', '--srt', srtPath, projectId];
+        // multipart → mọi field là chuỗi; dictionaryUuids gửi dạng JSON
+        const isYes = (v) => v === true || v === 'true' || v === '1' || v === 'on';
+        let dicts = [];
+        try { dicts = dictionaryUuids ? JSON.parse(dictionaryUuids) : []; } catch { dicts = []; }
+        if (isYes(voiceAuto) && speakerUuid) {
+            writeVoiceAutoConfig(projectId, {
+                speakerUuid, contentType: voiceContentType || 'content', dictionaryUuids: dicts,
+                lips: (isYes(lipsAuto) && lipsVideo) ? { video: lipsVideo, guidanceScale: parseFloat(lipsGuidance) || 2.2 } : null,
+                speed: voiceSpeed,
+            });
+        }
+        const args = ['src/workers/naze_content.js', '--srt', srtPath, projectId];
         if (srtTargetPath) args.push(srtTargetPath);
         if (targetLang) args.push(targetLang);
-        const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+        if (genre === 'drama') args.push('--genre', 'drama');
+        const env = { ...process.env };
+        if (genre === 'drama' && tweetUrls && tweetUrls.trim()) env.NAZE_TWEET_URLS = tweetUrls.trim();
+        const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'], env });
         child.stdout.on('data', d => process.stdout.write(`[naze] ${d}`));
         child.stderr.on('data', d => process.stderr.write(`[naze] ${d}`));
+        child.on('exit', (code) => {
+            if (code !== 0) return console.warn(`[naze-srt] pipeline lỗi (code ${code}) — bỏ qua auto voice ${projectId}`);
+            orchestrateAutoVoice(projectId).catch(e => console.error('[naze-srt] auto voice lỗi:', e.message));
+        });
         child.unref();
         res.json({ success: true, projectId });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1314,7 +1402,7 @@ app.post('/api/create-naze-srt-batch', upload.array('srts', 500), async (req, re
             const tgtPath = path.join(targetDir, 'input_target.srt');
             fs.renameSync(g[srcLang].path, srcPath);
             fs.renameSync(g[targetLang].path, tgtPath);
-            enqueueNazeJob({ projectId, args: ['naze_content.js', '--srt', srcPath, projectId, tgtPath, targetLang] });
+            enqueueNazeJob({ projectId, args: ['src/workers/naze_content.js', '--srt', srcPath, projectId, tgtPath, targetLang] });
             projects.push(projectId);
         }
         res.json({ success: true, count: projects.length, projects });
@@ -1322,16 +1410,16 @@ app.post('/api/create-naze-srt-batch', upload.array('srts', 500), async (req, re
 });
 
 app.post('/api/create-naze-youtube', express.json(), async (req, res) => {
-    const { url, projectId, targetLang, voiceAuto, voiceContentType, speakerUuid, dictionaryUuids, lipsAuto, lipsVideo, lipsGuidance } = req.body;
+    const { url, projectId, targetLang, voiceAuto, voiceContentType, speakerUuid, dictionaryUuids, lipsAuto, lipsVideo, lipsGuidance, voiceSpeed } = req.body;
     if (!url?.trim() || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu URL hoặc projectId' });
     try {
         const targetDir = path.join(MEDIA_DIR, projectId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
         if (voiceAuto && speakerUuid) {
             writeVoiceAutoConfig(projectId, { speakerUuid, contentType: voiceContentType, dictionaryUuids,
-                lips: (lipsAuto && lipsVideo) ? { video: lipsVideo, guidanceScale: lipsGuidance } : null });
+                lips: (lipsAuto && lipsVideo) ? { video: lipsVideo, guidanceScale: lipsGuidance } : null, speed: voiceSpeed });
         }
-        const args = ['naze_content.js', '--youtube', url.trim(), projectId];
+        const args = ['src/workers/naze_content.js', '--youtube', url.trim(), projectId];
         if (targetLang) args.push(targetLang);
         const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
         child.stdout.on('data', d => process.stdout.write(`[naze] ${d}`));
@@ -1346,16 +1434,16 @@ app.post('/api/create-naze-youtube', express.json(), async (req, res) => {
 });
 
 app.post('/api/create-naze', express.json(), async (req, res) => {
-    const { topic, projectId, targetLang, genre, tweetUrls, voiceAuto, voiceContentType, speakerUuid, dictionaryUuids, lipsAuto, lipsVideo, lipsGuidance } = req.body;
+    const { topic, projectId, targetLang, genre, tweetUrls, voiceAuto, voiceContentType, speakerUuid, dictionaryUuids, lipsAuto, lipsVideo, lipsGuidance, voiceSpeed } = req.body;
     if (!topic?.trim() || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu topic hoặc projectId' });
     try {
         const targetDir = path.join(MEDIA_DIR, projectId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
         if (voiceAuto && speakerUuid) {
             writeVoiceAutoConfig(projectId, { speakerUuid, contentType: voiceContentType, dictionaryUuids,
-                lips: (lipsAuto && lipsVideo) ? { video: lipsVideo, guidanceScale: lipsGuidance } : null });
+                lips: (lipsAuto && lipsVideo) ? { video: lipsVideo, guidanceScale: lipsGuidance } : null, speed: voiceSpeed });
         }
-        const args = ['naze_content.js', topic.trim(), projectId, targetLang || 'vi', genre === 'drama' ? 'drama' : 'naze'];
+        const args = ['src/workers/naze_content.js', topic.trim(), projectId, targetLang || 'vi', genre === 'drama' ? 'drama' : 'naze'];
         const env = { ...process.env };
         // Chỉ drama mới cào X; truyền link tweet dán tay (nếu có) qua env
         if (genre === 'drama' && tweetUrls && tweetUrls.trim()) env.NAZE_TWEET_URLS = tweetUrls.trim();
@@ -1599,8 +1687,11 @@ app.post('/api/crop', async (req, res) => {
     const ext = path.extname(fullPath);
     const outPath = fullPath.replace(ext, `_cropped${ext}`);
     try {
-        const { execSync } = await import('child_process');
-        execSync(`ffmpeg -i "${fullPath}" -vf "crop=${width}:${height}:${x}:${y}" -y "${outPath}"`);
+        // Crop bắt buộc re-encode → dùng NVENC cho nhanh (libx264 mặc định mất vài giây/clip 1080p)
+        const vcodec = hasNvenc
+            ? ['-c:v', 'h264_nvenc', '-preset', 'p4', '-b:v', '8M']
+            : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20'];
+        await runFfmpeg(['-i', fullPath, '-vf', `crop=${width}:${height}:${x}:${y}`, ...vcodec, '-c:a', 'copy', '-y', outPath]);
         // Ghi đè lên file gốc
         fs.renameSync(outPath, fullPath);
         const db = await getDb();
@@ -1620,17 +1711,11 @@ app.post('/api/trim', async (req, res) => {
     const trimmedPath = `${base}_trim_${ts}${ext}`;
     const trimmedRelative = path.relative(MEDIA_DIR, trimmedPath);
     try {
-        const { execSync } = await import('child_process');
         // Lấy totalDur TRƯỚC khi xóa file gốc
-        const totalDur = (() => {
-            try {
-                const out = execSync(`ffprobe -v error -show_entries format=duration -of csv=p=0 "${fullPath}"`);
-                return parseFloat(out.toString().trim());
-            } catch(e) { return 0; }
-        })();
+        const totalDur = await ffprobeDuration(fullPath);
         const dur = end - start;
         // Dùng -ss trước -i (nhanh, keyframe snap) và re-encode nếu cần
-        execSync(`ffmpeg -ss ${start} -t ${dur} -i "${fullPath}" -c copy -avoid_negative_ts make_zero -y "${trimmedPath}"`);
+        await runFfmpeg(['-ss', String(start), '-t', String(dur), '-i', fullPath, '-c', 'copy', '-avoid_negative_ts', 'make_zero', '-y', trimmedPath]);
 
         const db = await getDb();
         const orig = await db.get('SELECT id, paragraph_id, sentence_id, post_id, section, type, selected, "order" FROM Asset WHERE file_path = ?', [relativePath]);
@@ -1655,7 +1740,7 @@ app.post('/api/trim', async (req, res) => {
                 const beforePath = `${base}_trim_before_${ts}${ext}`;
                 const beforeRelative = path.relative(MEDIA_DIR, beforePath);
                 try {
-                    execSync(`ffmpeg -ss 0 -t ${start} -i "${fullPath}" -c copy -y "${beforePath}"`);
+                    await runFfmpeg(['-ss', '0', '-t', String(start), '-i', fullPath, '-c', 'copy', '-y', beforePath]);
                     if (isSection) {
                         await db.run(
                             'INSERT INTO Asset (post_id, section, type, selected, "order", duration, source_id, file_path) VALUES (?, ?, ?, 0, 0, ?, ?, ?)',
@@ -1677,7 +1762,7 @@ app.post('/api/trim', async (req, res) => {
                 const afterRelative = path.relative(MEDIA_DIR, afterPath);
                 console.log('[trim] totalDur:', totalDur, 'end:', end, 'after duration:', totalDur - end, 'afterPath:', afterPath);
                 try {
-                    execSync(`ffmpeg -ss ${end} -i "${fullPath}" -c copy -y "${afterPath}"`);
+                    await runFfmpeg(['-ss', String(end), '-i', fullPath, '-c', 'copy', '-y', afterPath]);
                     if (isSection) {
                         await db.run(
                             'INSERT INTO Asset (post_id, section, type, selected, "order", duration, source_id, file_path) VALUES (?, ?, ?, 0, 0, ?, ?, ?)',
@@ -1697,6 +1782,8 @@ app.post('/api/trim', async (req, res) => {
         }
         await db.close();
         res.json({ success: true, newRelativePath: trimmedRelative });
+        // File vừa cắt xong: encode proxy nền để bấm xem lại là có ngay
+        warmProxies(MEDIA_DIR, [trimmedRelative], `trim:${ts}`);
     } catch (e) {
         if (fs.existsSync(trimmedPath)) fs.unlinkSync(trimmedPath);
         res.status(500).json({ error: e.message });
@@ -1815,7 +1902,7 @@ app.post('/api/chrome-profiles/:id/login', async (req, res) => {
         if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
         const profileDirName = `chrome-profile-${profile.id}`;
-        const args = ['browser.js', profileDirName];
+        const args = ['src/services/browser.js', profileDirName];
         if (profile.email) args.push(profile.email);
         if (profile.password) args.push(profile.password);
 
@@ -1839,7 +1926,7 @@ app.post('/api/chrome-profiles/:id/open', async (req, res) => {
         await db.close();
         if (!profile) return res.status(404).json({ error: 'Profile not found' });
         const profileDirName = profile.profile_dir || `chrome-profile-${profile.id}`;
-        const args = ['browser.js', profileDirName, '--open', (url && url.trim()) || 'https://x.com'];
+        const args = ['src/services/browser.js', profileDirName, '--open', (url && url.trim()) || 'https://x.com'];
         const child = spawn('node', args, { detached: false, stdio: 'inherit' });
         child.unref();
         res.json({ success: true });
@@ -1848,7 +1935,7 @@ app.post('/api/chrome-profiles/:id/open', async (req, res) => {
 
 // API: Đọc proxies.txt
 app.get('/api/proxies', (req, res) => {
-    const proxyFile = path.join(__dirname, 'proxies.txt');
+    const proxyFile = path.join(__dirname, 'config', 'proxies.txt');
     if (!fs.existsSync(proxyFile)) return res.json([]);
     const lines = fs.readFileSync(proxyFile, 'utf8').trim().split('\n').filter(l => l.trim());
     res.json(lines);
@@ -1906,7 +1993,7 @@ app.post('/api/export-capcut', (req, res) => {
     const outDir = path.join(MEDIA_DIR, '_capcut_exports');
     if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
     let stdout = '', stderr = '', done = false;
-    const args = ['capcut_export.js', String(postId), outDir];
+    const args = ['src/workers/capcut_export.js', String(postId), outDir];
     if (contentType) args.push(contentType);
     const child = spawn(process.execPath, args, {
         cwd: __dirname, env: process.env
@@ -2011,7 +2098,7 @@ app.post('/api/render-capcut', (req, res) => {
     const outDir = path.join(MEDIA_DIR, '_capcut_exports');
     if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
     let stdout = '', stderr = '', done = false;
-    const renderArgs = ['capcut_export.js', String(postId), outDir];
+    const renderArgs = ['src/workers/capcut_export.js', String(postId), outDir];
     if (contentType) renderArgs.push(contentType);
     const child = spawn(process.execPath, renderArgs, {
         cwd: __dirname, env: process.env
@@ -2136,15 +2223,18 @@ function readVoiceAutoConfig(rawProjectId) {
         return JSON.parse(fs.readFileSync(p, 'utf8'));
     } catch { return null; }
 }
-function writeVoiceAutoConfig(rawProjectId, { speakerUuid, contentType, dictionaryUuids, lips, viSpeakerUuid }) {
+function writeVoiceAutoConfig(rawProjectId, { speakerUuid, contentType, dictionaryUuids, lips, viSpeakerUuid, speed }) {
     const p = voiceAutoConfigPath(rawProjectId);
     fs.mkdirSync(path.dirname(p), { recursive: true });
     const ct = contentType === 'content_vi' ? 'content_vi' : 'content';
+    const spd = Number(speed);
     const cfg = {
         enabled: true,
         speakerUuid: String(speakerUuid || ''),
         contentType: ct,
         dictionaryUuids: Array.isArray(dictionaryUuids) ? dictionaryUuids : [],
+        // Tốc độ đọc (ttsmin). Kẹp [0.5, 2]; không hợp lệ → 1 (bình thường).
+        speed: Number.isFinite(spd) ? Math.min(2, Math.max(0.5, spd)) : 1,
         // lips chỉ áp dụng khi voice là ngôn ngữ đích (content)
         lips: (ct === 'content' && lips && lips.video)
             ? { enabled: true, video: String(lips.video), guidanceScale: Number.isFinite(Number(lips.guidanceScale)) ? Number(lips.guidanceScale) : 2.2 }
@@ -2183,7 +2273,7 @@ async function autoGenVoiceForPost(projectId, post, cfg) {
     if (cfg.speakerUuid) {
         const lang = primaryCt === 'content_vi' ? 'vi' : (post.target_lang || 'en');
         console.log(`[auto-voice] Gen voice chính post ${post.id} (lang=${lang}, ct=${primaryCt})`);
-        const result = await generateAudios(projectDir, post.id, lang, cfg.speakerUuid, primaryCt, cfg.dictionaryUuids || [], null);
+        const result = await generateAudios(projectDir, post.id, lang, cfg.speakerUuid, primaryCt, cfg.dictionaryUuids || [], null, cfg.speed);
         const db = await getDb();
         await db.run('UPDATE Post SET audio_uuid = ?, voice_content_type = ? WHERE id = ?', [result.batch_uuid, primaryCt, post.id]);
         await db.close();
@@ -2205,7 +2295,7 @@ async function autoGenVoiceForPost(projectId, post, cfg) {
     if (cfg.viSpeakerUuid && primaryCt !== 'content_vi') {
         try {
             console.log(`[auto-voice] Gen thêm voice tiếng Việt post ${post.id}`);
-            const rvi = await generateAudios(projectDir, post.id, 'vi', cfg.viSpeakerUuid, 'content_vi', [], null);
+            const rvi = await generateAudios(projectDir, post.id, 'vi', cfg.viSpeakerUuid, 'content_vi', [], null, cfg.speed);
             // Nếu KHÔNG có voice chính thì audio_uuid chưa được set → lưu theo VN để idempotent
             if (!cfg.speakerUuid) { const db = await getDb(); await db.run('UPDATE Post SET audio_uuid = ?, voice_content_type = ? WHERE id = ?', [rvi.batch_uuid, 'content_vi', post.id]); await db.close(); }
             await updateBatchStatus(rvi.batch_uuid);
@@ -2444,6 +2534,45 @@ app.get('/api/lips-sync/saved/:postId', async (req, res) => {
         });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Tải TẤT CẢ video lips sync của 1 post thành 1 file zip (đặt tên 1.mp4, 2.mp4... theo thứ tự câu)
+app.get('/api/lips-sync/download/:postId', async (req, res) => {
+    try {
+        const postId = req.params.postId;
+        const db = await getDb();
+        const post = await db.get('SELECT project_id FROM Post WHERE id = ?', [postId]);
+        const rows = await db.all(
+            `SELECT idx AS "index", output_path AS outputPath FROM LipsSyncJob
+             WHERE post_id = ? AND status = 'done' AND output_path IS NOT NULL ORDER BY idx`, [postId]);
+        await db.close();
+        if (!post) return res.status(404).json({ error: 'Không thấy post' });
+        const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
+
+        // Ưu tiên DB; chưa lưu DB thì quét thẳng thư mục lips_sync (giống /saved)
+        let files = rows.filter(r => r.outputPath && fs.existsSync(r.outputPath))
+            .map(r => ({ index: r.index, path: r.outputPath }));
+        if (!files.length) {
+            const dir = path.join(MEDIA_DIR, projectId, 'lips_sync');
+            if (fs.existsSync(dir)) {
+                files = fs.readdirSync(dir).filter(f => /^\d+\.mp4$/i.test(f))
+                    .map(f => ({ index: parseInt(f, 10), path: path.join(dir, f) }))
+                    .sort((a, b) => a.index - b.index);
+            }
+        }
+        if (!files.length) return res.status(404).json({ error: 'Chưa có video lips sync nào để tải' });
+
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${projectId}_lips_sync.zip"`);
+        const archive = archiver('zip', { zlib: { level: 6 } });
+        archive.on('error', e => { console.error('[lips-zip]', e.message); try { res.end(); } catch (_) {} });
+        archive.pipe(res);
+        for (const f of files) archive.file(f.path, { name: `${f.index}.mp4` });
+        console.log(`[lips-zip] post ${postId}: đóng gói ${files.length} video`);
+        await archive.finalize();
+    } catch (e) {
+        if (!res.headersSent) res.status(500).json({ error: e.message });
+    }
+});
+
 // Upload file lên server rồi trả về đường dẫn tuyệt đối để dùng làm input lips_sync
 app.post('/api/lips-sync/upload', upload.single('file'), async (req, res) => {
     try {
@@ -2497,11 +2626,47 @@ app.get('/api/lips-sync/preview', (req, res) => {
 });
 // ===== END LIPS SYNC =====
 
+// Thumbnail jpg 320px cho lưới asset (video + ảnh). Sinh lần đầu rồi cache trên đĩa.
+// Lưới KHÔNG trỏ thẳng file gốc nữa: mở 1 project naze là ~400 video/10GB, kéo qua LAN thì treo máy.
+app.get('/api/thumb', async (req, res) => {
+    const rel = String(req.query.path || '');
+    const root = path.resolve(MEDIA_DIR);
+    const src = path.resolve(MEDIA_DIR, rel);
+    if (!rel || !src.startsWith(root + path.sep)) return res.status(400).send('Bad path');
+    try {
+        const thumb = await ensureThumb(MEDIA_DIR, rel);
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.sendFile(thumb, (err) => { if (err && !res.headersSent) res.status(404).end(); });
+    } catch (e) {
+        // Không tạo được thumb (file hỏng/ffmpeg lỗi) → trả 404, UI tự fallback về nền đen
+        res.status(404).end();
+    }
+});
+
+// Xem video: trả bản proxy 480p nếu đã encode xong, chưa có thì phát bản gốc và encode nền cho lần sau.
+// Không bao giờ bắt client CHỜ encode — chờ ffmpeg còn lâu hơn tải file gốc.
+app.get('/api/media', (req, res) => {
+    const rel = String(req.query.path || '');
+    const root = path.resolve(MEDIA_DIR);
+    const src = path.resolve(MEDIA_DIR, rel);
+    if (!rel || !src.startsWith(root + path.sep) || !fs.existsSync(src)) return res.status(404).end();
+
+    if (proxyReady(MEDIA_DIR, rel)) {
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.sendFile(proxyPathFor(MEDIA_DIR, rel), (err) => { if (err && !res.headersSent) res.status(404).end(); });
+    }
+    ensureProxy(MEDIA_DIR, rel).catch(() => {});
+    res.sendFile(src, (err) => { if (err && !res.headersSent) res.status(404).end(); });
+});
+
 app.get('/', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.sendFile(path.join(__dirname, 'index.html'));
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
-app.use(express.static(__dirname));
+// Chỉ phục vụ public/ (index.html, media-upload.html). Trước đây static(__dirname) mở cả thư mục gốc
+// ra HTTP — nghĩa là /google_sheet.json (key service account) tải được từ trình duyệt. UI không dùng
+// file tĩnh nào ở gốc (chỉ /api/* + media từ MEDIA_DIR) nên bỏ đi là an toàn.
+app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(MEDIA_DIR, {
     setHeaders: (res, path) => {
         res.setHeader('Accept-Ranges', 'bytes'); // Cho phép trình duyệt yêu cầu từng đoạn video để tua
@@ -2524,7 +2689,7 @@ function safeMediaName(name) {
 
 app.get('/media-upload', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.sendFile(path.join(__dirname, 'media-upload.html'));
+    res.sendFile(path.join(__dirname, 'public', 'media-upload.html'));
 });
 
 // Liệt kê file trong thư mục Downloads (kèm size + thời gian sửa + danh sách đuôi)
@@ -2660,12 +2825,16 @@ const SHEET_COL = {
     lipsOn: 'Lips sync?', lipsVideo: 'Video khuôn mặt (lips)', lipsGuidance: 'Độ mạnh lips',
     srtSrc: 'File SRT (nguồn)', srtTgt: 'File SRT (đích)', note: 'Ghi chú',
     speakerVi: 'Giọng đọc (tiếng Việt)',   // TUỲ CHỌN: chọn → tạo thêm voice tiếng Việt (content_vi) song song voice chính
+    speed: 'Tốc độ đọc',   // TUỲ CHỌN: tốc độ voice (ttsmin) — trống/không hợp lệ = 1 (bình thường), kẹp [0.5, 2]
 };
-// speakerVi ĐẶT CUỐI để không xô lệch index dropdown các cột cũ (speaker=7, lipsVideo=11, srtSrc=13, srtTgt=14)
+// 'speed' đứng NGAY SAU 'Tạo giọng đọc?' (index 7) → các cột từ 'Giọng đọc' trở đi dịch phải +1:
+// speaker=8, lipsVideo=12, srtSrc=14, srtTgt=15. speakerVi vẫn ở CUỐI.
 const SHEET_HEADERS = [SHEET_COL.status, SHEET_COL.genre, SHEET_COL.topic, SHEET_COL.lang, SHEET_COL.projectId, SHEET_COL.tweets,
-    SHEET_COL.voiceOn, SHEET_COL.speaker, SHEET_COL.voiceType, SHEET_COL.dict,
+    SHEET_COL.voiceOn, SHEET_COL.speed, SHEET_COL.speaker, SHEET_COL.voiceType, SHEET_COL.dict,
     SHEET_COL.lipsOn, SHEET_COL.lipsVideo, SHEET_COL.lipsGuidance,
     SHEET_COL.srtSrc, SHEET_COL.srtTgt, SHEET_COL.note, SHEET_COL.speakerVi];
+// Đọc tốc độ đọc từ 1 ô sheet: trống/không hợp lệ → 1; kẹp [0.5, 2].
+function sheetParseSpeed(v) { const n = parseFloat(String(v || '').replace(',', '.')); return Number.isFinite(n) ? Math.min(2, Math.max(0.5, n)) : 1; }
 const SHEET_COL_SPEAKER_VI_IDX = SHEET_HEADERS.indexOf(SHEET_COL.speakerVi);   // 0-index cột giọng Việt (cho dropdown)
 const SHEET_POLL_MS = 2 * 60 * 1000;
 const MAX_SHEET_JOBS = parseInt(process.env.MAX_SHEET_JOBS) || 1;   // số project naze/drama chạy đồng thời (mặc định 1 = tuần tự, từng dòng một)
@@ -2675,7 +2844,7 @@ let sheetSpeakerMap = {};   // TÊN giọng → UUID (đa ngôn ngữ), build kh
 
 // --- Map giá trị tiếng Việt (dropdown) → giá trị nội bộ ---
 const SHEET_LANG_MAP = { 'tiếng việt': 'vi', 'việt': 'vi', 'tiếng anh': 'en', 'anh': 'en', 'tiếng nhật': 'ja', 'nhật': 'ja', 'tiếng hàn': 'ko', 'hàn': 'ko', 'tiếng trung': 'zh', 'trung': 'zh', 'tiếng pháp': 'fr', 'pháp': 'fr', 'tiếng tây ban nha': 'es', 'tây ban nha': 'es' };
-function sheetMapLang(v) { const t = (v || '').trim(); if (!t) return 'vi'; return SHEET_LANG_MAP[t.toLowerCase()] || t; }
+function sheetMapLang(v, fallback = 'vi') { const t = (v || '').trim(); if (!t) return fallback; return SHEET_LANG_MAP[t.toLowerCase()] || t; }
 function sheetMapGenre(v) { const t = (v || '').trim().toLowerCase(); if (t.includes('drama')) return 'drama'; if (t.includes('naze') || t.includes('tại sao') || t.includes('tai sao')) return 'naze'; return t; }
 function sheetMapContentType(v) { const t = (v || '').trim().toLowerCase(); if (!t) return 'content'; if (t.includes('việt') || t.includes('viet') || t === 'content_vi') return 'content_vi'; return 'content'; }
 // Placeholder dropdown '(không dùng...)' đều bắt đầu bằng '(' → chỉ strip đúng placeholder, không đụng path/tên thật.
@@ -2693,12 +2862,52 @@ async function sheetResolveSpeaker(v, lang) {
 
 let sheetAuth = null;
 try {
-    const creds = JSON.parse(fs.readFileSync(path.join(__dirname, 'google_sheet.json'), 'utf8'));
+    const creds = JSON.parse(fs.readFileSync(path.join(__dirname, 'config', 'google_sheet.json'), 'utf8'));
     sheetAuth = new JWT({ email: creds.client_email, key: creds.private_key, scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
 } catch (e) { console.warn('[naze-sheet] Không đọc được google_sheet.json → tắt sync sheet:', e.message); }
 
 let sheetTickRunning = false;
 let activeSheetJobs = 0;
+
+// Chèn 1 CỘT TRỐNG vật lý vào tab (dịch dữ liệu các cột từ atIndex trở đi sang phải) → thêm cột GIỮA bảng
+// mà KHÔNG lệch dữ liệu cột cũ. Phải làm trước setHeaderRow (setHeaderRow chỉ ghi lại nhãn dòng 1, không dời data).
+async function insertSheetBlankColumn(sheetId, atIndex) {
+    await sheetAuth.request({
+        url: `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`,
+        method: 'POST',
+        // inheritFromBefore=true: kế thừa từ cột TRÁI ('Tạo giọng đọc?'), KHÔNG phải cột phải ('Giọng đọc').
+        // false sẽ kế thừa dropdown giọng đọc của cột phải → cột tốc độ hiện danh sách giọng (sai). Sau đó vẫn xoá DV.
+        data: { requests: [{ insertDimension: {
+            range: { sheetId, dimension: 'COLUMNS', startIndex: atIndex, endIndex: atIndex + 1 },
+            inheritFromBefore: true,
+        } }] },
+    });
+}
+
+// Xoá data-validation (dropdown) của 1 cột → cột 'Tốc độ đọc' là ô nhập số tự do, không dính dropdown cột kế bên.
+async function clearColumnValidation(sheetId, colIndex) {
+    if (colIndex < 0) return;
+    await sheetAuth.request({
+        url: `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`,
+        method: 'POST',
+        data: { requests: [{ setDataValidation: {   // không kèm 'rule' → xoá mọi validation trong range
+            range: { sheetId, startRowIndex: 1, endRowIndex: 1000, startColumnIndex: colIndex, endColumnIndex: colIndex + 1 },
+        } }] },
+    });
+}
+
+// Dời 1 CỘT từ vị trí from → to (dùng khi cột 'Tốc độ đọc' lỡ được thêm ở cuối, cần đưa về sau 'Tạo giọng đọc?').
+// destinationIndex tính theo toạ độ TRƯỚC khi dời; from>to (dời sang trái) → cột nằm đúng tại `to`.
+async function moveSheetColumn(sheetId, from, to) {
+    await sheetAuth.request({
+        url: `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`,
+        method: 'POST',
+        data: { requests: [{ moveDimension: {
+            source: { sheetId, dimension: 'COLUMNS', startIndex: from, endIndex: from + 1 },
+            destinationIndex: to,
+        } }] },
+    });
+}
 
 // Tạo project naze/drama + chờ pipeline xong rồi orchestrate auto voice. Trả về true nếu thành công.
 // srt = { src, tgt } → chạy chế độ --srt (import phụ đề, không cần GPT sinh nội dung).
@@ -2708,16 +2917,18 @@ function createNazeProjectAndWait({ topic, projectId, targetLang, genre, tweetUr
             const targetDir = path.join(MEDIA_DIR, projectId);
             if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
             if (voice && (voice.speakerUuid || voice.viSpeakerUuid)) {
-                writeVoiceAutoConfig(projectId, { speakerUuid: voice.speakerUuid, contentType: voice.contentType, dictionaryUuids: voice.dictionaryUuids, lips: voice.lips, viSpeakerUuid: voice.viSpeakerUuid });
+                writeVoiceAutoConfig(projectId, { speakerUuid: voice.speakerUuid, contentType: voice.contentType, dictionaryUuids: voice.dictionaryUuids, lips: voice.lips, viSpeakerUuid: voice.viSpeakerUuid, speed: voice.speed });
             }
             let args;
             if (srt && srt.src) {
-                // naze_content.js --srt <src> <projectId> [<srtĐích>] <lang>
-                args = ['naze_content.js', '--srt', srt.src, projectId];
+                // naze_content.js --srt <src> <projectId> [<srtĐích>] <lang> [--genre drama]
+                // Thiếu --genre thì SRT luôn chạy như 'naze' → dòng drama trong sheet không cào X, lưu sai thể loại.
+                args = ['src/workers/naze_content.js', '--srt', srt.src, projectId];
                 if (srt.tgt) args.push(srt.tgt);
                 args.push(targetLang || 'vi');
+                if (genre === 'drama') args.push('--genre', 'drama');
             } else {
-                args = ['naze_content.js', topic.trim(), projectId, targetLang || 'vi', genre === 'drama' ? 'drama' : 'naze'];
+                args = ['src/workers/naze_content.js', topic.trim(), projectId, targetLang || 'vi', genre === 'drama' ? 'drama' : 'naze'];
             }
             const env = { ...process.env };
             if (genre === 'drama' && tweetUrls) env.NAZE_TWEET_URLS = tweetUrls;
@@ -2779,18 +2990,30 @@ async function refreshSheetDropdowns(doc) {
             rule: { condition: { type: 'ONE_OF_LIST', values: values.map(v => ({ userEnteredValue: String(v) })) }, strict: false, showCustomUi: true },
         } });
         const requests = [];
-        // Tab naze — cột 0-index: speaker=7, lipsVideo=11, srtSrc=13, srtTgt=14
+        // Tab naze — index TÍNH ĐỘNG theo SHEET_HEADERS (chèn cột 'Tốc độ đọc' làm các cột sau dịch phải,
+        // nên hardcode index sẽ trỏ sai; indexOf luôn đúng dù đổi thứ tự cột).
         const nz = doc.sheetsByTitle[SHEET_TAB];
         if (nz) {
-            requests.push(dv(nz.sheetId, 11, [...mp4s, '(không dùng lips)']), dv(nz.sheetId, 13, [...srts, '(không dùng SRT)']), dv(nz.sheetId, 14, [...srts, '(không dùng SRT)']));
-            if (speakers.length) requests.push(dv(nz.sheetId, 7, [...speakers, '(không tạo voice)']));
+            const cLips = SHEET_HEADERS.indexOf(SHEET_COL.lipsVideo);
+            const cSrtSrc = SHEET_HEADERS.indexOf(SHEET_COL.srtSrc);
+            const cSrtTgt = SHEET_HEADERS.indexOf(SHEET_COL.srtTgt);
+            const cSpk = SHEET_HEADERS.indexOf(SHEET_COL.speaker);
+            if (cLips >= 0) requests.push(dv(nz.sheetId, cLips, [...mp4s, '(không dùng lips)']));
+            if (cSrtSrc >= 0) requests.push(dv(nz.sheetId, cSrtSrc, [...srts, '(không dùng SRT)']));
+            if (cSrtTgt >= 0) requests.push(dv(nz.sheetId, cSrtTgt, [...srts, '(không dùng SRT)']));
+            if (cSpk >= 0 && speakers.length) requests.push(dv(nz.sheetId, cSpk, [...speakers, '(không tạo voice)']));
             if (viSpeakers.length && SHEET_COL_SPEAKER_VI_IDX >= 0) requests.push(dv(nz.sheetId, SHEET_COL_SPEAKER_VI_IDX, [...viSpeakers, '(không tạo voice VN)']));
         }
-        // Tab geo — cột 0-index: speaker=4, lipsVideo=8
+        // Tab geo — index TÍNH ĐỘNG theo GEO_SHEET_HEADERS (đã chèn 'Ngôn ngữ đích' ở cột C nên
+        // các cột dịch phải; hardcode index cũ sẽ trỏ sai cột).
         const geo = doc.sheetsByTitle[GEO_SHEET_TAB];
         if (geo) {
-            requests.push(dv(geo.sheetId, 8, [...mp4s, '(không dùng lips)']));
-            if (speakers.length) requests.push(dv(geo.sheetId, 4, [...speakers, '(không tạo voice)']));
+            const cLips = GEO_SHEET_HEADERS.indexOf(SHEET_COL.lipsVideo);
+            const cSpk = GEO_SHEET_HEADERS.indexOf(SHEET_COL.speaker);
+            const cLang = GEO_SHEET_HEADERS.indexOf(GEO_COL.lang);
+            if (cLips >= 0) requests.push(dv(geo.sheetId, cLips, [...mp4s, '(không dùng lips)']));
+            if (cSpk >= 0 && speakers.length) requests.push(dv(geo.sheetId, cSpk, [...speakers, '(không tạo voice)']));
+            if (cLang >= 0) requests.push(dv(geo.sheetId, cLang, GEO_LANG_CHOICES));   // dropdown ngôn ngữ (giống modal)
         }
         if (!requests.length) return;
         await sheetAuth.request({ url: `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, method: 'POST', data: { requests } });
@@ -2813,10 +3036,26 @@ async function sheetPollTick() {
         // Tab cũ chưa có cột 'Giọng đọc (tiếng Việt)' → thêm header (append cuối, không đụng dữ liệu cột cũ)
         try {
             await sheet.loadHeaderRow();
-            if (!sheet.headerValues.includes(SHEET_COL.speakerVi)) {
+            const hv = sheet.headerValues;
+            // Cột 'Tốc độ đọc' nằm GIỮA bảng (ngay sau 'Tạo giọng đọc?') → phải chèn/dời cột VẬT LÝ để data cột cũ
+            // dịch đúng, rồi mới setHeaderRow. Chỉ setHeaderRow sẽ dán nhãn đè lên data giọng/từ điển → lệch hết.
+            const wantIdx = hv.indexOf(SHEET_COL.voiceOn) + 1;   // vị trí đích của 'Tốc độ đọc'
+            const curIdx = hv.indexOf(SHEET_COL.speed);
+            if (wantIdx > 0 && curIdx < 0) {
+                try { await insertSheetBlankColumn(sheet.sheetId, wantIdx); } catch (e) { console.error('[naze-sheet] chèn cột tốc độ lỗi:', e.message); }
+                await sheet.setHeaderRow(SHEET_HEADERS);
+                console.log(`[naze-sheet] Đã chèn cột '${SHEET_COL.speed}' ngay sau '${SHEET_COL.voiceOn}' ở tab '${SHEET_TAB}'.`);
+            } else if (wantIdx > 0 && curIdx >= 0 && curIdx !== wantIdx) {
+                // Đã có nhưng sai chỗ (vd bản trước lỡ thêm ở cuối) → dời về đúng sau 'Tạo giọng đọc?'
+                try { await moveSheetColumn(sheet.sheetId, curIdx, wantIdx); } catch (e) { console.error('[naze-sheet] dời cột tốc độ lỗi:', e.message); }
+                await sheet.setHeaderRow(SHEET_HEADERS);
+                console.log(`[naze-sheet] Đã dời cột '${SHEET_COL.speed}' về sau '${SHEET_COL.voiceOn}' ở tab '${SHEET_TAB}'.`);
+            } else if (!hv.includes(SHEET_COL.speakerVi)) {
                 await sheet.setHeaderRow(SHEET_HEADERS);
                 console.log(`[naze-sheet] Đã thêm cột '${SHEET_COL.speakerVi}' vào tab '${SHEET_TAB}'.`);
             }
+            // Cột tốc độ là ô nhập số → luôn xoá dropdown (kể cả cột đã lỡ kế thừa dropdown giọng của cột kế).
+            await clearColumnValidation(sheet.sheetId, SHEET_HEADERS.indexOf(SHEET_COL.speed)).catch(() => {});
         } catch (e) { console.error('[naze-sheet] ensure header lỗi:', e.message); }
         await refreshSheetDropdowns(doc);                    // đồng bộ dropdown (naze+geo) với file hiện có mỗi nhịp
         const rows = await sheet.getRows();
@@ -2829,22 +3068,32 @@ async function sheetPollTick() {
             const srtTgt = sheetCleanLips(row.get(SHEET_COL.srtTgt));
             const isSrt = !!srtSrc;
             if (!isSrt && !topic) continue;                       // dòng trống thật → bỏ qua (cần topic HOẶC file SRT)
-            // SRT là luồng naze (import phụ đề). Chỉ validate genre cho luồng thường.
-            let genre = 'naze';
-            if (!isSrt) {
-                genre = sheetMapGenre(row.get(SHEET_COL.genre));
-                if (genre !== 'naze' && genre !== 'drama') {
-                    row.set(SHEET_COL.status, 'ERROR'); row.set(SHEET_COL.note, "Thể loại phải là 'Tại sao' hoặc 'Drama'"); await row.save(); continue;
-                }
-            } else if (!fs.existsSync(srtSrc)) {
-                row.set(SHEET_COL.status, 'ERROR'); row.set(SHEET_COL.note, 'File SRT (nguồn) không tồn tại: ' + srtSrc); await row.save(); continue;
+            // SRT dùng cho CẢ 'Tại sao' lẫn 'Drama' (drama giờ nhận 2 file SRT thay ô 'Chủ đề')
+            // → luôn đọc cột Thể loại, kể cả dòng SRT. Trước đây dòng SRT bị ép cứng thành naze.
+            const genre = sheetMapGenre(row.get(SHEET_COL.genre)) || 'naze';
+            if (genre !== 'naze' && genre !== 'drama') {
+                row.set(SHEET_COL.status, 'ERROR'); row.set(SHEET_COL.note, "Thể loại phải là 'Tại sao' hoặc 'Drama'"); await row.save(); continue;
             }
-            const projectId = (row.get(SHEET_COL.projectId) || '').trim() || ('naze_' + Date.now());
+            if (isSrt) {
+                if (!fs.existsSync(srtSrc)) {
+                    row.set(SHEET_COL.status, 'ERROR'); row.set(SHEET_COL.note, 'File SRT (nguồn) không tồn tại: ' + srtSrc); await row.save(); continue;
+                }
+                if (srtTgt && !fs.existsSync(srtTgt)) {
+                    row.set(SHEET_COL.status, 'ERROR'); row.set(SHEET_COL.note, 'File SRT (đích) không tồn tại: ' + srtTgt); await row.save(); continue;
+                }
+            } else if (genre === 'drama') {
+                // Drama giờ chạy bằng 2 file SRT → dòng drama chỉ có 'Chủ đề' là thiếu đầu vào
+                row.set(SHEET_COL.status, 'ERROR');
+                row.set(SHEET_COL.note, 'Drama cần File SRT (nguồn) — ô Chủ đề không còn dùng cho drama');
+                await row.save(); continue;
+            }
+            const projectId = (row.get(SHEET_COL.projectId) || '').trim() || stampId('naze_');
             const targetLang = sheetMapLang(row.get(SHEET_COL.lang));
             const tweetUrls = (row.get(SHEET_COL.tweets) || '').trim();
             // Giọng đọc & Lips sync là TUỲ CHỌN Có/Không — chỉ khi 'Có' mới đọc giá trị.
             const voiceOn = sheetIsYes(row.get(SHEET_COL.voiceOn));
             const lipsOn = sheetIsYes(row.get(SHEET_COL.lipsOn));
+            const speed = sheetParseSpeed(row.get(SHEET_COL.speed));   // tốc độ đọc (áp dụng cho cả voice chính & voice VN)
             const errRow = async (msg) => { row.set(SHEET_COL.status, 'ERROR'); row.set(SHEET_COL.note, msg); await row.save(); };
             let voice = null;
             if (voiceOn) {
@@ -2859,7 +3108,7 @@ async function sheetPollTick() {
                     if (!lipsVideo) { await errRow('Đã chọn Lips sync = Có nhưng chưa chọn Video khuôn mặt'); continue; }
                     lips = { video: lipsVideo, guidanceScale: parseFloat(row.get(SHEET_COL.lipsGuidance)) || 2.2 };
                 }
-                voice = { speakerUuid, contentType: voiceContentType, dictionaryUuids, lips };
+                voice = { speakerUuid, contentType: voiceContentType, dictionaryUuids, lips, speed };
             } else if (lipsOn) {
                 await errRow('Muốn Lips sync thì phải bật Tạo giọng đọc = Có'); continue;
             }
@@ -2869,7 +3118,7 @@ async function sheetPollTick() {
                 const viSpeakerUuid = await sheetResolveSpeaker(viRaw, 'vi');
                 if (!viSpeakerUuid) { await errRow('Đã chọn Giọng đọc (tiếng Việt) nhưng không hợp lệ'); continue; }
                 if (!(voice && voice.contentType === 'content_vi')) {   // voice chính đã là VN thì khỏi tạo trùng
-                    voice = voice || { speakerUuid: '', contentType: 'content', dictionaryUuids: [], lips: null };
+                    voice = voice || { speakerUuid: '', contentType: 'content', dictionaryUuids: [], lips: null, speed };
                     voice.viSpeakerUuid = viSpeakerUuid;
                 }
             }
@@ -2903,33 +3152,57 @@ if (sheetAuth && process.env.NAZE_SHEET_SYNC !== 'off') {
 // nếu có tin MỚI → xào 1 project (proj_<ts>) qua process_content.js; không có tin mới → bỏ qua.
 // ============================================================
 const GEO_SHEET_TAB = 'dia_chinh_tri';
-const GEO_COL = { topic: 'Chủ đề', sources: 'Nguồn', on: 'Bật?', lastRun: 'Lần chạy gần nhất', lastNew: 'Tin mới lần gần nhất', total: 'Tổng tin đã lấy', note: 'Ghi chú' };
+const GEO_COL = { topic: 'Chủ đề', sources: 'Nguồn', on: 'Bật?', lang: 'Ngôn ngữ đích', xAccounts: 'Account X', lastRun: 'Lần chạy gần nhất', lastNew: 'Tin mới lần gần nhất', total: 'Tổng tin đã lấy', note: 'Ghi chú' };
+// Chọn ngôn ngữ đích cho dropdown cột 'Ngôn ngữ đích' (giống modal). Tên khớp SHEET_LANG_MAP.
+// Ô trống → 'ja' (mặc định geo). Đặt Tiếng Nhật đầu cho tiện.
+const GEO_LANG_CHOICES = ['Tiếng Nhật', 'Tiếng Việt', 'Tiếng Anh', 'Tiếng Hàn', 'Tiếng Trung', 'Tiếng Pháp', 'Tiếng Tây Ban Nha'];
 // Cột voice/lips DÙNG CHUNG header với tab naze (SHEET_COL) → tái dùng helper map/validate.
-const GEO_SHEET_HEADERS = [GEO_COL.topic, GEO_COL.sources, GEO_COL.on,
-    SHEET_COL.voiceOn, SHEET_COL.speaker, SHEET_COL.voiceType, SHEET_COL.dict,
+// 'Ngôn ngữ đích' ở cột C (index 2). 'Account X' để CUỐI. Thứ tự này PHẢI khớp thứ tự vật lý
+// trên sheet — read theo tên header nên đọc không lệch, nhưng setHeaderRow (self-heal) ghi theo
+// thứ tự mảng này, nên đổi thứ tự ở đây mà không dịch cột thật sẽ xô lệch dữ liệu.
+const GEO_SHEET_HEADERS = [GEO_COL.topic, GEO_COL.sources, GEO_COL.lang, GEO_COL.on,
+    SHEET_COL.voiceOn, SHEET_COL.speed, SHEET_COL.speaker, SHEET_COL.voiceType, SHEET_COL.dict,
     SHEET_COL.lipsOn, SHEET_COL.lipsVideo, SHEET_COL.lipsGuidance,
-    GEO_COL.lastRun, GEO_COL.lastNew, GEO_COL.total, GEO_COL.note];
+    GEO_COL.lastRun, GEO_COL.lastNew, GEO_COL.total, GEO_COL.note, GEO_COL.xAccounts];
 const GEO_POLL_MS = 2 * 60 * 1000;
 const MAX_GEO_JOBS = 1;                            // geo nặng (RSS+FlareSolverr+GPT-5) → chạy 1 lúc
 const GEO_SEEN_DIR = path.join(__dirname, 'rss_seen');
 let geoTickRunning = false;
 let activeGeoJobs = 0;
 const geoRunning = new Set();                      // key chủ đề đang chạy (chống chồng khi run > 2 phút)
+// Lần chạy gần nhất theo chủ đề. Mỗi tick chỉ chạy được MAX_GEO_JOBS dòng, nên phải XOAY VÒNG:
+// ưu tiên dòng lâu chưa chạy nhất (chưa chạy lần nào = 0 → chạy trước). Không có cái này thì tick nào
+// cũng bắt đầu từ đầu sheet → dòng 1 chạy mãi, dòng 2 trở đi không bao giờ tới lượt.
+const geoLastRun = new Map();
 const geoSeenPath = (topic) => path.join(GEO_SEEN_DIR, crypto.createHash('md5').update(topic).digest('hex').slice(0, 12) + '.json');
 const nowVN = () => new Date().toLocaleString('vi-VN');
+// Đọc lại mốc chạy từ cột 'Lần chạy gần nhất' (do nowVN() ghi: "14:18:34 14/7/2026").
+// Nhờ vậy restart server KHÔNG làm mất thứ tự xoay vòng — dòng crawl lâu rồi vẫn được ưu tiên.
+// Chấp nhận cả kiểu ngày-trước ("14/7/2026 14:18:34") phòng khi Google Sheets định dạng lại ô.
+function parseVN(s) {
+    const t = String(s || '').trim();
+    if (!t) return 0;
+    let m = t.match(/^(\d{1,2}):(\d{2}):(\d{2})\s+(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) return new Date(+m[6], +m[5] - 1, +m[4], +m[1], +m[2], +m[3]).getTime() || 0;
+    m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (m) return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0)).getTime() || 0;
+    const d = Date.parse(t);
+    return Number.isFinite(d) ? d : 0;   // không đọc được → coi như chưa chạy (được ưu tiên chạy trước)
+}
 
 // Chạy 1 lần monitor cho 1 chủ đề: spawn process_content.js (JP RSS, when:1d, dedup theo seenFile). Trả {code,new,projectId}.
-function runGeoMonitor({ topic, sources, voice }) {
+function runGeoMonitor({ topic, sources, xAccounts, targetLang, voice }) {
     return new Promise((resolve) => {
         try {
-            const projectId = 'proj_' + Date.now();   // process_content.js tự tạo thư mục project khi saveToDb (chỉ khi có tin mới)
+            const projectId = stampId('proj_');   // process_content.js tự tạo thư mục project khi saveToDb (chỉ khi có tin mới)
             // Ô 'Chủ đề' có thể chứa NHIỀU keyword (mỗi dòng / phẩy 1 keyword) → tách ra để search TỪNG cái,
             // không dồn thành 1 query dài dính liền (dồn lại thì gần như 0 bài).
             const geoKeywords = topic.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
-            const args = ['process_content.js', '--projectId', projectId,
+            const args = ['src/workers/process_content.js', '--projectId', projectId,
                 '--keywords', JSON.stringify(geoKeywords.length ? geoKeywords : [topic]), '--sources', JSON.stringify(sources),
-                '--country', 'JP', '--clang', 'ja', '--targetLang', 'vi',
+                '--country', 'JP', '--clang', 'ja', '--targetLang', targetLang || 'ja',
                 '--days', '1', '--content', topic, '--seenFile', geoSeenPath(topic)];
+            if (xAccounts && xAccounts.length) args.push('--xAccounts', JSON.stringify(xAccounts));
             let out = '';
             const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
             child.stdout.on('data', d => { out += d.toString(); process.stdout.write(`[geo-sheet] ${d}`); });
@@ -2973,17 +3246,62 @@ async function geoSheetTick() {
         await doc.loadInfo();
         const sheet = doc.sheetsByTitle[GEO_SHEET_TAB];
         if (!sheet) { await doc.addSheet({ title: GEO_SHEET_TAB, headerValues: GEO_SHEET_HEADERS }); console.log(`[geo-sheet] Đã tạo tab '${GEO_SHEET_TAB}'.`); return; }
+        // Tab cũ thiếu cột mới → thêm header. Riêng 'Tốc độ đọc' nằm GIỮA bảng (sau 'Tạo giọng đọc?')
+        // nên phải chèn cột vật lý trước để data cột cũ dịch phải, rồi setHeaderRow mới không lệch.
+        try {
+            await sheet.loadHeaderRow();
+            const hv = sheet.headerValues;
+            const wantIdx = hv.indexOf(SHEET_COL.voiceOn) + 1;   // vị trí đích của 'Tốc độ đọc'
+            const curIdx = hv.indexOf(SHEET_COL.speed);
+            if (wantIdx > 0 && curIdx < 0) {
+                try { await insertSheetBlankColumn(sheet.sheetId, wantIdx); } catch (e) { console.error('[geo-sheet] chèn cột tốc độ lỗi:', e.message); }
+            } else if (wantIdx > 0 && curIdx >= 0 && curIdx !== wantIdx) {
+                try { await moveSheetColumn(sheet.sheetId, curIdx, wantIdx); } catch (e) { console.error('[geo-sheet] dời cột tốc độ lỗi:', e.message); }
+            }
+            if (!GEO_SHEET_HEADERS.every(h => hv.includes(h)) || (curIdx >= 0 && curIdx !== wantIdx)) {
+                const miss = GEO_SHEET_HEADERS.filter(h => !hv.includes(h));
+                await sheet.setHeaderRow(GEO_SHEET_HEADERS);
+                console.log(`[geo-sheet] Đã đồng bộ header${miss.length ? ' (thêm [' + miss.join(', ') + '])' : ''} ở tab '${GEO_SHEET_TAB}'.`);
+            }
+            // Cột tốc độ là ô nhập số → luôn xoá dropdown (kể cả cột đã lỡ kế thừa dropdown giọng của cột kế).
+            await clearColumnValidation(sheet.sheetId, GEO_SHEET_HEADERS.indexOf(SHEET_COL.speed)).catch(() => {});
+        } catch (e) { console.error('[geo-sheet] ensure header lỗi:', e.message); }
         const rows = await sheet.getRows();
-        for (const row of rows) {
+
+        // Xếp hàng CHỜ: bỏ dòng trống / tắt / đang chạy, rồi sắp theo lần chạy gần nhất (cũ nhất trước).
+        // Dòng chưa chạy lần nào có mốc 0 → luôn được ưu tiên, nên hết 1 lượt từ trên xuống dưới rồi mới quay lại dòng 1.
+        const queue = rows
+            .map((row, i) => {
+                const topic = (row.get(GEO_COL.topic) || '').trim();
+                // Chưa có mốc trong RAM (server vừa restart) → lấy từ cột 'Lần chạy gần nhất' của sheet
+                if (topic && !geoLastRun.has(topic)) {
+                    const ts = parseVN(row.get(GEO_COL.lastRun));
+                    if (ts) geoLastRun.set(topic, ts);
+                }
+                return { row, i, topic };
+            })
+            .filter(({ row, topic }) => {
+                if (!topic) return false;
+                const on = (row.get(GEO_COL.on) || '').trim().toLowerCase();
+                if (['không', 'khong', 'no', 'off', 'tắt', 'tat'].includes(on)) return false;   // tạm dừng (trống = bật)
+                return !geoRunning.has(geoSeenPath(topic));                                     // đang chạy dở → bỏ qua nhịp này
+            })
+            .sort((a, b) => ((geoLastRun.get(a.topic) || 0) - (geoLastRun.get(b.topic) || 0)) || (a.i - b.i));
+
+        if (queue.length) {
+            const waiting = queue.filter(q => !geoLastRun.has(q.topic)).length;
+            console.log(`[geo-sheet] ${queue.length} dòng sẵn sàng (${waiting} chưa chạy lần nào), chạy tối đa ${MAX_GEO_JOBS} dòng/nhịp`);
+        }
+
+        for (const { row, topic } of queue) {
             if (activeGeoJobs >= MAX_GEO_JOBS) break;
-            const topic = (row.get(GEO_COL.topic) || '').trim();
-            if (!topic) continue;
-            const on = (row.get(GEO_COL.on) || '').trim().toLowerCase();
-            if (['không', 'khong', 'no', 'off', 'tắt', 'tat'].includes(on)) continue;   // tạm dừng (trống = bật)
             const key = geoSeenPath(topic);
-            if (geoRunning.has(key)) continue;                                           // đang chạy dở → bỏ qua nhịp này
             // Nhiều nguồn: mỗi nguồn 1 dòng (hoặc phẩy). Bỏ http/path/www → domain thuần cho site: filter.
             const sources = (row.get(GEO_COL.sources) || '').split(/[\n,]/).map(s => s.trim().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '')).filter(Boolean);
+            // Account X: mỗi dòng/phẩy 1 account (bỏ @ và URL x.com/twitter.com → username thuần).
+            const xAccounts = (row.get(GEO_COL.xAccounts) || '').split(/[\n,]/).map(s => s.trim().replace(/^@/, '').replace(/^https?:\/\/(x|twitter)\.com\//i, '').split(/[/?]/)[0]).filter(Boolean);
+            // Ngôn ngữ đích: ô trống → tiếng Nhật (ja). Điền 'Tiếng Việt'/vi... → theo đó.
+            const targetLang = sheetMapLang(row.get(GEO_COL.lang), 'ja');
             const prevTotal = parseInt(row.get(GEO_COL.total)) || 0;
             // Voice + lips (tuỳ chọn, giống tab naze). Bật voice mà chưa chọn giọng hợp lệ → vẫn crawl, chỉ bỏ voice.
             let voice = null;
@@ -2992,26 +3310,28 @@ async function geoSheetTick() {
                 if (speakerUuid) {
                     const voiceContentType = sheetMapContentType(row.get(SHEET_COL.voiceType));
                     const dictionaryUuids = (row.get(SHEET_COL.dict) || '').split(',').map(s => s.trim()).filter(Boolean);
+                    const speed = sheetParseSpeed(row.get(SHEET_COL.speed));   // tốc độ đọc (ttsmin)
                     let lips = null;
                     if (sheetIsYes(row.get(SHEET_COL.lipsOn)) && voiceContentType === 'content') {
                         const lipsVideo = sheetCleanLips(row.get(SHEET_COL.lipsVideo));
                         if (lipsVideo) lips = { video: lipsVideo, guidanceScale: parseFloat(row.get(SHEET_COL.lipsGuidance)) || 2.2 };
                     }
-                    voice = { speakerUuid, contentType: voiceContentType, dictionaryUuids, lips };
+                    voice = { speakerUuid, contentType: voiceContentType, dictionaryUuids, lips, speed };
                 } else {
                     console.warn(`[geo-sheet] '${topic}': bật Tạo giọng đọc nhưng chưa chọn Giọng đọc hợp lệ → bỏ qua voice.`);
                 }
             }
             geoRunning.add(key); activeGeoJobs++;
+            geoLastRun.set(topic, Date.now());   // đánh dấu NGAY để dòng này lùi xuống cuối hàng, nhường lượt dòng sau
             setGeoRow(topic, { [GEO_COL.note]: '⏳ Đang crawl...', [GEO_COL.lastRun]: nowVN() });
             console.log(`[geo-sheet] ▶ '${topic}' (nguồn: ${sources.join(',') || 'tất cả'}${voice ? ', +voice' + (voice.lips ? '+lips' : '') : ''})`);
-            runGeoMonitor({ topic, sources, voice })
+            runGeoMonitor({ topic, sources, xAccounts, targetLang, voice })
                 .then(res => {
                     if (res.code === 0) setGeoRow(topic, { [GEO_COL.lastRun]: nowVN(), [GEO_COL.lastNew]: res.new, [GEO_COL.total]: prevTotal + (res.new || 0), [GEO_COL.note]: `✅ ${res.new} tin mới → ${res.projectId || ''}` });
                     else if (res.code === 2) setGeoRow(topic, { [GEO_COL.lastRun]: nowVN(), [GEO_COL.lastNew]: 0, [GEO_COL.note]: 'Không có tin mới' });
                     else setGeoRow(topic, { [GEO_COL.lastRun]: nowVN(), [GEO_COL.note]: '❌ Lỗi (xem log server)' });
                 })
-                .finally(() => { geoRunning.delete(key); activeGeoJobs--; });
+                .finally(() => { geoRunning.delete(key); activeGeoJobs--; geoLastRun.set(topic, Date.now()); });
         }
     } catch (e) { console.error('[geo-sheet] poll lỗi:', e.message); }
     finally { geoTickRunning = false; }
@@ -3022,5 +3342,18 @@ if (sheetAuth && process.env.GEO_SHEET_SYNC !== 'off') {
     geoSheetTick();
     console.log(`[geo-sheet] Bật monitor Địa chính trị tab '${GEO_SHEET_TAB}' mỗi ${GEO_POLL_MS / 1000}s (RSS Nhật, when:1d).`);
 }
+
+// Dọn row kẹt status='crawling' từ lần chạy trước: restart server giết mọi crawl con (spawn từ server),
+// nên khi server khởi động lại thì không còn crawl nào thật sự chạy → mọi 'crawling' đều là rác.
+// Không xoá thì loadPosts() đọc lại DB sẽ hiện spinner "ma" trên dự án đã xong. (sync-assets chỉ đẩy SSE,
+// không ghi cột status nên không ảnh hưởng.)
+(async () => {
+    try {
+        const d = await getDb();
+        const r = await d.run("UPDATE Post SET status = NULL WHERE status = 'crawling'");
+        await d.close();
+        if (r?.changes) console.log(`[startup] Dọn ${r.changes} post kẹt status='crawling' từ lần chạy trước.`);
+    } catch (e) { console.error('[startup] dọn crawling lỗi:', e.message); }
+})();
 
 app.listen(PORT, () => console.log(`🚀 http://localhost:${PORT}`));

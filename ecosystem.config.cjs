@@ -9,7 +9,7 @@ module.exports = {
         },
         {
             name: 'sync-assets',
-            script: 'sync_assets_db.js',
+            script: 'src/workers/sync_assets_db.js',
             interpreter: 'node',
             watch: false,
             env_file: '.env',
