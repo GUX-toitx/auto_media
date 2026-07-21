@@ -50,7 +50,7 @@ function capture(profileName, url, outDir, base) {
 }
 
 // Cào X -> trả về manifest [{id,url,user,date,text, images[], videos[], screenshot, recording}]
-export async function crawlX({ profileName, outDir, keywords = '', urls = '', limit = 15, max = 8, captureMax = 3 }) {
+export async function crawlX({ profileName, outDir, keywords = '', urls = '', limit = 15, max = 8, captureMax = 3, maxImages = Infinity, maxVideos = Infinity }) {
     const cookies = readCookies(profileName);
     let tweets = runScrape(cookies, { keywords, urls, limit });
     // ưu tiên bài có media trước, cắt còn `max`
@@ -67,17 +67,22 @@ export async function crawlX({ profileName, outDir, keywords = '', urls = '', li
 
     const manifest = [];
     let captured = 0;
+    let totImg = 0, totVid = 0;   // tổng ảnh/video đã tải — để dừng khi đạt maxImages/maxVideos
     for (const t of tweets) {
+        // Đủ chỉ tiêu cả ảnh lẫn video → dừng sớm (khỏi tải/chụp thêm)
+        if (totImg >= maxImages && totVid >= maxVideos) break;
         const rec = { id: t.id, url: t.url, user: t.user, date: t.date, text: t.text, images: [], videos: [], screenshot: null, recording: null };
         let mi = 0, vi = 0;
         for (const m of (t.media || [])) {
             try {
                 if (m.type === 'photo') {
+                    if (totImg >= maxImages) continue;   // đủ ảnh rồi → bỏ qua
                     const dest = path.join(dirs.images, `x_${t.id}_${mi++}.jpg`);
-                    await download(m.url, dest); rec.images.push(dest);
+                    await download(m.url, dest); rec.images.push(dest); totImg++;
                 } else if (m.type === 'video') {
+                    if (totVid >= maxVideos) continue;   // đủ video rồi → bỏ qua
                     const dest = path.join(dirs.videos, `x_${t.id}_${vi++}.mp4`);
-                    await download(m.url, dest); rec.videos.push(dest);
+                    await download(m.url, dest); rec.videos.push(dest); totVid++;
                 }
             } catch (e) { console.error(`[x_crawler] tải media ${t.id}: ${e.message}`); }
         }

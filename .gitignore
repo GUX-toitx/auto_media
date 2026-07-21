@@ -9,10 +9,23 @@ __pycache__/
 logs/
 *.log
 
-# DB + WAL
+# DB + WAL (dữ liệu chạy thật, KHÔNG commit)
 *.sqlite-shm
 *.sqlite-wal
 *.bak-*
+*.sqlite
+database/
+accounts.db
+
+# BÍ MẬT — tuyệt đối không commit (key/cookie/tài khoản)
+config/google_sheet.json
+config/youtube.com_cookies.txt
+*_cookies.txt
+
+# Rác runtime / trùng lặp
+setting/
+.vscode/
+0616/
 
 # Profile trình duyệt (Playwright/Puppeteer)
 chrome_profile_*/

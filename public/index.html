@@ -23,6 +23,7 @@
                 <button @click="openProfilePage" :class="['flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all', page === 'profiles' ? 'bg-green-600 text-white shadow-lg shadow-green-500/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white']">🧑💻 Profiles</button>
             </div>
             <button @click="genreChooser.open = true" class="w-full py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-cyan-600 hover:bg-cyan-500 text-white">➕ Tạo dự án</button>
+            <button @click="pageChooser.open = true" class="w-full py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">🔗 Mở trang khác</button>
         </div>
         <!-- Tách 3 menu theo thể loại dự án -->
         <div class="px-3 pt-3 flex gap-1">
@@ -60,8 +61,15 @@
                     <p class="text-blue-500 font-mono text-[10px] mb-2 uppercase tracking-[0.3em]">Workspace / Project</p>
                     <div class="flex items-center gap-3">
                         <h2 class="text-4xl font-black text-white">{{ activePost.project_id }}</h2>
+                        <!-- Điểm chấm nội dung (địa chính trị): GPT chấm 0-100 — bấm xem đánh giá chi tiết -->
+                        <button v-if="activePost.content_score != null" @click="openScoreDetail" title="Bấm xem đánh giá chi tiết"
+                            class="shrink-0 px-3 py-1.5 rounded-xl font-black text-sm cursor-pointer flex items-center gap-1 border hover:brightness-125 transition-all" :class="scoreClass(activePost.content_score)">
+                            ⭐ {{ activePost.content_score }}<span class="text-[10px] opacity-60">/100</span>
+                            <span class="text-[10px] opacity-70 ml-1">🔍 chi tiết</span>
+                        </button>
                     </div>
                     <p v-if="activePost.title" class="text-gray-300 text-sm mt-1 font-medium">{{ activePost.title }}</p>
+                    <p v-if="activePost.content_score != null && activePost.content_score_reason" class="text-gray-500 text-[11px] mt-0.5 italic max-w-2xl">📊 {{ activePost.content_score_reason }}</p>
                 </div>
                 <div class="flex gap-4 items-end">
                     <!-- Refresh: live sync tự động đã tắt, bấm nút này mới nạp asset mới -->
@@ -107,6 +115,7 @@
                             <button @click="generateTitleSeo" :disabled="titleModal.loading" class="bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="titleModal.loading" class="animate-spin inline-block mr-1">⏳</span>📝 Title SEO</button>
                             <button @click="openIntroOutroModal" class="bg-teal-800 hover:bg-teal-700 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🎞️ Intro/Outro<span v-if="activePost.intro_path || activePost.outro_path" class="ml-1 inline-block w-2 h-2 rounded-full bg-green-400 align-middle"></span></button>
                             <button @click="openLipsSyncModal" class="bg-fuchsia-700 hover:bg-fuchsia-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">👄 Lips Sync</button>
+                            <button @click="downloadSrt" class="bg-indigo-700 hover:bg-indigo-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Tải phụ đề .srt khớp với audio (dùng khoảng nghỉ giống CapCut)">📄 Tải SRT</button>
                         </div>
                     </div>
 
@@ -119,6 +128,9 @@
                             <button @click.stop="capcutLang='content'; showCapcutMenu=false; exportCapcut()" class="bg-pink-700 hover:bg-pink-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🌍 Export Target Lang</button>
                             <button @click.stop="capcutLang='both'; showCapcutMenu=false; exportCapcut()" class="bg-pink-700 hover:bg-pink-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🌍+🇻🇳 Cả 2 ngôn ngữ</button>
                             <div class="h-px bg-gray-700 my-0.5"></div>
+                            <button @click.stop="matteLips" :disabled="matteState.running" class="bg-fuchsia-700 hover:bg-fuchsia-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Xoá nền video lips (RVM → nền xanh). Xong rồi export CapCut sẽ tự dùng bản đã xoá nền; trong CapCut Chroma key màu xanh là mất nền.">
+                                <span v-if="matteState.running" class="animate-spin inline-block mr-1">⏳</span>🎭 Xoá nền lips{{ matteState.total ? ` (${matteState.green}/${matteState.total})` : '' }}
+                            </button>
                             <button @click="renderCapcut" :disabled="capcutRendering" class="bg-rose-700 hover:bg-rose-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="capcutRendering" class="animate-spin inline-block mr-1">⏳</span>▶️ Auto Render</button>
                         </div>
                     </div>
@@ -882,6 +894,25 @@
                                             </div>
                                         </div>
                                     </div>
+                                    <!-- Thanh gợi ý phủ cho CẢ CÂU (luận cứ #x.y) — ở NGOÀI phần detail, đo media đã chọn của câu (sentenceId==s.id) so với narration câu (title + các dòng) -->
+                                    <div v-if="s._narrationViSec > 0 || s._narrationTargetSec > 0" class="grid grid-cols-2 gap-2 mt-1">
+                                        <div v-if="s._narrationViSec > 0" class="flex items-center gap-1">
+                                            <span class="text-[10px] shrink-0" title="Phủ tiếng Việt">🇻🇳</span>
+                                            <div class="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                                                <div class="h-full rounded-full transition-all duration-300" :class="sentenceCoverFull(para,s,'vi') ? 'bg-green-500' : 'bg-yellow-500'" :style="{ width: Math.min(100, sentenceMediaSec(para,s) / s._narrationViSec * 100) + '%' }"></div>
+                                            </div>
+                                            <span class="text-[9px] font-mono tabular-nums font-black whitespace-nowrap" :class="coverageClass(sentenceMediaSec(para,s), s._narrationViSec)">{{ sentenceMediaSec(para,s).toFixed(1) }}/{{ s._narrationViSec.toFixed(1) }}s·{{ coverageText(sentenceMediaSec(para,s), s._narrationViSec) }}</span>
+                                        </div>
+                                        <div v-else></div>
+                                        <div v-if="s._narrationTargetSec > 0" class="flex items-center gap-1">
+                                            <span class="text-[10px] shrink-0" title="Phủ ngôn ngữ đích">🌍</span>
+                                            <div class="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                                                <div class="h-full rounded-full transition-all duration-300" :class="sentenceCoverFull(para,s,'target') ? 'bg-green-500' : 'bg-yellow-500'" :style="{ width: Math.min(100, sentenceMediaSec(para,s) / s._narrationTargetSec * 100) + '%' }"></div>
+                                            </div>
+                                            <span class="text-[9px] font-mono tabular-nums font-black whitespace-nowrap" :class="coverageClass(sentenceMediaSec(para,s), s._narrationTargetSec)">{{ sentenceMediaSec(para,s).toFixed(1) }}/{{ s._narrationTargetSec.toFixed(1) }}s·{{ coverageText(sentenceMediaSec(para,s), s._narrationTargetSec) }}</span>
+                                        </div>
+                                        <div v-else></div>
+                                    </div>
                                     <!-- Video selected của câu này -->
                                     <div v-if="(para.videos || []).filter(v => v.sentenceId == s.id).length">
                                         <div class="flex items-center text-[10px] font-black text-gray-500 cursor-pointer hover:text-gray-300 py-0.5" @click="s._videoOpen = !s._videoOpen">
@@ -1228,7 +1259,10 @@
 
             <!-- VIDEO TRIM -->
             <template v-if="editModal.type === 'video'">
-                <video :ref="el => editVideoRef = el" :src="mediaUrl(editModal.asset)" controls class="w-full rounded-lg bg-black" style="max-height:320px"
+                <div v-if="!editModal.videoSrc" class="w-full rounded-lg bg-black flex items-center justify-center text-gray-400 text-sm gap-2" style="height:320px">
+                    <span class="animate-spin">⏳</span> Đang chuẩn bị bản xem 480p (nhẹ)...
+                </div>
+                <video v-else :ref="el => editVideoRef = el" :src="editModal.videoSrc" controls class="w-full rounded-lg bg-black" style="max-height:320px"
                     @loadedmetadata="onVideoLoaded" @timeupdate="onVideoTimeUpdate"></video>
 
                 <!-- Timeline -->
@@ -1442,11 +1476,17 @@
                     <button @click="uploadModal.files.splice(fi, 1)" class="text-red-500 hover:text-red-400 ml-2 font-bold">×</button>
                 </div>
             </div>
+            <div v-if="uploadModal.uploading" class="space-y-1 pt-1">
+                <div class="h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                    <div class="h-full bg-blue-500 rounded-full transition-all duration-150" :style="{ width: (uploadModal.progress || 0) + '%' }"></div>
+                </div>
+                <div class="text-[11px] font-mono font-black text-center text-blue-400">{{ uploadModal.progress || 0 }}%{{ (uploadModal.progress || 0) >= 100 ? ' · đang lưu...' : '' }}</div>
+            </div>
             <div class="flex gap-3 justify-end pt-2">
                 <button @click="uploadModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
                 <button @click="submitUpload" :disabled="!uploadModal.files.length || uploadModal.uploading"
                     class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-blue-600 hover:bg-blue-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
-                    {{ uploadModal.uploading ? 'Đang tải...' : `🚀 Tải lên (${uploadModal.files.length})` }}
+                    {{ uploadModal.uploading ? `Đang tải... ${uploadModal.progress || 0}%` : `🚀 Tải lên (${uploadModal.files.length})` }}
                 </button>
             </div>
         </div>
@@ -1468,7 +1508,7 @@
                     <input v-model="lipsSyncModal.videoPath" type="text" placeholder="/home/gux/.../input.mp4" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 focus:outline-none focus:border-pink-500">
                     <button @click="openFileBrowser('video')" :disabled="lipsSyncModal.uploadingVideo" class="shrink-0 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 px-3 py-2 rounded-lg font-bold text-[11px] text-gray-200">📁 Chọn</button>
                     <label class="shrink-0 bg-indigo-700 hover:bg-indigo-600 px-3 py-2 rounded-lg font-bold text-[11px] text-white cursor-pointer" :class="{'opacity-40 pointer-events-none': lipsSyncModal.uploadingVideo}">
-                        <span v-if="lipsSyncModal.uploadingVideo" class="animate-spin inline-block mr-1">⏳</span>⬆️ Upload
+                        <span v-if="lipsSyncModal.uploadingVideo" class="animate-spin inline-block mr-1">⏳</span>{{ lipsSyncModal.uploadingVideo ? (lipsSyncModal.uploadProgress || 0) + '%' : '⬆️ Upload' }}
                         <input type="file" accept="video/mp4" class="hidden" @change="uploadLipsSyncFile('video', $event)">
                     </label>
                 </div>
@@ -1652,7 +1692,12 @@
                 <input type="file" accept="video/*" @change="uploadIntroOutro('outro', $event)" :disabled="introOutroModal.uploading" class="block w-full text-[11px] text-gray-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-teal-600 file:text-white file:font-bold file:cursor-pointer hover:file:bg-teal-500 disabled:opacity-40">
             </div>
 
-            <div v-if="introOutroModal.uploading" class="text-center text-teal-400 text-[11px] font-bold"><span class="animate-spin inline-block mr-1">⏳</span>Đang upload...</div>
+            <div v-if="introOutroModal.uploading" class="space-y-1">
+                <div class="h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                    <div class="h-full bg-teal-500 rounded-full transition-all duration-150" :style="{ width: (introOutroModal.progress || 0) + '%' }"></div>
+                </div>
+                <div class="text-center text-teal-400 text-[11px] font-bold">Đang upload... {{ introOutroModal.progress || 0 }}%{{ (introOutroModal.progress || 0) >= 100 ? ' · đang lưu' : '' }}</div>
+            </div>
 
             <div class="flex justify-end pt-2">
                 <button @click="introOutroModal.open=false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-400">Đóng</button>
@@ -1954,6 +1999,80 @@
         </div>
     </div>
 
+    <!-- PAGE CHOOSER MODAL: chọn mở trang phụ (Media Upload / Lips Sync Queue) -->
+    <div v-if="pageChooser.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="pageChooser.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[480px] space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-lg font-black text-white">🔗 Mở trang</h3>
+                <button @click="pageChooser.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <a href="/media-upload" target="_blank" @click="pageChooser.open = false"
+                    class="flex flex-col items-center gap-2 p-6 rounded-xl border border-gray-700 bg-gray-800 hover:bg-blue-600 hover:border-blue-500 transition-all group no-underline">
+                    <span class="text-4xl">📤</span>
+                    <span class="text-[13px] font-black text-white">Media Upload</span>
+                    <span class="text-[10px] text-gray-400 group-hover:text-white text-center">Quản lý & upload file media</span>
+                </a>
+                <a href="/lips-queue" target="_blank" @click="pageChooser.open = false"
+                    class="flex flex-col items-center gap-2 p-6 rounded-xl border border-gray-700 bg-gray-800 hover:bg-fuchsia-600 hover:border-fuchsia-500 transition-all group no-underline">
+                    <span class="text-4xl">👄</span>
+                    <span class="text-[13px] font-black text-white">Lips Sync Queue</span>
+                    <span class="text-[10px] text-gray-400 group-hover:text-white text-center">Hàng đợi lips sync theo dự án</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCORE DETAIL MODAL: đánh giá chi tiết điểm nội dung (địa chính trị) -->
+    <div v-if="scoreModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" @click.self="scoreModal.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[640px] max-h-[90vh] overflow-y-auto space-y-5">
+            <div class="flex justify-between items-start gap-3">
+                <div class="flex items-center gap-3">
+                    <span class="px-3 py-1.5 rounded-xl font-black text-lg border" :class="scoreClass(scoreModal.score)">⭐ {{ scoreModal.score }}<span class="text-[11px] opacity-60">/100</span></span>
+                    <div>
+                        <h3 class="text-lg font-black text-white">Đánh giá nội dung</h3>
+                        <p v-if="scoreModal.reason" class="text-[12px] text-gray-400 italic">{{ scoreModal.reason }}</p>
+                    </div>
+                </div>
+                <button @click="scoreModal.open = false" class="text-gray-500 hover:text-white text-xl leading-none">×</button>
+            </div>
+
+            <!-- Tiêu chí -->
+            <div v-if="scoreModal.detail?.criteria?.length" class="space-y-2">
+                <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Theo tiêu chí (mỗi tiêu chí /20)</p>
+                <div v-for="(c, ci) in scoreModal.detail.criteria" :key="ci" class="bg-gray-800/50 border border-gray-800 rounded-lg p-3 space-y-1">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-[12px] font-bold text-gray-200">{{ c.name }}</span>
+                        <span class="text-[12px] font-mono font-black shrink-0" :class="c.score >= 16 ? 'text-green-400' : c.score >= 12 ? 'text-yellow-300' : 'text-red-400'">{{ c.score }}/20</span>
+                    </div>
+                    <div class="h-1.5 bg-gray-900 rounded-full overflow-hidden">
+                        <div class="h-full rounded-full" :class="c.score >= 16 ? 'bg-green-500' : c.score >= 12 ? 'bg-yellow-500' : 'bg-red-500'" :style="{ width: Math.min(100, c.score/20*100) + '%' }"></div>
+                    </div>
+                    <p v-if="c.comment" class="text-[11px] text-gray-400 leading-relaxed">{{ c.comment }}</p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-3">
+                <div v-if="scoreModal.detail?.strengths?.length">
+                    <p class="text-[10px] font-black text-green-400 uppercase tracking-widest mb-1">✅ Điểm mạnh</p>
+                    <ul class="list-disc list-inside space-y-0.5 text-[12px] text-gray-300"><li v-for="(s,i) in scoreModal.detail.strengths" :key="i">{{ s }}</li></ul>
+                </div>
+                <div v-if="scoreModal.detail?.weaknesses?.length">
+                    <p class="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">⚠️ Điểm yếu</p>
+                    <ul class="list-disc list-inside space-y-0.5 text-[12px] text-gray-300"><li v-for="(s,i) in scoreModal.detail.weaknesses" :key="i">{{ s }}</li></ul>
+                </div>
+                <div v-if="scoreModal.detail?.suggestions?.length">
+                    <p class="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">💡 Gợi ý cải thiện</p>
+                    <ul class="list-disc list-inside space-y-0.5 text-[12px] text-gray-300"><li v-for="(s,i) in scoreModal.detail.suggestions" :key="i">{{ s }}</li></ul>
+                </div>
+            </div>
+
+            <p v-if="!scoreModal.detail || (!scoreModal.detail.criteria?.length && !scoreModal.detail.strengths?.length)" class="text-[12px] text-gray-500 italic text-center py-4">
+                Dự án này chỉ có điểm tổng, chưa có đánh giá chi tiết (tạo trước khi bật tính năng). Tạo dự án mới để có đánh giá đầy đủ.
+            </p>
+        </div>
+    </div>
+
     <!-- NAZE MODAL -->
     <div v-if="nazeModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" @click.self="nazeModal.open = false">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[540px] space-y-4 max-h-[90vh] overflow-y-auto">
@@ -2136,7 +2255,7 @@
                                 <input v-model="nazeModal.lipsVideo" type="text" placeholder="/home/gux/.../face.mp4" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-fuchsia-500">
                                 <button @click="openFileBrowser('nazeVideo')" class="shrink-0 bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded-lg font-bold text-[11px] text-gray-200">📁 Chọn</button>
                                 <label class="shrink-0 bg-indigo-700 hover:bg-indigo-600 px-3 py-2 rounded-lg font-bold text-[11px] text-white cursor-pointer" :class="{'opacity-40 pointer-events-none': nazeModal.lipsUploading}">
-                                    <span v-if="nazeModal.lipsUploading" class="animate-spin inline-block mr-1">⏳</span>⬆️ Upload
+                                    <span v-if="nazeModal.lipsUploading" class="animate-spin inline-block mr-1">⏳</span>{{ nazeModal.lipsUploading ? (nazeModal.lipsProgress || 0) + '%' : '⬆️ Upload' }}
                                     <input type="file" accept="video/mp4" class="hidden" @change="uploadNazeLipsVideo($event)">
                                 </label>
                             </div>
@@ -2280,7 +2399,7 @@
                                 <input v-model="newProjectModal.lipsVideo" type="text" placeholder="/home/gux/.../face.mp4" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-fuchsia-500">
                                 <button @click="openFileBrowser('geoVideo')" class="shrink-0 bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded-lg font-bold text-[11px] text-gray-200">📁 Chọn</button>
                                 <label class="shrink-0 bg-indigo-700 hover:bg-indigo-600 px-3 py-2 rounded-lg font-bold text-[11px] text-white cursor-pointer" :class="{'opacity-40 pointer-events-none': newProjectModal.lipsUploading}">
-                                    <span v-if="newProjectModal.lipsUploading" class="animate-spin inline-block mr-1">⏳</span>⬆️ Upload
+                                    <span v-if="newProjectModal.lipsUploading" class="animate-spin inline-block mr-1">⏳</span>{{ newProjectModal.lipsUploading ? (newProjectModal.lipsProgress || 0) + '%' : '⬆️ Upload' }}
                                     <input type="file" accept="video/mp4" class="hidden" @change="uploadGeoLipsVideo($event)">
                                 </label>
                             </div>
@@ -2725,13 +2844,13 @@ createApp({
             const file = event.target.files?.[0];
             if (!file) return;
             nazeModal.value.lipsUploading = true;
+            nazeModal.value.lipsProgress = 0;
             try {
                 const fd = new FormData();
                 fd.append('file', file);
                 fd.append('kind', 'video');
-                const res = await fetch('/api/lips-sync/upload', { method: 'POST', body: fd });
-                const r = await res.json();
-                if (!res.ok || r.error) { showToast('❌ ' + (r.error || 'Lỗi upload')); return; }
+                const r = await xhrUpload('/api/lips-sync/upload', fd, pct => { nazeModal.value.lipsProgress = pct; });
+                if (r.error) { showToast('❌ ' + (r.error || 'Lỗi upload')); return; }
                 nazeModal.value.lipsVideo = r.path;
                 showToast('✅ Đã upload ' + (r.name || file.name));
             } catch (e) { showToast('❌ ' + e.message); }
@@ -2743,13 +2862,13 @@ createApp({
             const file = event.target.files?.[0];
             if (!file) return;
             newProjectModal.value.lipsUploading = true;
+            newProjectModal.value.lipsProgress = 0;
             try {
                 const fd = new FormData();
                 fd.append('file', file);
                 fd.append('kind', 'video');
-                const res = await fetch('/api/lips-sync/upload', { method: 'POST', body: fd });
-                const r = await res.json();
-                if (!res.ok || r.error) { showToast('❌ ' + (r.error || 'Lỗi upload')); return; }
+                const r = await xhrUpload('/api/lips-sync/upload', fd, pct => { newProjectModal.value.lipsProgress = pct; });
+                if (r.error) { showToast('❌ ' + (r.error || 'Lỗi upload')); return; }
                 newProjectModal.value.lipsVideo = r.path;
                 showToast('✅ Đã upload ' + (r.name || file.name));
             } catch (e) { showToast('❌ ' + e.message); }
@@ -2801,6 +2920,15 @@ createApp({
             return { pairs, errors, langs, srcLang, targetLang: tl, valid };
         });
         const genreChooser = ref({ open: false });
+        const pageChooser = ref({ open: false });
+        const scoreModal = ref({ open: false, score: 0, reason: '', detail: null });
+        function openScoreDetail() {
+            const p = activePost.value;
+            if (!p || p.content_score == null) return;
+            let detail = null;
+            try { detail = p.content_score_detail ? JSON.parse(p.content_score_detail) : null; } catch (_) { detail = null; }
+            scoreModal.value = { open: true, score: p.content_score, reason: p.content_score_reason || '', detail };
+        }
 
         function openGenre(genre) {
             genreChooser.value.open = false;
@@ -3223,6 +3351,17 @@ createApp({
             // Narration tổng: ưu tiên audio gộp ở para nếu có, không thì cộng title + từng detail
             para._narrationViSec = para.content_vi_audio ? await loadAudioDuration(para.content_vi_audio) : (para._durTitleVi + details.reduce((s, d) => s + (d._durVi || 0), 0));
             para._narrationTargetSec = para.content_audio ? await loadAudioDuration(para.content_audio) : (para._durTitleTg + details.reduce((s, d) => s + (d._durTg || 0), 0));
+            // Luận cứ (Sentence #x.y): narration từng câu = title câu + các dòng detail của câu
+            for (const s of (para.sentences || [])) {
+                s._durTitleVi = s.title_vi_audio ? await loadAudioDuration(s.title_vi_audio) : 0;
+                s._durTitleTg = s.title_audio ? await loadAudioDuration(s.title_audio) : 0;
+                await Promise.all((s.details || []).map(async d => {
+                    d._durVi = d.content_vi_audio ? await loadAudioDuration(d.content_vi_audio) : 0;
+                    d._durTg = d.content_audio ? await loadAudioDuration(d.content_audio) : 0;
+                }));
+                s._narrationViSec = s._durTitleVi + (s.details || []).reduce((a, d) => a + (d._durVi || 0), 0);
+                s._narrationTargetSec = s._durTitleTg + (s.details || []).reduce((a, d) => a + (d._durTg || 0), 0);
+            }
         }
 
         // COVERAGE: media đã chọn (theo thứ tự) phủ được tới giây nào -> tô cam text tới đó, khít audio thì xanh lá.
@@ -3241,6 +3380,17 @@ createApp({
         function titleCoverFull(para, lang) {
             const dur = lang === 'vi' ? (para._durTitleVi || 0) : (para._durTitleTg || 0);
             return dur > 0 && selectedTotalSec(para) + 0.1 >= dur;
+        }
+        // Luận cứ (Sentence #x.y): tổng giây media = media ĐÃ CHỌN của cả câu (para asset gắn sentenceId==s.id,
+        // giống pool "Video/Image selected của câu này"), KHÔNG phải media của từng dòng detail.
+        function sentenceMediaSec(para, s) {
+            const vids = (para.videos || []).filter(v => v.sentenceId == s.id && v.selected);
+            const imgs = (para.images || []).filter(im => im.sentenceId == s.id && im.selected);
+            return [...vids, ...imgs].reduce((sum, m) => sum + (Number(m.duration) || 0), 0);
+        }
+        function sentenceCoverFull(para, s, lang) {
+            const narr = lang === 'vi' ? s._narrationViSec : s._narrationTargetSec;
+            return !!narr && sentenceMediaSec(para, s) + 0.1 >= narr;
         }
         // Số giây phủ dành cho RIÊNG 1 detail = (tổng media đã chọn) trừ độ dài TITLE + các detail đứng trước,
         // kẹp [0, dur detail này]. Title đứng đầu paragraph nên là offset khởi đầu, không được bỏ qua.
@@ -3643,6 +3793,31 @@ createApp({
             }, 5000);
         }
 
+        // Xoá nền video lips (RVM → nền xanh). Chạy nền + poll tiến độ. Export CapCut sau đó tự dùng bản _green.
+        const matteState = ref({ running: false, total: 0, green: 0 });
+        let matteTimer = null;
+        async function pollMatte() {
+            if (!activePostId.value) return;
+            try {
+                const r = await fetch('/api/lips-sync/matte-status/' + activePostId.value).then(r => r.json());
+                matteState.value = { running: !!r.running, total: r.total || 0, green: r.green || 0 };
+                if (!r.running && matteTimer) { clearInterval(matteTimer); matteTimer = null; if (r.total && r.green >= r.total) showToast(`✅ Đã xoá nền ${r.green}/${r.total} clip lips. Export CapCut rồi Chroma key màu xanh.`); }
+            } catch (_) {}
+        }
+        async function matteLips() {
+            if (!activePostId.value) return;
+            showCapcutMenu.value = false;
+            try {
+                const r = await fetch('/api/lips-sync/matte', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: activePostId.value }) }).then(r => r.json());
+                if (r.error) return showToast('❌ ' + r.error);
+                showToast('🎭 ' + (r.message || 'Đang xoá nền lips...'), 6000);
+                matteState.value.running = true;
+                if (matteTimer) clearInterval(matteTimer);
+                matteTimer = setInterval(pollMatte, 4000);
+                pollMatte();
+            } catch (e) { showToast('❌ ' + e.message); }
+        }
+
         async function exportCapcut() {
             if (!activePostId.value) return;
             capcutExporting.value = true;
@@ -3857,11 +4032,11 @@ createApp({
         }
 
         function uploadSectionAsset(section, type) {
-            uploadModal.value = { open: true, type, section, para: null, gid: section, files: [], dragging: false, uploading: false, url: '', downloading: false };
+            uploadModal.value = { open: true, type, section, para: null, gid: section, files: [], dragging: false, uploading: false, progress: 0, url: '', downloading: false };
         }
 
         function uploadAsset(para, gid, type) {
-            uploadModal.value = { open: true, type, para, gid: String(gid), files: [], dragging: false, uploading: false, url: '', downloading: false };
+            uploadModal.value = { open: true, type, para, gid: String(gid), files: [], dragging: false, uploading: false, progress: 0, url: '', downloading: false };
         }
 
         async function submitDownloadUrl() {
@@ -3894,10 +4069,29 @@ createApp({
             e.target.value = '';
         }
 
+        // Upload FormData qua XHR để có %tiến-độ (fetch không báo tiến độ upload được).
+        // Trả JSON như res.json(); onProgress(pct) gọi trong lúc đẩy file (0..100).
+        function xhrUpload(url, formData, onProgress) {
+            return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', url);
+                xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(Math.round(e.loaded / e.total * 100)); };
+                xhr.onload = () => {
+                    let data = {};
+                    try { data = JSON.parse(xhr.responseText); } catch (_) {}
+                    if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+                    else reject(new Error(data.error || ('HTTP ' + xhr.status)));
+                };
+                xhr.onerror = () => reject(new Error('Lỗi mạng khi upload'));
+                xhr.send(formData);
+            });
+        }
+
         async function submitUpload() {
             const { type, para, section, gid, files } = uploadModal.value;
             if (!files.length) return;
             uploadModal.value.uploading = true;
+            uploadModal.value.progress = 0;
             const form = new FormData();
             form.append('videoId', activeProjectId.value);
             form.append('groupId', gid);
@@ -3906,18 +4100,19 @@ createApp({
             form.append('type', type);
             files.forEach(f => form.append('files', f));
             try {
-                const res = await fetch('/api/upload', { method: 'POST', body: form });
-                const r = await res.json();
+                const r = await xhrUpload('/api/upload', form, pct => { uploadModal.value.progress = pct; });
                 if (r.success) {
                     showToast(`✅ Đã tải ${files.length} file!`);
                     uploadModal.value.open = false;
+                    // APPEND asset mới vào cảnh — KHÔNG full reload post (tránh query nặng /api/posts/:id,
+                    // upload gần như tức thì kể cả khi máy đang tải nặng vì lips-sync).
+                    const key = type === 'video' ? 'videos' : 'images';
+                    const news = r.assets || [];
                     if (para) {
-                        const postRes = await fetch(`/api/posts/${activePostId.value}`);
-                        const data = await postRes.json();
-                        const updated = data.paragraphs.find(p => p.id === para.id);
-                        if (updated) { para.videos = updated.videos || []; para.images = updated.images || []; }
+                        para[key] = [...(para[key] || []), ...news];
                     } else if (section) {
-                        await reloadSectionAssets(section);
+                        const sec = activePost.value?.sections?.[section];
+                        if (sec) sec[key] = [...(sec[key] || []), ...news];
                     }
                 } else alert('❌ ' + r.error);
             } catch (e) { alert('❌ ' + e.message); }
@@ -3944,8 +4139,16 @@ createApp({
                 duration_val: asset.duration || 0,
                 cropX: 0, cropY: 0, cropW: 0, cropH: 0,
                 scaleX: 1, scaleY: 1, cropReady: false,
-                ratio: '16:9', saving: false, zoom: 1, panX: 0, panY: 0
+                ratio: '16:9', saving: false, zoom: 1, panX: 0, panY: 0,
+                videoSrc: '',   // chỉ set sau khi proxy 480p sẵn sàng → không tải nguyên bản gốc lớn qua LAN
             };
+            if (type === 'video') {
+                // Chuẩn bị proxy 480p (faststart) rồi mới nạp video vào modal. Trim vẫn áp lên bản gốc
+                // (timeline giống nhau) nên xem qua proxy không ảnh hưởng kết quả cắt.
+                fetch('/api/ensure-proxy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: asset.relativePath }) })
+                    .catch(() => {})
+                    .finally(() => { if (editModal.value.asset === asset) editModal.value.videoSrc = mediaUrl(asset); });
+            }
         }
 
         function openPreview(asset, type, para, section = null) {
@@ -4364,6 +4567,12 @@ createApp({
             if (d < -COVER_TOL) return 'text-red-400';
             return 'text-green-400';
         }
+        // Màu badge điểm chấm nội dung: ≥80 xanh, ≥60 vàng, <60 đỏ
+        function scoreClass(s) {
+            if (s >= 80) return 'bg-green-600/20 text-green-400 border-green-600/40';
+            if (s >= 60) return 'bg-yellow-600/20 text-yellow-300 border-yellow-600/40';
+            return 'bg-red-600/20 text-red-400 border-red-600/40';
+        }
         // Tổng giây media của 1 section = pool đã chọn (sections[key]) + media gán theo từng detail
         function sectionSelectedSec(key) {
             const post = activePost.value; if (!post) return 0;
@@ -4533,23 +4742,23 @@ createApp({
         }
 
         // ===== Intro / Outro =====
-        const introOutroModal = ref({ open: false, uploading: false, cacheBust: 0 });
+        const introOutroModal = ref({ open: false, uploading: false, progress: 0, cacheBust: 0 });
 
         function openIntroOutroModal() {
-            introOutroModal.value = { open: true, uploading: false, cacheBust: Date.now() };
+            introOutroModal.value = { open: true, uploading: false, progress: 0, cacheBust: Date.now() };
         }
 
         async function uploadIntroOutro(kind, event) {
             const file = event.target.files?.[0];
             if (!file) return;
             introOutroModal.value.uploading = true;
+            introOutroModal.value.progress = 0;
             try {
                 const fd = new FormData();
                 fd.append('file', file);
                 fd.append('postId', activePostId.value);
                 fd.append('kind', kind);
-                const res = await fetch('/api/upload-intro-outro', { method: 'POST', body: fd });
-                const r = await res.json();
+                const r = await xhrUpload('/api/upload-intro-outro', fd, pct => { introOutroModal.value.progress = pct; });
                 if (r.success) {
                     showToast(`✅ Đã upload ${kind}`);
                     introOutroModal.value.cacheBust = Date.now(); // ép video preview tải lại file mới
@@ -4658,6 +4867,63 @@ createApp({
                 a.click();
                 URL.revokeObjectURL(url);
                 showToast('✅ Đã tải xong!');
+            } catch (e) { alert('❌ ' + e.message); }
+        }
+
+        // Định dạng giây -> mốc SRT hh:mm:ss,mmm
+        function srtTime(sec) {
+            const ms = Math.max(0, Math.round(sec * 1000));
+            const p = (n, l = 2) => String(n).padStart(l, '0');
+            return `${p(Math.floor(ms / 3600000))}:${p(Math.floor(ms % 3600000 / 60000))}:${p(Math.floor(ms % 60000 / 1000))},${p(ms % 1000, 3)}`;
+        }
+        // Tải file .srt KHỚP audio: đi đúng thứ tự getAllAudioUrls (hook→summary→luận điểm(title,chi tiết,
+        // luận cứ)→kết), mỗi câu 1 cue dài đúng độ dài audio, giữa 2 câu chèn silence_duration (giống CapCut).
+        async function downloadSrt() {
+            const post = activePost.value; if (!post) return;
+            showMediaMenu.value = false;
+            const viPrimary = (post.voice_content_type === 'content_vi');
+            // Chọn audio + text theo ngôn ngữ chính (fallback ngôn ngữ còn lại) — giống Export Auto
+            const pick = (tgAudio, viAudio, tgText, viText) => {
+                const pa = viPrimary ? viAudio : tgAudio, pt = viPrimary ? viText : tgText;
+                const aa = viPrimary ? tgAudio : viAudio, at = viPrimary ? tgText : viText;
+                if (pa) return { audio: pa, text: (pt || '').trim() };
+                if (aa) return { audio: aa, text: (at || '').trim() };
+                return null;
+            };
+            const units = [];
+            const addDetails = (arr) => { for (const d of (arr || [])) { const u = pick(d.content_audio, d.content_vi_audio, d.content, d.content_vi); if (u) units.push(u); } };
+            addDetails(post.hook_details);
+            addDetails(post.summary_details);
+            for (const para of (post.paragraphs || [])) {
+                const tu = pick(para.title_audio, para.title_vi_audio, para.title, para.title_vi);
+                if (tu) units.push(tu);
+                addDetails(para.details);
+                for (const s of (para.sentences || [])) {
+                    const su = pick(s.title_audio, s.title_vi_audio, s.title, s.title_vi);
+                    if (su) units.push(su);
+                    addDetails(s.details);
+                }
+            }
+            addDetails(post.conclusion_details);
+            if (!units.length) return alert('❌ Chưa có audio để tạo SRT (hãy tạo Voice trước).');
+            showToast('⏳ Đang dựng SRT...', 30000);
+            try {
+                const silence = Math.max(0, Number(post.silence_duration) || 0);
+                const durs = await Promise.all(units.map(u => loadAudioDuration(u.audio)));
+                let t = 0; const cues = [];
+                for (let i = 0; i < units.length; i++) {
+                    const dur = durs[i] || 0;
+                    if (dur <= 0) continue;                       // audio hỏng/hết hạn -> bỏ cue, không dịch mốc
+                    cues.push(`${cues.length + 1}\n${srtTime(t)} --> ${srtTime(t + dur)}\n${units[i].text || ''}`);
+                    t += dur + silence;                           // khoảng nghỉ giữa câu = CapCut
+                }
+                if (!cues.length) return alert('❌ Không đọc được độ dài audio (URL có thể đã hết hạn) — hãy tạo lại Voice.');
+                const blob = new Blob([cues.join('\n\n') + '\n'], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = `${activeProjectId.value || 'sub'}.srt`; a.click();
+                URL.revokeObjectURL(url);
+                showToast(`✅ Đã tải SRT (${cues.length} dòng)!`);
             } catch (e) { alert('❌ ' + e.message); }
         }
 
@@ -4945,6 +5211,10 @@ createApp({
             const idx = posts.value.findIndex(p => p.id === activePostId.value);
             if (idx >= 0) posts.value[idx] = data;
             activePost.value = data;
+            // Tính lại narration (gồm luận cứ/Sentence) — reload thay object mới nên phải recompute,
+            // nếu không thanh gợi ý của câu (#x.y) sẽ mất (narration câu KHÔNG được applyUiState mang sang).
+            activePost.value.paragraphs.forEach(p => computeNarration(p));
+            ['hook', 'summary', 'conclusion'].forEach(k => computeSectionNarration(k));
         }
 
         // Karaoke: gọi WhisperX căn mốc từng từ cho cả post (cả target + VN), rồi reload
@@ -4969,19 +5239,19 @@ createApp({
         }
 
         // ===== LIPS SYNC (port từ main_v4): lặp từng câu -> job, lưu vào lips_sync/ của dự án =====
-        const lipsSyncModal = ref({ open: false, videoPath: '', contentType: 'content', guidanceScale: 2.2, jobs: [], previewPath: '', zipping: false, running: false, checking: false, polling: false, uploadingVideo: false, stopping: false });
+        const lipsSyncModal = ref({ open: false, videoPath: '', contentType: 'content', guidanceScale: 2.2, jobs: [], previewPath: '', zipping: false, running: false, checking: false, polling: false, uploadingVideo: false, uploadProgress: 0, stopping: false });
         const lipsSyncDone = computed(() => lipsSyncModal.value.jobs.filter(j => j.status === 'done').length);
         async function uploadLipsSyncFile(kind, event) {
             const file = event.target.files?.[0];
             if (!file) return;
             lipsSyncModal.value.uploadingVideo = true;
+            lipsSyncModal.value.uploadProgress = 0;
             try {
                 const fd = new FormData();
                 fd.append('file', file);
                 fd.append('kind', kind);
-                const res = await fetch('/api/lips-sync/upload', { method: 'POST', body: fd });
-                const r = await res.json();
-                if (!res.ok || r.error) { showToast('❌ ' + (r.error || 'Lỗi upload')); return; }
+                const r = await xhrUpload('/api/lips-sync/upload', fd, pct => { lipsSyncModal.value.uploadProgress = pct; });
+                if (r.error) { showToast('❌ ' + (r.error || 'Lỗi upload')); return; }
                 lipsSyncModal.value.videoPath = r.path;
                 showToast('✅ Đã upload ' + (r.name || file.name));
             } catch (e) { showToast('❌ ' + e.message); }
@@ -5286,9 +5556,10 @@ createApp({
             submitCreateVoice,
             genAudio,
             downloadVoice,
+            downloadSrt,
             pollingTimer,
             startPollingVoice,
-            crawling, thumbLoading, createThumbnail, selectThumbnail, capcutExporting, capcutRendering, capcutLang, showCapcutMenu, showVoiceMenu, showMediaMenu,
+            crawling, thumbLoading, createThumbnail, selectThumbnail, capcutExporting, capcutRendering, capcutLang, showCapcutMenu, showVoiceMenu, showMediaMenu, matteLips, matteState,
             triggerCrawlAll, exportCapcut, renderCapcut,
             refetchMedia,
             aiGenerate,
@@ -5307,8 +5578,8 @@ createApp({
             loadSpeakersByLang,
             reloadParaAssets,
             selectedMedia,
-            selectedTotalSec, coverageText, coverageClass, sectionSelectedSec,
-            coverFull, detailCoverSec, titleCoverSec, titleCoverFull,
+            selectedTotalSec, coverageText, coverageClass, scoreClass, sectionSelectedSec,
+            coverFull, detailCoverSec, titleCoverSec, titleCoverFull, sentenceMediaSec, sentenceCoverFull,
             coverageRemain,
             coverageHintClass,
             setImageDuration,
@@ -5329,6 +5600,8 @@ createApp({
             newProjectModal,
             nazeModal,
             genreChooser,
+            pageChooser,
+            scoreModal, openScoreDetail,
             openGenre,
             submitNaze,
             uploadNazeLipsVideo,

@@ -596,14 +596,18 @@ except Exception as e:
         console.log(`[X] keywords (JA): ${xKeywords.join(' | ') || '(none)'}`);
     }
 
+    // TẮT cào stock + sinh keyword + từ gợi ý (mặc định) — ảnh/video cào về không dùng được mà tốn token.
+    // Bật lại khi cần: đặt env NAZE_CRAWL_STOCK=on. (Drama luôn không cào stock, media lấy từ X.)
+    const CRAWL_STOCK = process.env.NAZE_CRAWL_STOCK === 'on';
+
     // Crawl ảnh
     const emptyScenes = [];   // cảnh không lấy được ảnh nào (kể cả sau retry + fallback) → báo khi xong
     for (const { index, text, paragraphId } of paragraphIds) {
         console.log(`\n[${index}/${paragraphIds.length}] "${text.slice(0, 60)}..."`);
         let keywords = [];
-        // DRAMA: không sinh keyword (factual) và từ gợi ý ảnh (image_suggestion) — media lấy từ X,
-        // không cào stock nên hai lệnh gọi GPT này chỉ tốn tiền/thời gian và không dùng tới.
-        if (genre !== 'drama') {
+        // Chỉ sinh keyword (factual) + từ gợi ý ảnh (image_suggestion) khi THỰC SỰ cào stock.
+        // Tắt stock (mặc định) hoặc drama → bỏ 2 lệnh gọi GPT này để tiết kiệm token.
+        if (CRAWL_STOCK && genre !== 'drama') {
             try {
                 keywords = await getKeywordsFromGPT(text);
                 console.log(`    Keywords: ${keywords.join(' | ')}`);
@@ -671,10 +675,11 @@ except Exception as e:
             }
         };
 
-        // DRAMA: KHÔNG cào ảnh/video stock cho từng cảnh — media của drama lấy từ X (block section='x':
-        // ảnh/video trong tweet + ảnh chụp + quay màn hình bài viết). Cào stock ở đây vừa tốn thời gian
-        // vừa cho ra ảnh minh hoạ chung chung không dính tới vụ việc.
-        if (genre === 'drama') {
+        // KHÔNG cào ảnh/video stock khi tắt stock (mặc định) hoặc drama (media lấy từ X).
+        // Cào stock cho ra ảnh minh hoạ chung chung không dính nội dung → không dùng được, lại tốn thời gian.
+        if (!CRAWL_STOCK) {
+            console.log(`    [no-stock] bỏ qua cào ảnh/video cảnh ${index} (tắt để tiết kiệm; bật lại: NAZE_CRAWL_STOCK=on)`);
+        } else if (genre === 'drama') {
             console.log(`    [drama] bỏ qua cào ảnh/video stock cho cảnh ${index} (media lấy từ X)`);
         } else {
             // Chạy tuần tự TỪNG CÁI 1 (ảnh xong rồi video) — tránh nhiều Puppeteer/tải đua nhau

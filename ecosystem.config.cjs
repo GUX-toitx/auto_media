@@ -24,6 +24,9 @@ module.exports = {
             cwd: '/home/gux/workspace/lips_sync/lips_sync',
             watch: false,
             autorestart: true,
+            // Giới hạn số nhân ffmpeg (libx264) của LatentSync để không ăn hết CPU, chừa cho web/upload.
+            // Tăng nếu muốn lips nhanh hơn (và chấp nhận máy tải nặng hơn), giảm nếu muốn máy mượt hơn.
+            env: { LATENTSYNC_FFMPEG_THREADS: '4' },
         }
     ]
 };

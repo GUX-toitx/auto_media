@@ -21,7 +21,7 @@ import { translateTitle } from './src/services/translateTitle.js';
 import archiver from 'archiver';
 import { downloadWithYtDlp } from './src/services/ytDlpDownloader.js'; // Nhúng con Bot vừa viết
 import { ensureThumb } from './src/services/thumbs.js';
-import { proxyPathFor, proxyReady, ensureProxy, warmProxies, hasNvenc } from './src/lib/proxies.js';
+import { proxyPathFor, proxyReady, ensureProxy, warmProxies, hasNvenc, needsProxy } from './src/lib/proxies.js';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
@@ -80,7 +80,7 @@ app.get('/api/posts', async (req, res) => {
     try {
         const db = await getDb();
         // genre có thể NULL với post do nhánh khác tạo (dùng chung DB) → suy ra từ project_id để không lọt khỏi menu
-        const posts = await db.all(`SELECT id, project_id, status, audio_uuid, COALESCE(title, project_id) AS title, voice_content_type,
+        const posts = await db.all(`SELECT id, project_id, status, audio_uuid, COALESCE(title, project_id) AS title, voice_content_type, content_score,
                                            COALESCE(genre, CASE WHEN project_id LIKE 'proj_%' THEN 'geo' ELSE 'naze' END) AS genre
                                     FROM Post ORDER BY id DESC`);
         await db.close();
@@ -92,7 +92,7 @@ app.get('/api/posts', async (req, res) => {
 app.get('/api/posts/:postId', async (req, res) => {
     try {
         const db = await getDb();
-        const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, summary, summary_vi, summary_audio, summary_vi_audio, summary_target, summary_target_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio, intro_path, outro_path, seo_title FROM Post WHERE id = ?', [req.params.postId]);
+        const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, summary, summary_vi, summary_audio, summary_vi_audio, summary_target, summary_target_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio, intro_path, outro_path, seo_title, content_score, content_score_reason, content_score_detail, silence_duration, voice_content_type FROM Post WHERE id = ?', [req.params.postId]);
         if (!post) return res.status(404).json({ error: 'Post not found' });
 
         // HookDetail
@@ -431,85 +431,78 @@ app.post('/api/download-voice', async (req, res) => {
         const lang = post.project_id.match(/_([a-z]{2})$/)?.[1] || (reqContentType === 'content_vi' ? 'vi' : 'en');
         const contentType = reqContentType || post.voice_content_type || 'content';
 
+        const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
+        const lipsDir = path.join(MEDIA_DIR, projectId, 'lips_sync');
+
+        // ===== 1) AUDIO: tải TOÀN BỘ trước (song song + retry) rồi mới đóng zip → tránh tải thiếu/đứt giữa chừng.
+        const audioList = await getAllAudioUrls(postId, contentType);
+        // Fallback local: file lips_sync/<idx>.mp3 (tải lúc chạy lips) — chỉ dùng khi lips CÙNG ngôn ngữ với bản đang tải.
+        let lipsSameType = false;
+        try { const lr = await db.get('SELECT content_type FROM LipsSyncJob WHERE post_id = ? LIMIT 1', [postId]); lipsSameType = !!lr && (lr.content_type || 'content') === contentType; } catch (_) {}
+        const fetchAudio = async (idx, url) => {
+            if (url) { try { return await fetchBunnyAudio(url); } catch (e) { console.warn(`[download-voice] audio ${idx} CDN lỗi (${e.message}) → thử file local`); } }
+            if (lipsSameType) { try { const lp = path.join(lipsDir, `${idx}.mp3`); if (fs.existsSync(lp) && fs.statSync(lp).size > 1000) return fs.readFileSync(lp); } catch (_) {} }
+            return null;
+        };
+        const audios = new Array(audioList.length).fill(null);
+        const CONC = 6;
+        for (let i = 0; i < audioList.length; i += CONC) {
+            const chunk = audioList.slice(i, i + CONC);
+            const bufs = await Promise.all(chunk.map((a, k) => fetchAudio(i + k + 1, a.audio)));
+            for (let k = 0; k < bufs.length; k++) audios[i + k] = bufs[k];
+        }
+        const missing = [];
+        audios.forEach((b, i) => { if (!b) missing.push(i + 1); });
+
+        // ===== 2) MEDIA: gom TẤT CẢ asset đã chọn theo ĐÚNG thứ tự video (hook → summary → luận điểm(+câu) → kết),
+        // rồi để trong 1 THƯ MỤC PHẲNG media/ đánh số 001, 002... (không lồng thư mục con) — ném vào CapCut cho dễ.
+        const ordered = [];
+        const q = (sql, p) => db.all(sql, p);
+        const push = (rows) => { for (const r of rows) ordered.push(r); };
+        push(await q('SELECT file_path, duration FROM Asset WHERE selected=1 AND post_id=? AND section=\'hook\' ORDER BY "order", id', [postId]));
+        push(await q('SELECT file_path, duration FROM Asset WHERE selected=1 AND post_id=? AND section=\'summary\' ORDER BY "order", id', [postId]));
+        const paragraphs = await q('SELECT id FROM Paragraph WHERE post_id=? ORDER BY "order", id', [postId]);
+        for (const para of paragraphs) {
+            push(await q('SELECT file_path, duration FROM Asset WHERE selected=1 AND paragraph_id=? AND sentence_id IS NULL ORDER BY "order", id', [para.id]));
+            const sentences = await q('SELECT id FROM Sentence WHERE paragraph_id=? ORDER BY "order", id', [para.id]);
+            for (const s of sentences) push(await q('SELECT file_path, duration FROM Asset WHERE selected=1 AND sentence_id=? ORDER BY "order", id', [s.id]));
+        }
+        push(await q('SELECT file_path, duration FROM Asset WHERE selected=1 AND post_id=? AND section=\'conclusion\' ORDER BY "order", id', [postId]));
+        await db.close();
+
+        // ===== 3) Đóng gói & stream
         const zipName = `${videoId}_${lang}.zip`;
         res.setHeader('Content-Type', 'application/zip');
         res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
-
         const archive = archiver('zip', { zlib: { level: 6 } });
-        archive.on('error', e => { throw e; });
+        archive.on('error', () => { try { res.destroy(); } catch (_) {} });
         archive.pipe(res);
 
-        // Lấy tất cả audio URLs theo thứ tự (giống download audio đơn lẻ)
-        const audioList = await getAllAudioUrls(postId, contentType);
+        let audioOk = 0;
+        audios.forEach((buf, i) => { if (buf) { archive.append(buf, { name: `audio/${String(i + 1).padStart(3, '0')}.mp3` }); audioOk++; } });
 
-        // Đặt tên 1.mp3, 2.mp3...
-        for (let i = 0; i < audioList.length; i++) {
-            const audioUrl = audioList[i].audio;
-            if (!audioUrl) continue;
-            try {
-                const buf = await fetchBunnyAudio(audioUrl);
-                archive.append(buf, { name: `audio/${i + 1}.mp3` });
-            } catch(e) { console.error(`[download-voice] skip audio ${i+1}:`, e.message); }
+        let mi = 0;
+        for (const a of ordered) {
+            const srcPath = path.join(MEDIA_DIR, a.file_path);
+            if (!fs.existsSync(srcPath)) continue;
+            mi++;
+            const ext = path.extname(a.file_path);
+            const durSuffix = a.duration ? `_${Math.round(a.duration)}s` : '';
+            archive.file(srcPath, { name: `media/${String(mi).padStart(3, '0')}${durSuffix}${ext}` });
         }
 
-        // Assets selected theo section (hook, summary, conclusion)
-        const sectionAssets = await db.all(
-            'SELECT file_path, "order", duration, section FROM Asset WHERE selected = 1 AND post_id = ? AND section IS NOT NULL ORDER BY section, "order"',
-            [postId]
-        );
-        for (const asset of sectionAssets) {
-            const srcPath = path.join(MEDIA_DIR, asset.file_path);
-            if (fs.existsSync(srcPath)) {
-                const ext = path.extname(asset.file_path);
-                const durSuffix = asset.duration ? `_${Math.round(asset.duration)}s` : '';
-                archive.file(srcPath, { name: `media/${asset.section}/${asset.order}${durSuffix}${ext}` });
-            }
-        }
+        // (Không đưa lips_sync/ vào zip nữa — lips đã có sẵn trong bản export CapCut, khỏi trùng.)
 
-        // Assets selected theo sentence (paragraphs)
-        const paragraphs = await db.all('SELECT id, "order" FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);
-        for (const para of paragraphs) {
-            // Assets cho luận điểm (sentence_id IS NULL)
-            const paraAssets = await db.all(
-                'SELECT file_path, "order", duration FROM Asset WHERE selected = 1 AND paragraph_id = ? AND sentence_id IS NULL ORDER BY "order"',
-                [para.id]
-            );
-            for (const asset of paraAssets) {
-                const srcPath = path.join(MEDIA_DIR, asset.file_path);
-                if (fs.existsSync(srcPath)) {
-                    const ext = path.extname(asset.file_path);
-                    const durSuffix = asset.duration ? `_${Math.round(asset.duration)}s` : '';
-                    archive.file(srcPath, { name: `media/${para.order}_0/${asset.order}${durSuffix}${ext}` });
-                }
-            }
-            // Assets cho luận cứ (sentence)
-            const sentences = await db.all('SELECT id, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"', [para.id]);
-            for (const s of sentences) {
-                const assets = await db.all(
-                    'SELECT file_path, "order", duration FROM Asset WHERE selected = 1 AND sentence_id = ? ORDER BY "order"',
-                    [s.id]
-                );
-                for (const asset of assets) {
-                    const srcPath = path.join(MEDIA_DIR, asset.file_path);
-                    if (fs.existsSync(srcPath)) {
-                        const ext = path.extname(asset.file_path);
-                        const durSuffix = asset.duration ? `_${Math.round(asset.duration)}s` : '';
-                        archive.file(srcPath, { name: `media/${para.order}_${s.order}/${asset.order}${durSuffix}${ext}` });
-                    }
-                }
-            }
-        }
+        // Báo cáo: cho biết CHÍNH XÁC có thiếu voice không (không còn bỏ qua âm thầm)
+        const report = [
+            `Voice: tải được ${audioOk}/${audioList.length} câu.`,
+            missing.length ? `⚠️ THIẾU ${missing.length} câu (index): ${missing.join(', ')}` : '✅ Đủ toàn bộ voice.',
+            missing.length ? '   → URL audio có thể đã hết hạn. Hãy gen lại voice rồi tải lại (hoặc chạy lips sync để có bản mp3 local dự phòng).' : '',
+            `Media: ${mi} file trong thư mục media/ (đánh số theo thứ tự video).`,
+        ].filter(Boolean).join('\n');
+        archive.append(report, { name: '_bao_cao.txt' });
+        console.log(`[download-voice] post ${postId}: voice ${audioOk}/${audioList.length} (thiếu ${missing.length}), media ${mi} file`);
 
-        // Lips sync outputs (nếu đã chạy) -> thư mục lips_sync/ trong zip
-        const lipsProjectId = post.project_id.replace(/_[a-z]{2}$/, '');
-        const lipsDir = path.join(MEDIA_DIR, lipsProjectId, 'lips_sync');
-        if (fs.existsSync(lipsDir)) {
-            for (const f of fs.readdirSync(lipsDir)) {
-                if (/^\d+\.mp4$/i.test(f)) archive.file(path.join(lipsDir, f), { name: `lips_sync/${f}` });
-            }
-        }
-
-        await db.close();
         await archive.finalize();
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1597,6 +1590,8 @@ app.post('/api/upload', upload.array('files'), async (req, res) => {
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
         const db = await getDb();
+        // Trả về asset vừa tạo (đúng shape UI dùng) để frontend APPEND vào cảnh, KHỎI phải full reload post.
+        const created = [];
         for (const file of req.files) {
             const ext = path.extname(file.originalname);
             const fileName = `upload_${Date.now()}_${Math.random().toString(36).slice(2, 6)}${ext}`;
@@ -1604,25 +1599,36 @@ app.post('/api/upload', upload.array('files'), async (req, res) => {
             fs.renameSync(file.path, destPath);
 
             const relativePath = path.relative(MEDIA_DIR, destPath);
+            let assetId = null;
             if (section) {
                 // Upload cho section (hook/summary/conclusion)
                 const post = await db.get('SELECT id FROM Post WHERE project_id LIKE ?', [`%${videoId}%`]);
                 if (post) {
-                    await db.run(
+                    const r = await db.run(
                         'INSERT INTO Asset (post_id, section, type, file_path) VALUES (?, ?, ?, ?)',
                         [post.id, section, type, relativePath]
                     );
+                    assetId = r.lastID;
                 }
             } else {
                 // Upload cho paragraph
-                await db.run(
+                const r = await db.run(
                     'INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)',
                     [paragraphId, type, relativePath]
                 );
+                assetId = r.lastID;
+            }
+            if (assetId) {
+                created.push({
+                    id: assetId, type, name: path.basename(destPath), url: `/${relativePath}`,
+                    relativePath, selected: false, order: 0, duration: 0, sentenceId: null,
+                });
+                // Video: tạo sẵn proxy 480p nền ngay sau upload → lúc mở Edit là có liền, khỏi chờ encode.
+                if (type === 'video' && needsProxy(MEDIA_DIR, relativePath)) ensureProxy(MEDIA_DIR, relativePath).catch(() => {});
             }
         }
         await db.close();
-        res.json({ success: true, count: req.files.length });
+        res.json({ success: true, count: req.files.length, assets: created });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2659,6 +2665,20 @@ app.get('/api/media', (req, res) => {
     res.sendFile(src, (err) => { if (err && !res.headersSent) res.status(404).end(); });
 });
 
+// Tạo & CHỜ proxy 480p sẵn sàng rồi mới báo "ready" — dùng khi mở Edit video: client chờ cái này xong
+// mới nạp video, để luôn xem qua bản 480p nhẹ (faststart) thay vì tải nguyên bản gốc lớn qua LAN 100Mbps.
+app.post('/api/ensure-proxy', express.json(), async (req, res) => {
+    const rel = String(req.body?.path || '');
+    const src = path.resolve(MEDIA_DIR, rel);
+    if (!rel || !src.startsWith(path.resolve(MEDIA_DIR) + path.sep) || !fs.existsSync(src)) return res.json({ ready: false });
+    try {
+        // File nhỏ (<4MB) hoặc proxy đã sẵn → dùng luôn, khỏi encode
+        if (!needsProxy(MEDIA_DIR, rel)) return res.json({ ready: true });
+        await ensureProxy(MEDIA_DIR, rel);
+        res.json({ ready: true });
+    } catch { res.json({ ready: false }); }
+});
+
 app.get('/', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -2690,6 +2710,87 @@ function safeMediaName(name) {
 app.get('/media-upload', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.sendFile(path.join(__dirname, 'public', 'media-upload.html'));
+});
+
+// Trang list hàng đợi Lips Sync
+app.get('/lips-queue', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.sendFile(path.join(__dirname, 'public', 'lips-queue.html'));
+});
+
+// API: liệt kê hàng đợi lips sync theo TỪNG DỰ ÁN + trạng thái worker inference (running/waiting).
+app.get('/api/lips-sync/queues', async (req, res) => {
+    try {
+        const db = await getDb();
+        const has = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='LipsSyncJob'");
+        if (!has) { await db.close(); return res.json({ projects: [], queue: null }); }
+        const projects = await db.all(`
+            SELECT j.post_id AS postId, p.project_id AS projectId, COALESCE(p.title, p.project_id) AS title,
+                   COUNT(*) AS total,
+                   SUM(CASE WHEN j.status='done' THEN 1 ELSE 0 END) AS done,
+                   SUM(CASE WHEN j.status='queued' THEN 1 ELSE 0 END) AS queued,
+                   SUM(CASE WHEN j.status IN ('processing','running') THEN 1 ELSE 0 END) AS running,
+                   SUM(CASE WHEN j.status='error' THEN 1 ELSE 0 END) AS error,
+                   SUM(CASE WHEN j.status='cancelled' THEN 1 ELSE 0 END) AS cancelled,
+                   MAX(j.updated_at) AS updatedAt
+            FROM LipsSyncJob j LEFT JOIN Post p ON p.id = j.post_id
+            GROUP BY j.post_id
+            ORDER BY updatedAt DESC`);
+        await db.close();
+        // Trạng thái worker inference (best-effort, không có cũng không sao)
+        let queue = null;
+        try {
+            const r = await globalThis.fetch(`${LIPS_SYNC_BASE}/queue`);
+            if (r.ok) queue = await r.json();
+        } catch (_) {}
+        res.json({ projects, queue });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Xoá nền video lips: RVM matte → người trên NỀN XANH (N_green.mp4). Chạy nền. Sau đó export CapCut tự dùng bản này.
+const matteRunning = new Set();
+app.post('/api/lips-sync/matte', async (req, res) => {
+    const { postId, force } = req.body || {};
+    if (!postId) return res.status(400).json({ error: 'Thiếu postId' });
+    if (matteRunning.has(postId)) return res.json({ ok: true, message: 'Đang xoá nền, chờ chút...' });
+    try {
+        const db = await getDb();
+        const post = await db.get('SELECT project_id FROM Post WHERE id = ?', [postId]);
+        await db.close();
+        if (!post) return res.status(404).json({ error: 'Post not found' });
+        const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
+        const lipsDir = path.join(MEDIA_DIR, projectId, 'lips_sync');
+        if (!fs.existsSync(lipsDir)) return res.status(400).json({ error: 'Chưa có lips_sync — chạy lips sync trước.' });
+        const py = process.env.MATTE_PYTHON || '/home/gux/workspace/lips_sync/lips_sync/.venv/bin/python';
+        const args = ['src/workers/matte_lips.py', lipsDir];
+        if (force) args.push('--force');
+        matteRunning.add(postId);
+        const child = spawn(py, args, { cwd: __dirname, detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+        child.stdout.on('data', d => process.stdout.write(`[matte-lips] ${d}`));
+        child.stderr.on('data', d => process.stderr.write(`[matte-lips] ${d}`));
+        child.on('exit', code => { matteRunning.delete(postId); console.log(`[matte-lips] post ${postId} xong (code ${code})`); });
+        child.on('error', e => { matteRunning.delete(postId); console.error('[matte-lips] spawn lỗi:', e.message); });
+        res.json({ ok: true, message: 'Đang xoá nền lips (chạy nền, vài phút). Xong export CapCut sẽ tự dùng bản đã xoá nền — nhớ Chroma key màu xanh trong CapCut.' });
+    } catch (e) { matteRunning.delete(postId); res.status(500).json({ error: e.message }); }
+});
+
+// Trạng thái xoá nền lips: đã có bao nhiêu N_green.mp4 / tổng N.mp4
+app.get('/api/lips-sync/matte-status/:postId', async (req, res) => {
+    try {
+        const db = await getDb();
+        const post = await db.get('SELECT project_id FROM Post WHERE id = ?', [req.params.postId]);
+        await db.close();
+        if (!post) return res.status(404).json({ error: 'Post not found' });
+        const lipsDir = path.join(MEDIA_DIR, post.project_id.replace(/_[a-z]{2}$/, ''), 'lips_sync');
+        let total = 0, green = 0;
+        if (fs.existsSync(lipsDir)) {
+            for (const f of fs.readdirSync(lipsDir)) {
+                if (/^\d+\.mp4$/i.test(f)) total++;
+                else if (/^\d+_green\.mp4$/i.test(f)) green++;
+            }
+        }
+        res.json({ total, green, running: matteRunning.has(Number(req.params.postId)) || matteRunning.has(req.params.postId) });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Liệt kê file trong thư mục Downloads (kèm size + thời gian sửa + danh sách đuôi)
@@ -3351,9 +3452,26 @@ if (sheetAuth && process.env.GEO_SHEET_SYNC !== 'off') {
     try {
         const d = await getDb();
         const r = await d.run("UPDATE Post SET status = NULL WHERE status = 'crawling'");
+        // Self-heal cột điểm chấm nội dung (địa chính trị) — để API SELECT không lỗi trên DB cũ chưa có cột.
+        await d.run('ALTER TABLE Post ADD COLUMN content_score INTEGER DEFAULT NULL').catch(() => {});
+        await d.run('ALTER TABLE Post ADD COLUMN content_score_reason TEXT DEFAULT NULL').catch(() => {});
+        await d.run('ALTER TABLE Post ADD COLUMN content_score_detail TEXT DEFAULT NULL').catch(() => {});
         await d.close();
         if (r?.changes) console.log(`[startup] Dọn ${r.changes} post kẹt status='crawling' từ lần chạy trước.`);
     } catch (e) { console.error('[startup] dọn crawling lỗi:', e.message); }
+    // Dọn file rác trong _tmp_uploads (multer tạm) cũ hơn 1 giờ — upload lỗi/hỏng để lại, tích dần tốn đĩa.
+    try {
+        const tmpDir = path.join(MEDIA_DIR, '_tmp_uploads');
+        if (fs.existsSync(tmpDir)) {
+            const cutoff = Date.now() - 60 * 60 * 1000;
+            let n = 0;
+            for (const f of fs.readdirSync(tmpDir)) {
+                const fp = path.join(tmpDir, f);
+                try { if (fs.statSync(fp).isFile() && fs.statSync(fp).mtimeMs < cutoff) { fs.unlinkSync(fp); n++; } } catch (_) {}
+            }
+            if (n) console.log(`[startup] Dọn ${n} file rác trong _tmp_uploads.`);
+        }
+    } catch (e) { console.error('[startup] dọn _tmp_uploads lỗi:', e.message); }
 })();
 
 app.listen(PORT, () => console.log(`🚀 http://localhost:${PORT}`));

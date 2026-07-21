@@ -352,105 +352,177 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     // INTRO: chèn ở đầu (start = 0), đẩy toàn bộ đoạn ra sau.
     if (post.intro_path) totalDuration += addBoundaryVideo(path.join(MEDIA_DIR, post.intro_path), totalDuration, 'intro');
 
-    for (const para of paragraphs) {
-        // Audio track chính (có tiếng, định độ dài timeline). Single-mode cho phép fallback sang ngôn ngữ còn lại.
-        const primaryAudio = await buildParaAudio(para, primaryUseVi, !bothLangs);
-        const audioMatId = primaryAudio.audioMatId;
-        const audioDuration = primaryAudio.audioMatId ? primaryAudio.audioDuration : 5_000_000;
-
-        // Lấy assets selected
-        const assets = await db.all(
-            `SELECT * FROM Asset WHERE paragraph_id = ? AND selected = 1 ORDER BY "order"`,
-            [para.id]
-        );
-        let allAssets = assets;
-        if (!allAssets.length) {
-            // Chưa chọn gì -> tự chọn video phù hợp: gom video đủ phủ độ dài audio đoạn này
-            const vids = await db.all(
-                `SELECT * FROM Asset WHERE paragraph_id = ? AND type = 'video' ORDER BY id`,
-                [para.id]
-            );
-            const picked = [];
-            let acc = 0;
-            for (const v of vids) {
-                picked.push(v);
-                acc += v.duration ? v.duration * 1_000_000 : 5_000_000;
-                if (acc >= audioDuration) break; // đủ phủ audio thì dừng
-            }
-            allAssets = picked.length ? picked : await db.all(
-                // Đoạn không có video -> dùng ảnh
-                `SELECT * FROM Asset WHERE paragraph_id = ? ORDER BY id LIMIT 3`,
-                [para.id]
-            );
-            if (allAssets.length) console.log(`[CapCut] Para ${para.order}: tự chọn ${allAssets.length} ${picked.length ? 'video' : 'ảnh'} (chưa có lựa chọn)`);
+    // ===== DỰNG TIMELINE THEO TỪNG CÂU (audio + lips + b-roll khớp nhau) =====
+    // Mỗi câu (unit trong getAllAudioUrls) = 1 audio segment + 1 clip lips, đặt CÙNG mốc thời gian,
+    // giữa 2 câu chèn khoảng nghỉ = silence_duration (giống mp3 gốc) → lips khớp tiếng.
+    const lipsType = (resolvedType === 'content_vi') ? 'content_vi' : 'content';
+    const lipsByIdx = {};   // idx (thứ tự câu) → file lips .mp4 (file thật trên đĩa)
+    try {
+        const lipsRows = await db.all('SELECT idx, output_path, content_type FROM LipsSyncJob WHERE post_id = ? ORDER BY idx', [postId]);
+        for (const r of lipsRows) {
+            if ((r.content_type || 'content') !== lipsType) continue;
+            if (!r.output_path) continue;
+            // Ưu tiên bản ĐÃ XOÁ NỀN (N_green.mp4 — người trên nền xanh, CapCut chroma key là mất nền).
+            const greenPath = r.output_path.replace(/\.mp4$/i, '_green.mp4');
+            const use = (fs.existsSync(greenPath) && (() => { try { return fs.statSync(greenPath).size > 20000; } catch (_) { return false; } })()) ? greenPath : r.output_path;
+            try { if (fs.existsSync(use) && fs.statSync(use).size > 20000) lipsByIdx[r.idx] = use; } catch (_) {}
         }
+    } catch (_) {}
+    const silenceUs = Math.max(0, Math.round((Number(post.silence_duration) || 0) * 1_000_000));
+    const lipsSegments = [];
 
-        const segStart = totalDuration;
+    const af = primaryUseVi ? 'content_vi_audio' : 'content_audio';
+    const afAlt = primaryUseVi ? 'content_audio' : 'content_vi_audio';
+    const tf = primaryUseVi ? 'title_vi_audio' : 'title_audio';
+    const tfAlt = primaryUseVi ? 'title_audio' : 'title_vi_audio';
 
-        if (allAssets.length === 0) {
-            totalDuration += audioDuration;
-        } else {
-            // Chia audioDuration theo TRỌNG SỐ = thời lượng đặt cho từng asset (video: độ dài thật; ảnh: số giây người dùng đặt).
-            // slice cuối gánh phần dư để Σ slice = audioDuration → audio luôn khớp, không lệch tiếng.
-            // Asset chưa có duration -> dùng trung bình các asset đã có (nếu không có cái nào -> chia đều như cũ).
-            const N = allAssets.length;
-            const knownDurs = allAssets.map(a => (a.duration > 0 ? a.duration : 0)).filter(d => d > 0);
-            const fbWeight = knownDurs.length ? (knownDurs.reduce((s, d) => s + d, 0) / knownDurs.length) : 1;
-            const weights = allAssets.map(a => (a.duration > 0 ? a.duration : fbWeight));
-            const totalW = weights.reduce((s, w) => s + w, 0) || N;
-            let sliceAcc = 0;
-            for (let ai = 0; ai < N; ai++) {
-                const asset = allAssets[ai];
-                const slotDur = (ai === N - 1) ? (audioDuration - sliceAcc) : Math.round(audioDuration * weights[ai] / totalW);
-                sliceAcc += slotDur;
-                const srcPath = path.join(MEDIA_DIR, asset.file_path);
-                if (!fs.existsSync(srcPath)) { totalDuration += slotDur; continue; }
-                const ext = path.extname(asset.file_path).toLowerCase();
-                const assetFileName = `asset_${fileIndex++}${ext}`;
-                const destPath = path.join(assetsDir, assetFileName);
-                fs.copyFileSync(srcPath, destPath);
-                const isVideo = ['.mp4', '.mov', '.avi'].includes(ext);
-                const mediaInfo = isVideo ? getMediaInfo(destPath) : { width: 1920, height: 1080 };
-                const realDur = isVideo ? (asset.duration ? Math.round(asset.duration * 1_000_000) : slotDur) : slotDur;
-                // Slot timeline luôn = slotDur (phủ đủ audio); nguồn video chỉ lấy tối đa = slotDur (dài hơn → cắt; ngắn hơn → đứng hình phần dư)
-                const srcDur = isVideo ? Math.min(realDur, slotDur) : slotDur;
-                const matId = uuid();
-                const mat = buildVideoMaterial(matId, destPath, isVideo ? realDur : slotDur, assetFileName, isVideo, draftId);
-                content.materials.videos.push(mat);
-                const { segment, extraMaterials } = buildVideoSegment(matId, totalDuration, slotDur, srcDur, videoIndex++, mediaInfo.width, mediaInfo.height, isVideo);
-                videoSegments.push(segment);
-                // Extra materials
-                const speedMat = { ...JSON.parse(JSON.stringify(templateContent.materials.speeds[0])), id: extraMaterials.speedId };
-                const canvasMat = { ...JSON.parse(JSON.stringify(templateContent.materials.canvases[0])), id: extraMaterials.canvasId };
-                const colorMat = { ...JSON.parse(JSON.stringify(templateContent.materials.material_colors[0])), id: extraMaterials.colorId };
-                const vocalMat = { ...JSON.parse(JSON.stringify(templateContent.materials.vocal_separations[0])), id: extraMaterials.vocalId };
-                const phMat = { ...JSON.parse(JSON.stringify(templateContent.materials.placeholder_infos[0])), id: extraMaterials.placeholderId };
-                content.materials.speeds.push(speedMat);
-                content.materials.canvases.push(canvasMat);
-                content.materials.material_colors.push(colorMat);
-                content.materials.vocal_separations.push(vocalMat);
-                content.materials.placeholder_infos.push(phMat);
-                const scVideoMat = { ...JSON.parse(JSON.stringify(templateContent.materials.sound_channel_mappings[0])), id: extraMaterials.soundChannelId };
-                content.materials.sound_channel_mappings.push(scVideoMat);
-                totalDuration += slotDur;
-            }
+    // Tải 1 audio unit về assets, trả { matId, durUs }
+    const fetchUnitAudio = (url) => {
+        if (!url) return null;
+        try {
+            const base = process.env.BUNNYCDN_BASE_URL || '', key = process.env.BUNNYCDN_ACCESS_KEY || '';
+            const full = url.startsWith('http') ? url : `${base}/${url}`;
+            const fn = `audio_${fileIndex++}.mp3`;
+            const dest = path.join(assetsDir, fn);
+            execSync(`curl -sL -H "AccessKey: ${key}" "${full}" -o "${dest}"`, { timeout: 15000 });
+            if (!(fs.existsSync(dest) && fs.statSync(dest).size > 1000)) return null;
+            const durUs = getMediaDuration(dest);
+            const matId = uuid();
+            content.materials.audios.push(buildAudioMaterial(matId, `${WIN_DRAFT_ROOT}/${draftId}/assets/${fn}`, durUs, fn));
+            return { matId, durUs };
+        } catch (e) { console.error('[CapCut] audio unit lỗi:', e.message); return null; }
+    };
+    // Đặt clip lips tại start, slot = slotDur (khớp audio; lips ngắn hơn → đứng hình, dài hơn → cắt). Mute.
+    const placeLips = (lipsPath, start, slotDur) => {
+        if (!lipsPath || !fs.existsSync(lipsPath)) return;
+        const fn = `lips_${fileIndex++}.mp4`;
+        const dest = path.join(assetsDir, fn);
+        try { fs.copyFileSync(lipsPath, dest); } catch (_) { return; }
+        const info = getMediaInfo(dest); const lipsDur = getMediaDuration(dest);
+        const matId = uuid();
+        const lipsMat = buildVideoMaterial(matId, dest, lipsDur, fn, true, draftId);
+        // Xoá nền: dùng bản N_green.mp4 (người trên nền xanh) + Chroma key trong CapCut. KHÔNG dùng matting flag
+        // (智能抠像 qua draft không đáng tin cậy giữa các bản CapCut).
+        content.materials.videos.push(lipsMat);
+        const srcDur = Math.min(lipsDur, slotDur);
+        const { segment, extraMaterials } = buildVideoSegment(matId, start, slotDur, srcDur, videoIndex++, info.width, info.height, true);
+        segment.volume = 0.0;
+        lipsSegments.push(segment);
+        content.materials.speeds.push({ ...JSON.parse(JSON.stringify(templateContent.materials.speeds[0])), id: extraMaterials.speedId });
+        content.materials.canvases.push({ ...JSON.parse(JSON.stringify(templateContent.materials.canvases[0])), id: extraMaterials.canvasId });
+        content.materials.material_colors.push({ ...JSON.parse(JSON.stringify(templateContent.materials.material_colors[0])), id: extraMaterials.colorId });
+        content.materials.vocal_separations.push({ ...JSON.parse(JSON.stringify(templateContent.materials.vocal_separations[0])), id: extraMaterials.vocalId });
+        content.materials.placeholder_infos.push({ ...JSON.parse(JSON.stringify(templateContent.materials.placeholder_infos[0])), id: extraMaterials.placeholderId });
+        content.materials.sound_channel_mappings.push({ ...JSON.parse(JSON.stringify(templateContent.materials.sound_channel_mappings[0])), id: extraMaterials.soundChannelId });
+    };
+    // Rải b-roll phủ [sceneStart, sceneStart+sceneDur]: mỗi asset chạy ĐÚNG duration đã đặt (nối tiếp),
+    // asset CUỐI kéo dài lấp hết khoảng còn lại → tổng luôn khớp lời của sub-scene. Trả về segment cuối
+    // (để sub-scene không có media kéo dài clip trước phủ vào, tránh nền đen).
+    let lastBrollSeg = null;
+    const layBroll = (assets, sceneStart, sceneDur) => {
+        if (sceneDur <= 0) return;
+        if (!assets.length) {                               // sub-scene không có media → nối dài clip trước
+            if (lastBrollSeg) lastBrollSeg.target_timerange.duration += Math.round(sceneDur);
+            return;
         }
+        let cur = sceneStart;
+        const end = sceneStart + sceneDur;
+        for (let ai = 0; ai < assets.length; ai++) {
+            if (cur >= end - 1000) break;                   // hết chỗ (đã lấp đủ lời)
+            const asset = assets[ai];
+            const isLast = ai === assets.length - 1;
+            const want = asset.duration > 0 ? Math.round(asset.duration * 1_000_000) : 3_000_000;
+            // asset cuối (hoặc asset tràn qua end) → lấp trọn phần còn lại; còn lại chạy đúng duration đặt
+            const slotDur = (isLast || cur + want > end) ? (end - cur) : want;
+            const srcPath = path.join(MEDIA_DIR, asset.file_path);
+            if (!fs.existsSync(srcPath)) { cur += slotDur; continue; }
+            const ext = path.extname(asset.file_path).toLowerCase();
+            const assetFileName = `asset_${fileIndex++}${ext}`;
+            const destPath = path.join(assetsDir, assetFileName);
+            fs.copyFileSync(srcPath, destPath);
+            const isVideo = ['.mp4', '.mov', '.avi'].includes(ext);
+            const mediaInfo = isVideo ? getMediaInfo(destPath) : { width: 1920, height: 1080 };
+            const realDur = isVideo ? (asset.duration ? Math.round(asset.duration * 1_000_000) : slotDur) : slotDur;
+            const srcDur = isVideo ? Math.min(realDur, slotDur) : slotDur;
+            const matId = uuid();
+            content.materials.videos.push(buildVideoMaterial(matId, destPath, isVideo ? realDur : slotDur, assetFileName, isVideo, draftId));
+            const { segment, extraMaterials } = buildVideoSegment(matId, cur, slotDur, srcDur, videoIndex++, mediaInfo.width, mediaInfo.height, isVideo);
+            videoSegments.push(segment);
+            lastBrollSeg = segment;
+            content.materials.speeds.push({ ...JSON.parse(JSON.stringify(templateContent.materials.speeds[0])), id: extraMaterials.speedId });
+            content.materials.canvases.push({ ...JSON.parse(JSON.stringify(templateContent.materials.canvases[0])), id: extraMaterials.canvasId });
+            content.materials.material_colors.push({ ...JSON.parse(JSON.stringify(templateContent.materials.material_colors[0])), id: extraMaterials.colorId });
+            content.materials.vocal_separations.push({ ...JSON.parse(JSON.stringify(templateContent.materials.vocal_separations[0])), id: extraMaterials.vocalId });
+            content.materials.placeholder_infos.push({ ...JSON.parse(JSON.stringify(templateContent.materials.placeholder_infos[0])), id: extraMaterials.placeholderId });
+            content.materials.sound_channel_mappings.push({ ...JSON.parse(JSON.stringify(templateContent.materials.sound_channel_mappings[0])), id: extraMaterials.soundChannelId });
+            cur += slotDur;
+        }
+    };
 
-        // Audio track 1 (ngôn ngữ chính, có tiếng)
-        if (audioMatId) pushAudioSegment(audioMatId, segStart, audioDuration, audioSegments, false);
-
-        // Audio track 2 (ngôn ngữ còn lại = tiếng Việt) khi xuất cả 2. KHÔNG mute -> chạy cả 2, editor tự mute.
-        // Bắt đầu cùng segStart với track chính để khớp theo từng đoạn (độ dài có thể lệch nhẹ).
-        if (bothLangs) {
-            const secAudio = await buildParaAudio(para, !primaryUseVi, false);
-            if (secAudio.audioMatId) pushAudioSegment(secAudio.audioMatId, segStart, secAudio.audioDuration, audioSegments2, false);
+    // Xây danh sách SCENE theo ĐÚNG thứ tự getAllAudioUrls (để idx lips khớp).
+    const sectionScene = async (table, sectionKey) => {
+        const rows = await db.all(`SELECT ${af} AS au, ${afAlt} AS al FROM ${table} WHERE post_id = ? ORDER BY "order"`, [postId]);
+        const units = rows.map(r => ({ au: r.au, al: r.al })).filter(u => u.au || u.al);
+        const assets = await db.all(`SELECT * FROM Asset WHERE selected = 1 AND post_id = ? AND section = ? ORDER BY "order", id`, [postId, sectionKey]);
+        return { units, assets };
+    };
+    const scenes = [];
+    scenes.push(await sectionScene('HookDetail', 'hook'));
+    scenes.push(await sectionScene('SummaryDetail', 'summary'));
+    const parasSeq = await db.all('SELECT id FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);   // khớp getAllAudioUrls (ORDER BY id)
+    for (const para of parasSeq) {
+        // Sub-scene 1: RIÊNG luận điểm = title + chi tiết luận điểm → media chọn ở cấp luận điểm (sentence_id NULL)
+        const ownUnits = [];
+        const p = await db.get(`SELECT ${tf} AS tu, ${tfAlt} AS ta FROM Paragraph WHERE id = ?`, [para.id]);
+        if (p.tu || p.ta) ownUnits.push({ au: p.tu, al: p.ta });
+        const pd = await db.all(`SELECT ${af} AS au, ${afAlt} AS al FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"`, [para.id]);
+        for (const d of pd) if (d.au || d.al) ownUnits.push({ au: d.au, al: d.al });
+        const ownAssets = await db.all(`SELECT * FROM Asset WHERE paragraph_id = ? AND sentence_id IS NULL AND selected = 1 ORDER BY "order", id`, [para.id]);
+        if (ownUnits.length) scenes.push({ units: ownUnits, assets: ownAssets });
+        // Sub-scene mỗi luận cứ (#x.y): chi tiết câu → media chọn RIÊNG cho câu đó (sentence_id = s.id)
+        const sents = await db.all(`SELECT id, ${tf} AS tu, ${tfAlt} AS ta FROM Sentence WHERE paragraph_id = ? ORDER BY "order"`, [para.id]);
+        for (const s of sents) {
+            const sUnits = [];
+            if (s.tu || s.ta) sUnits.push({ au: s.tu, al: s.ta });
+            const sd = await db.all(`SELECT ${af} AS au, ${afAlt} AS al FROM SentenceDetail WHERE sentence_id = ? ORDER BY "order"`, [s.id]);
+            for (const d of sd) if (d.au || d.al) sUnits.push({ au: d.au, al: d.al });
+            if (!sUnits.length) continue;
+            const sAssets = await db.all(`SELECT * FROM Asset WHERE sentence_id = ? AND selected = 1 ORDER BY "order", id`, [s.id]);
+            scenes.push({ units: sUnits, assets: sAssets });
         }
     }
+    scenes.push(await sectionScene('ConclusionDetail', 'conclusion'));
+
+    // Duyệt scene: mỗi câu → audio segment + lips (cùng mốc), giữa các câu chèn silence.
+    // B-ROLL: kết thúc ĐÚNG lúc audio câu cuối (bỏ 1s nghỉ dư cuối cảnh, không giữ hình thừa);
+    // khoảng nghỉ giữa 2 cảnh do ẢNH/VIDEO cảnh sau bắt đầu SỚM (từ mốc audio-end cảnh trước) lấp vào.
+    let lipsIdx = 0, placedLips = 0, prevBrollEnd = null;
+    for (const scene of scenes) {
+        const sceneStart = totalDuration;
+        for (const unit of scene.units) {
+            const primaryUrl = unit.au || (!bothLangs ? unit.al : null);
+            if (unit.au) lipsIdx++;                          // idx khớp getAllAudioUrls (đếm theo audio ngôn ngữ chính)
+            const a = fetchUnitAudio(primaryUrl);
+            const slot = a ? a.durUs : 2_000_000;            // không có audio → slot mặc định 2s
+            if (a) pushAudioSegment(a.matId, totalDuration, a.durUs, audioSegments, false);
+            if (bothLangs && unit.al) { const a2 = fetchUnitAudio(unit.al); if (a2) pushAudioSegment(a2.matId, totalDuration, a2.durUs, audioSegments2, false); }
+            if (unit.au && lipsByIdx[lipsIdx]) { placeLips(lipsByIdx[lipsIdx], totalDuration, slot); placedLips++; }
+            totalDuration += slot + silenceUs;               // khoảng nghỉ giữa các câu (audio/lips giữ nhịp)
+        }
+        const sceneAudioEnd = totalDuration - silenceUs;     // hết audio câu cuối (không tính 1s nghỉ dư)
+        const brollStart = (prevBrollEnd != null) ? prevBrollEnd : sceneStart;   // phủ cả khoảng nghỉ trước cảnh
+        layBroll(scene.assets, brollStart, Math.max(0, sceneAudioEnd - brollStart));
+        prevBrollEnd = sceneAudioEnd;
+    }
+    // Lấp nốt khoảng nghỉ sau câu cuối cùng (trước outro/kết) bằng clip cuối, tránh nền đen.
+    if (lastBrollSeg != null && prevBrollEnd != null && totalDuration > prevBrollEnd)
+        lastBrollSeg.target_timerange.duration += Math.round(totalDuration - prevBrollEnd);
 
     await db.close();
 
-    // OUTRO: chèn ở cuối (sau toàn bộ đoạn).
+    // OUTRO: chèn ở cuối (sau toàn bộ câu).
     if (post.outro_path) totalDuration += addBoundaryVideo(path.join(MEDIA_DIR, post.outro_path), totalDuration, 'outro');
+    console.log(`[CapCut] Timeline theo câu: ${lipsIdx} câu, lips đặt ${placedLips} clip, silence ${(silenceUs/1e6).toFixed(2)}s/câu, tổng ${(totalDuration/1e6).toFixed(1)}s`);
 
     content.duration = totalDuration;
 
@@ -459,6 +531,13 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
         content.tracks.push({
             id: uuid(), type: 'video', segments: videoSegments,
             flag: 0, attribute: 0, name: '', is_default_name: true
+        });
+    }
+    // Track lips sync — đẩy SAU track video chính → nằm TRÊN (overlay). B-roll giữ track dưới.
+    if (lipsSegments.length) {
+        content.tracks.push({
+            id: uuid(), type: 'video', segments: lipsSegments,
+            flag: 0, attribute: 0, name: 'Lips Sync', is_default_name: false
         });
     }
     if (audioSegments.length) {
