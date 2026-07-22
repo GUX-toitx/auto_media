@@ -11,33 +11,31 @@ import { fileURLToPath } from 'url';
 import { spawnSync, execFileSync } from 'child_process';
 import https from 'https';
 import { normArticleUrl } from '../news/news_feeds.js';
+import { collectAccounts } from './x_crawler.js';
+import { aiChat } from '../lib/ai.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
 const VENV_PY = path.join(ROOT, '.venv', 'bin', 'python');
 const OPENAI_KEY = process.env.OPENAI_KEY;
-const X_PROFILE = process.env.X_PROFILE || 'chrome-profile-x';
-
-// Cookie X từ profile Playwright. Nếu trích được thì x_scrape đăng ký account; không thì vẫn chạy
+// Gọi twscrape lấy tweet mới nhất của từng account.
+// Dùng CHUNG pool đa profile với x_crawler (X_PROFILES) → nhiều account = throttle nhân lên.
+// Cookie đưa qua STDIN nên không lộ trong `ps`. Không có profile nào đọc được thì vẫn chạy
 // bằng account đã lưu sẵn trong accounts.db (twscrape giữ phiên bền).
-function readCookies(profileName = X_PROFILE) {
-    try {
-        const out = execFileSync('node', [path.join(HERE, 'x_cookies.js'), profileName], { encoding: 'utf8', timeout: 30000 });
-        const j = JSON.parse(out);
-        if (j.auth_token && j.ct0) return `auth_token=${j.auth_token}; ct0=${j.ct0}`;
-    } catch { /* dùng account đã lưu */ }
-    return '';
-}
-
-// Gọi twscrape lấy tweet mới nhất của từng account
-function scrapeUsers(cookies, users, limit) {
+function scrapeUsers(users, limit) {
+    const accounts = collectAccounts();
     const args = [path.join(HERE, 'x_scrape.py'),
-        '--cookies', cookies || 'x_session',
         '--users', users.join(','),
         '--limit', String(limit),
         '--db', path.join(ROOT, 'accounts.db')];
-    const r = spawnSync(VENV_PY, args, { encoding: 'utf8', maxBuffer: 96 * 1024 * 1024, timeout: 180000 });
+    if (accounts.length) args.push('--accounts-stdin');
+    else args.push('--cookies', 'x_session');   // fallback: dùng account đã lưu trong pool
+    const r = spawnSync(VENV_PY, args, {
+        encoding: 'utf8', maxBuffer: 96 * 1024 * 1024, timeout: 180000,
+        ...(accounts.length ? { input: JSON.stringify(accounts) } : {}),
+    });
     if (r.stderr) process.stderr.write(r.stderr);
+    if (r.error && r.error.code === 'ETIMEDOUT') { console.warn('[x-source] scrape quá 180s (rate-limit?) → bỏ qua'); return []; }
     try { return JSON.parse(r.stdout || '[]'); } catch { return []; }
 }
 
@@ -70,18 +68,12 @@ async function gptRelevant(tweets, keywords, topic) {
             + 'Chỉ giữ tweet đúng nội dung (bỏ quảng cáo, tin vặt, tweet lạc đề). CHỈ trả JSON.';
         const user = `CHỦ ĐỀ: ${topic || kwLine}\nTỪ KHÓA: ${kwLine}\n\nTWEET:\n${listed}`;
         try {
-            const res = await httpsPost(
-                'https://api.openai.com/v1/chat/completions',
-                { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-                { model: 'gpt-4o-mini', temperature: 0, response_format: { type: 'json_object' },
-                  messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] }
-            );
-            if (res.status === 200) {
-                const idxs = JSON.parse(JSON.parse(res.body).choices[0].message.content).relevant || [];
-                for (const i of idxs) if (Number.isInteger(i) && i >= 0 && i < chunk.length) keep.add(start + i);
-            } else {
-                console.error(`[x-source] GPT lọc lỗi ${res.status}: ${res.body.slice(0, 120)}`);
-            }
+            const { content } = await aiChat({
+                tier: 'mini', temperature: 0, json: true,
+                messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
+            });
+            const idxs = JSON.parse(content).relevant || [];
+            for (const i of idxs) if (Number.isInteger(i) && i >= 0 && i < chunk.length) keep.add(start + i);
         } catch (e) { console.error('[x-source] GPT lọc lỗi:', e.message); }
     }
     return keep;
@@ -105,8 +97,7 @@ export async function collectFromXAccounts({ accounts = [], keywords = [], topic
     const users = accounts.map(a => String(a).trim().replace(/^@/, '').replace(/^https?:\/\/(x|twitter)\.com\//i, '').split(/[/?]/)[0]).filter(Boolean);
     if (!users.length) return { articles: [], count: 0 };
 
-    const cookies = readCookies();
-    const raw = scrapeUsers(cookies, users, limit);
+    const raw = scrapeUsers(users, limit);
     console.log(`[x-source] ${users.length} account → ${raw.length} tweet`);
 
     // 1) Cửa sổ ngày + chỉ tweet CÓ media (không media thì không có gì để cào) + chưa dùng ở dự án trước

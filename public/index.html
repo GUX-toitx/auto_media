@@ -23,6 +23,7 @@
                 <button @click="openProfilePage" :class="['flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all', page === 'profiles' ? 'bg-green-600 text-white shadow-lg shadow-green-500/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white']">🧑💻 Profiles</button>
             </div>
             <button @click="genreChooser.open = true" class="w-full py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-cyan-600 hover:bg-cyan-500 text-white">➕ Tạo dự án</button>
+            <button @click="openGeoSheet" class="w-full py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-amber-700 hover:bg-amber-600 text-white">🌏 Chạy Địa chính trị</button>
             <button @click="pageChooser.open = true" class="w-full py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700">🔗 Mở trang khác</button>
         </div>
         <!-- Tách 3 menu theo thể loại dự án -->
@@ -56,7 +57,7 @@
 
     <!-- MAIN -->
     <main v-if="page === 'posts' && activePost" class="flex-1 overflow-y-auto px-5 bg-black/20">
-            <header class="fixed top-0 left-64 right-0 z-30 bg-black/80 backdrop-blur border-b border-gray-800 pb-8 pt-8 flex justify-between items-end px-5">
+            <header class="sticky top-0 z-30 bg-black/90 backdrop-blur border-b border-gray-800 pb-6 pt-6 mb-4 flex flex-wrap gap-y-4 justify-between items-end -mx-5 px-5">
                 <div>
                     <p class="text-blue-500 font-mono text-[10px] mb-2 uppercase tracking-[0.3em]">Workspace / Project</p>
                     <div class="flex items-center gap-3">
@@ -71,7 +72,7 @@
                     <p v-if="activePost.title" class="text-gray-300 text-sm mt-1 font-medium">{{ activePost.title }}</p>
                     <p v-if="activePost.content_score != null && activePost.content_score_reason" class="text-gray-500 text-[11px] mt-0.5 italic max-w-2xl">📊 {{ activePost.content_score_reason }}</p>
                 </div>
-                <div class="flex gap-4 items-end">
+                <div class="flex flex-wrap gap-4 items-end">
                     <!-- Refresh: live sync tự động đã tắt, bấm nút này mới nạp asset mới -->
                     <div class="flex flex-col gap-1.5">
                         <span class="text-[8px] font-black uppercase tracking-widest text-gray-600 px-1">Sync</span>
@@ -142,7 +143,7 @@
                 </div>
             </header>
 
-            <div class="space-y-4 mt-[180px]">
+            <div class="space-y-4">
                 <!-- Title SEO (lưu DB, toggle đóng/mở, 2 cột VI | đích) -->
                 <div v-if="activePost.seo_title" class="bg-gray-900/40 border border-gray-800 rounded-xl p-3">
                     <div class="flex items-center gap-2 cursor-pointer select-none" @click="seoTitleOpen = !seoTitleOpen">
@@ -193,60 +194,20 @@
                         <button @click="askDeleteContent('hook', activePost.id, 'Xóa toàn bộ khối MỞ BÀI? Tất cả đoạn, keyword và media của mở bài sẽ bị xóa vĩnh viễn.')" class="bg-red-600 hover:bg-red-700 text-white text-[12px] font-black w-5 h-5 rounded-lg flex items-center justify-center leading-none shadow shrink-0" title="Xóa cả khối mở bài">×</button>
                     </div>
                     <div class="space-y-1">
-                        <div v-for="d in activePost.hook_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
-                             @drop="handleDetailDrop($event, d, 'hook_detail')"
-                             @dragover.prevent
-                             @dragenter.prevent>
+                        <div v-for="d in activePost.hook_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1">
                             <div class="grid grid-cols-2 gap-1">
                                 <div class="relative">
                                     <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveHookDetailField(d, 'content_vi', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content_vi" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500"></div>
-                                    <button @click="askDeleteContent('hook_detail', d.id, 'Xóa đoạn này khỏi mở bài? Media gán riêng cho đoạn cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
+                                    <button @click="askDeleteContent('hook_detail', d.id, 'Xóa đoạn này khỏi mở bài?')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
                                 </div>
                                 <div class="relative">
                                     <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveHookDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
-                                    <button @click="askDeleteContent('hook_detail', d.id, 'Xóa đoạn này khỏi mở bài? Media gán riêng cho đoạn cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
+                                    <button @click="askDeleteContent('hook_detail', d.id, 'Xóa đoạn này khỏi mở bài?')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
                                 </div>
                             </div>
                             <div class="grid grid-cols-2 gap-1">
                                 <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio" :text="d.content_vi" :wt="d.content_vi_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                                 <div><audio-bar v-if="d.content_audio" :src="d.content_audio" :text="d.content" :wt="d.content_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                            </div>
-                            <!-- Assets for this detail -->
-                            <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
-                                <div v-if="d.videos?.length" class="space-y-0.5">
-                                    <p class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
-                                    <div class="grid grid-cols-4 gap-1">
-                                        <div v-for="(v, vi) in d.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
-                                             draggable="true"
-                                             @dragstart="handleAssetDragStart($event, v, 'video', d, 'hook_detail')">
-                                            <button @click="deleteDetailAsset(v, d, 'hook_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
-                                            <video v-if="previewMode" muted loop preload="none" :poster="thumbUrl(v)" :src="mediaUrl(v)" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video')" class="w-full h-16 object-cover rounded mb-1 bg-black cursor-pointer"></video>
-                                            <a v-else :href="v.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
-                                            <div class="flex gap-0.5">
-                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ vi+1 }}</span>
-                                                <button @click="openEdit(v,'video')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                <button @click="openAssignDetailModal(v,'video')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div v-if="d.images?.length" class="space-y-0.5 mt-1">
-                                    <p class="text-[8px] text-gray-500 mb-0.5">Images ({{d.images.length}})</p>
-                                    <div class="grid grid-cols-4 gap-1">
-                                        <div v-for="(img, ii) in d.images" :key="img.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
-                                             draggable="true"
-                                             @dragstart="handleAssetDragStart($event, img, 'image', d, 'hook_detail')">
-                                            <button @click="deleteDetailAsset(img, d, 'hook_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
-                                            <img v-if="previewMode" :src="thumbUrl(img)" loading="lazy" @click="openPreview(img,'image')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
-                                            <a v-else :href="img.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
-                                            <div class="flex gap-0.5">
-                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ ii+1 }}</span>
-                                                <button @click="openEdit(img,'image')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                <button @click="openAssignDetailModal(img,'image')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -296,9 +257,7 @@
                         </div>
                         <div v-if="activePost.sections['hook']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.hook?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" 
-                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
-                                 draggable="true"
-                                 @dragstart="handleSectionAssetDragStart($event, v, 'video', 'hook')">
+                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
                                 <button @click="deleteSectionAsset(v,'hook')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-10 flex items-center justify-center font-bold shadow-lg">&times;</button>
                                 <video v-if="previewMode" muted loop preload="none" :poster="thumbUrl(v)" :src="mediaUrl(v)" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video',null,'hook')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                 <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
@@ -306,7 +265,7 @@
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v,'hook','video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(v,'video',null,'hook')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
+                                    <button @click="openMoveModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
                         </div>
@@ -318,16 +277,14 @@
                         </div>
                         <div v-if="activePost.sections['hook']._selImageOpen !== false" class="grid grid-cols-6 gap-1 mt-1">
                             <div v-for="img in (activePost.sections?.hook?.images||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="img.relativePath" 
-                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
-                                 draggable="true"
-                                 @dragstart="handleSectionAssetDragStart($event, img, 'image', 'hook')">
+                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
                                 <img v-if="previewMode" :src="thumbUrl(img)" loading="lazy" @click="openPreview(img,'image',null,'hook')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
                                 <a v-else :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
                                 <div class="flex gap-1">
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img,'hook','image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(img,'image',null,'hook')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
+                                    <button @click="openMoveModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
                         </div>
@@ -354,7 +311,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v, 'hook', 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
+                                    <button @click="openMoveModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
                         </div>
@@ -380,7 +337,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img, 'hook', 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
+                                    <button @click="openMoveModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
                         </div>
@@ -394,60 +351,20 @@
                         <button @click="askDeleteContent('summary', activePost.id, 'Xóa toàn bộ khối TÓM TẮT? Tất cả đoạn, keyword và media của tóm tắt sẽ bị xóa vĩnh viễn.')" class="bg-red-600 hover:bg-red-700 text-white text-[12px] font-black w-5 h-5 rounded-lg flex items-center justify-center leading-none shadow shrink-0" title="Xóa cả khối tóm tắt">×</button>
                     </div>
                     <div class="space-y-1">
-                        <div v-for="d in activePost.summary_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
-                             @drop="handleDetailDrop($event, d, 'summary_detail')"
-                             @dragover.prevent
-                             @dragenter.prevent>
+                        <div v-for="d in activePost.summary_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1">
                             <div class="grid grid-cols-2 gap-1">
                                 <div class="relative">
                                     <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveSummaryDetailField(d, 'content_vi', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content_vi" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500"></div>
-                                    <button @click="askDeleteContent('summary_detail', d.id, 'Xóa đoạn này khỏi tóm tắt? Media gán riêng cho đoạn cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
+                                    <button @click="askDeleteContent('summary_detail', d.id, 'Xóa đoạn này khỏi tóm tắt?')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
                                 </div>
                                 <div class="relative">
                                     <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveSummaryDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
-                                    <button @click="askDeleteContent('summary_detail', d.id, 'Xóa đoạn này khỏi tóm tắt? Media gán riêng cho đoạn cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
+                                    <button @click="askDeleteContent('summary_detail', d.id, 'Xóa đoạn này khỏi tóm tắt?')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
                                 </div>
                             </div>
                             <div class="grid grid-cols-2 gap-1">
                                 <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio" :text="d.content_vi" :wt="d.content_vi_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                                 <div><audio-bar v-if="d.content_audio" :src="d.content_audio" :text="d.content" :wt="d.content_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                            </div>
-                            <!-- Assets for this detail -->
-                            <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
-                                <div v-if="d.videos?.length" class="space-y-0.5">
-                                    <p class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
-                                    <div class="grid grid-cols-4 gap-1">
-                                        <div v-for="(v, vi) in d.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
-                                             draggable="true"
-                                             @dragstart="handleAssetDragStart($event, v, 'video', d, 'summary_detail')">
-                                            <button @click="deleteDetailAsset(v, d, 'summary_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
-                                            <video v-if="previewMode" muted loop preload="none" :poster="thumbUrl(v)" :src="mediaUrl(v)" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video')" class="w-full h-16 object-cover rounded mb-1 bg-black cursor-pointer"></video>
-                                            <a v-else :href="v.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
-                                            <div class="flex gap-0.5">
-                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ vi+1 }}</span>
-                                                <button @click="openEdit(v,'video')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                <button @click="openAssignDetailModal(v,'video')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div v-if="d.images?.length" class="space-y-0.5 mt-1">
-                                    <p class="text-[8px] text-gray-500 mb-0.5">Images ({{d.images.length}})</p>
-                                    <div class="grid grid-cols-4 gap-1">
-                                        <div v-for="(img, ii) in d.images" :key="img.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
-                                             draggable="true"
-                                             @dragstart="handleAssetDragStart($event, img, 'image', d, 'summary_detail')">
-                                            <button @click="deleteDetailAsset(img, d, 'summary_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
-                                            <img v-if="previewMode" :src="thumbUrl(img)" loading="lazy" @click="openPreview(img,'image')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
-                                            <a v-else :href="img.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
-                                            <div class="flex gap-0.5">
-                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ ii+1 }}</span>
-                                                <button @click="openEdit(img,'image')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                <button @click="openAssignDetailModal(img,'image')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -497,16 +414,14 @@
                         </div>
                         <div v-if="activePost.sections['summary']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.summary?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" 
-                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
-                                 draggable="true"
-                                 @dragstart="handleSectionAssetDragStart($event, v, 'video', 'summary')">
+                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
                                 <video v-if="previewMode" muted loop preload="none" :poster="thumbUrl(v)" :src="mediaUrl(v)" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video',null,'summary')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                 <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
                                 <div class="flex gap-1">
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v,'summary','video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(v,'video',null,'summary')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
+                                    <button @click="openMoveModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
                         </div>
@@ -518,16 +433,14 @@
                         </div>
                         <div v-if="activePost.sections['summary']._selImageOpen !== false" class="grid grid-cols-6 gap-1 mt-1">
                             <div v-for="img in (activePost.sections?.summary?.images||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="img.relativePath" 
-                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
-                                 draggable="true"
-                                 @dragstart="handleSectionAssetDragStart($event, img, 'image', 'summary')">
+                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
                                 <img v-if="previewMode" :src="thumbUrl(img)" loading="lazy" @click="openPreview(img,'image',null,'summary')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
                                 <a v-else :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
                                 <div class="flex gap-1">
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img,'summary','image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(img,'image',null,'summary')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
+                                    <button @click="openMoveModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
                         </div>
@@ -554,7 +467,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v, 'summary', 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
+                                    <button @click="openMoveModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
                         </div>
@@ -581,7 +494,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img, 'summary', 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
+                                    <button @click="openMoveModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
                         </div>
@@ -647,60 +560,20 @@
                                 <!-- Content row -->
                                 <div class="space-y-1">
                                     <div v-if="para.details?.length" class="space-y-1">
-                                        <div v-for="d in para.details" :key="d.id" class="relative bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
-                                             @drop="handleDetailDrop($event, d, 'paragraph_detail')"
-                                             @dragover.prevent
-                                             @dragenter.prevent>
+                                        <div v-for="d in para.details" :key="d.id" class="relative bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1">
                                             <div class="grid grid-cols-2 gap-1">
                                                 <div class="relative">
                                                     <div contenteditable="true" @blur="saveParaDetailField(d, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500">{{ d.content_vi }}</div>
-                                                    <button @click="askDeleteContent('paragraph_detail', d.id, 'Xóa dòng này khỏi luận điểm? Media gán riêng cho dòng cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa dòng này">×</button>
+                                                    <button @click="askDeleteContent('paragraph_detail', d.id, 'Xóa dòng này khỏi luận điểm?')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa dòng này">×</button>
                                                 </div>
                                                 <div class="relative">
                                                     <div contenteditable="true" @blur="saveParaDetailField(d, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500">{{ d.content }}</div>
-                                                    <button @click="askDeleteContent('paragraph_detail', d.id, 'Xóa dòng này khỏi luận điểm? Media gán riêng cho dòng cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa dòng này">×</button>
+                                                    <button @click="askDeleteContent('paragraph_detail', d.id, 'Xóa dòng này khỏi luận điểm?')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa dòng này">×</button>
                                                 </div>
                                             </div>
                                             <div class="grid grid-cols-2 gap-1">
                                                 <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio" :text="d.content_vi" :wt="d.content_vi_wt" :cover-sec="detailCoverSec(para, d, 'vi')" :cover-full="coverFull(para, 'vi')"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                                                 <div><audio-bar v-if="d.content_audio" :src="d.content_audio" :text="d.content" :wt="d.content_wt" :cover-sec="detailCoverSec(para, d, 'target')" :cover-full="coverFull(para, 'target')"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                                            </div>
-                                            <!-- Assets for this detail -->
-                                            <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
-                                                <div v-if="d.videos?.length" class="space-y-0.5">
-                                                    <p class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
-                                                    <div class="grid grid-cols-4 gap-1">
-                                                        <div v-for="(v, vi) in d.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
-                                                             draggable="true"
-                                                             @dragstart="handleAssetDragStart($event, v, 'video', d, 'paragraph_detail')">
-                                                            <button @click="deleteDetailAsset(v, d, 'paragraph_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
-                                                            <video v-if="previewMode" muted loop preload="none" :poster="thumbUrl(v)" :src="mediaUrl(v)" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video')" class="w-full h-16 object-cover rounded mb-1 bg-black cursor-pointer"></video>
-                                                            <a v-else :href="v.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
-                                                            <div class="flex gap-0.5">
-                                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ vi+1 }}</span>
-                                                                <button @click="openEdit(v,'video')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                                <button @click="openAssignDetailModal(v,'video')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div v-if="d.images?.length" class="space-y-0.5 mt-1">
-                                                    <p class="text-[8px] text-gray-500 mb-0.5">Images ({{d.images.length}})</p>
-                                                    <div class="grid grid-cols-4 gap-1">
-                                                        <div v-for="(img, ii) in d.images" :key="img.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
-                                                             draggable="true"
-                                                             @dragstart="handleAssetDragStart($event, img, 'image', d, 'paragraph_detail')">
-                                                            <button @click="deleteDetailAsset(img, d, 'paragraph_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
-                                                            <img v-if="previewMode" :src="thumbUrl(img)" loading="lazy" @click="openPreview(img,'image')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
-                                                            <a v-else :href="img.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
-                                                            <div class="flex gap-0.5">
-                                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ ii+1 }}</span>
-                                                                <button @click="openEdit(img,'image')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                                <button @click="openAssignDetailModal(img,'image')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -833,60 +706,20 @@
                                             <!-- Sentence content - hiển thị details -->
                                             <div class="space-y-1">
                                                 <div v-if="s.details?.length" class="space-y-1">
-                                                    <div v-for="d in s.details" :key="d.id" class="relative bg-gray-950/80 border border-gray-800 rounded-lg p-1.5 space-y-1"
-                                                         @drop="handleDetailDrop($event, d, 'sentence_detail')"
-                                                         @dragover.prevent
-                                                         @dragenter.prevent>
+                                                    <div v-for="d in s.details" :key="d.id" class="relative bg-gray-950/80 border border-gray-800 rounded-lg p-1.5 space-y-1">
                                                         <div class="grid grid-cols-2 gap-1">
                                                             <div class="relative">
                                                                 <div contenteditable="true" @blur="saveDetailField(d, 'content_vi', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500">{{ d.content_vi }}</div>
-                                                                <button @click="askDeleteContent('sentence_detail', d.id, 'Xóa dòng này khỏi câu? Media gán riêng cho dòng cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa dòng này">×</button>
+                                                                <button @click="askDeleteContent('sentence_detail', d.id, 'Xóa dòng này khỏi câu?')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa dòng này">×</button>
                                                             </div>
                                                             <div class="relative">
                                                                 <div contenteditable="true" @blur="saveDetailField(d, 'content', $event)" @keydown.enter.prevent="$event.target.blur()" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500">{{ d.content }}</div>
-                                                                <button @click="askDeleteContent('sentence_detail', d.id, 'Xóa dòng này khỏi câu? Media gán riêng cho dòng cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa dòng này">×</button>
+                                                                <button @click="askDeleteContent('sentence_detail', d.id, 'Xóa dòng này khỏi câu?')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa dòng này">×</button>
                                                             </div>
                                                         </div>
                                                         <div class="grid grid-cols-2 gap-1">
                                                             <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio" :text="d.content_vi" :wt="d.content_vi_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                                                             <div><audio-bar v-if="d.content_audio" :src="d.content_audio" :text="d.content" :wt="d.content_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                                                        </div>
-                                                        <!-- Assets for this detail -->
-                                                        <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
-                                                            <div v-if="d.videos?.length" class="space-y-0.5">
-                                                                <p class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
-                                                                <div class="grid grid-cols-4 gap-1">
-                                                                    <div v-for="(v, vi) in d.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
-                                                                         draggable="true"
-                                                                         @dragstart="handleAssetDragStart($event, v, 'video', d, 'sentence_detail')">
-                                                                        <button @click="deleteDetailAsset(v, d, 'sentence_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
-                                                                        <video v-if="previewMode" muted loop preload="none" :poster="thumbUrl(v)" :src="mediaUrl(v)" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video')" class="w-full h-16 object-cover rounded mb-1 bg-black cursor-pointer"></video>
-                                                                        <a v-else :href="v.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
-                                                                        <div class="flex gap-0.5">
-                                                                            <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ vi+1 }}</span>
-                                                                            <button @click="openEdit(v,'video')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                                            <button @click="openAssignDetailModal(v,'video')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                            <div v-if="d.images?.length" class="space-y-0.5 mt-1">
-                                                                <p class="text-[8px] text-gray-500 mb-0.5">Images ({{d.images.length}})</p>
-                                                                <div class="grid grid-cols-4 gap-1">
-                                                                    <div v-for="(img, ii) in d.images" :key="img.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
-                                                                         draggable="true"
-                                                                         @dragstart="handleAssetDragStart($event, img, 'image', d, 'sentence_detail')">
-                                                                        <button @click="deleteDetailAsset(img, d, 'sentence_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">×</button>
-                                                                        <img v-if="previewMode" :src="thumbUrl(img)" loading="lazy" @click="openPreview(img,'image')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
-                                                                        <a v-else :href="img.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
-                                                                        <div class="flex gap-0.5">
-                                                                            <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ ii+1 }}</span>
-                                                                            <button @click="openEdit(img,'image')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                                            <button @click="openAssignDetailModal(img,'image')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -928,8 +761,8 @@
                                                     <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                                     <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
                                                         :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
-                                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                                     <button @click="openEdit(v, 'video', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                    <button @click="openMoveModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -949,8 +782,8 @@
                                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                                     <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
                                                         :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
-                                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
                                                     <button @click="openEdit(img, 'image', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                    <button @click="openMoveModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -1053,60 +886,20 @@
                         <button @click="askDeleteContent('conclusion', activePost.id, 'Xóa toàn bộ khối KẾT BÀI? Tất cả đoạn, keyword và media của kết bài sẽ bị xóa vĩnh viễn.')" class="bg-red-600 hover:bg-red-700 text-white text-[12px] font-black w-5 h-5 rounded-lg flex items-center justify-center leading-none shadow shrink-0" title="Xóa cả khối kết bài">×</button>
                     </div>
                     <div class="space-y-1">
-                        <div v-for="d in activePost.conclusion_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1"
-                             @drop="handleDetailDrop($event, d, 'conclusion_detail')"
-                             @dragover.prevent
-                             @dragenter.prevent>
+                        <div v-for="d in activePost.conclusion_details" :key="d.id" class="bg-gray-900 border border-gray-800 rounded-lg p-1.5 space-y-1">
                             <div class="grid grid-cols-2 gap-1">
                                 <div class="relative">
                                     <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveConclusionDetailField(d, 'content_vi', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content_vi" class="js-content-vi bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-400 leading-relaxed outline-none focus:border-blue-500"></div>
-                                    <button @click="askDeleteContent('conclusion_detail', d.id, 'Xóa đoạn này khỏi kết bài? Media gán riêng cho đoạn cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
+                                    <button @click="askDeleteContent('conclusion_detail', d.id, 'Xóa đoạn này khỏi kết bài?')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
                                 </div>
                                 <div class="relative">
                                     <div contenteditable="true" @focus="$event.target._editing = true" @blur="saveConclusionDetailField(d, 'content', $event); $event.target._editing = false" @keydown.enter.prevent="$event.target.blur()" v-html="d.content" class="js-content-target bg-gray-950 border border-gray-800 rounded p-1.5 pr-6 text-[10px] text-gray-300 leading-relaxed outline-none focus:border-blue-500"></div>
-                                    <button @click="askDeleteContent('conclusion_detail', d.id, 'Xóa đoạn này khỏi kết bài? Media gán riêng cho đoạn cũng sẽ bị xóa.')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
+                                    <button @click="askDeleteContent('conclusion_detail', d.id, 'Xóa đoạn này khỏi kết bài?')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black w-4 h-4 rounded-full z-20 flex items-center justify-center leading-none" title="Xóa đoạn này">×</button>
                                 </div>
                             </div>
                             <div class="grid grid-cols-2 gap-1">
                                 <div><audio-bar v-if="d.content_vi_audio" :src="d.content_vi_audio" :text="d.content_vi" :wt="d.content_vi_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
                                 <div><audio-bar v-if="d.content_audio" :src="d.content_audio" :text="d.content" :wt="d.content_wt"></audio-bar><span v-else class="inline-block px-1.5 py-0.5 rounded text-[9px] bg-gray-800 text-gray-600">No audio</span></div>
-                            </div>
-                            <!-- Assets for this detail -->
-                            <div v-if="d.videos?.length || d.images?.length" class="border-t border-gray-800 pt-1 mt-1">
-                                <div v-if="d.videos?.length" class="space-y-0.5">
-                                    <p class="text-[8px] text-gray-500 mb-0.5">Videos ({{d.videos.length}})</p>
-                                    <div class="grid grid-cols-4 gap-1">
-                                        <div v-for="(v, vi) in d.videos" :key="v.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
-                                             draggable="true"
-                                             @dragstart="handleAssetDragStart($event, v, 'video', d, 'conclusion_detail')">
-                                            <button @click="deleteDetailAsset(v, d, 'conclusion_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">&times;</button>
-                                            <video v-if="previewMode" muted loop preload="none" :poster="thumbUrl(v)" :src="mediaUrl(v)" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video')" class="w-full h-16 object-cover rounded mb-1 bg-black cursor-pointer"></video>
-                                            <a v-else :href="v.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
-                                            <div class="flex gap-0.5">
-                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ vi+1 }}</span>
-                                                <button @click="openEdit(v,'video')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                <button @click="openAssignDetailModal(v,'video')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div v-if="d.images?.length" class="space-y-0.5 mt-1">
-                                    <p class="text-[8px] text-gray-500 mb-0.5">Images ({{d.images.length}})</p>
-                                    <div class="grid grid-cols-4 gap-1">
-                                        <div v-for="(img, ii) in d.images" :key="img.id" class="card-asset bg-gray-900 p-1 rounded-lg border border-indigo-500/50 ring-1 ring-indigo-500/20 relative"
-                                             draggable="true"
-                                             @dragstart="handleAssetDragStart($event, img, 'image', d, 'conclusion_detail')">
-                                            <button @click="deleteDetailAsset(img, d, 'conclusion_detail')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-5 h-5 rounded-full z-10 flex items-center justify-center font-bold shadow">&times;</button>
-                                            <img v-if="previewMode" :src="thumbUrl(img)" loading="lazy" @click="openPreview(img,'image')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
-                                            <a v-else :href="img.url" target="_blank" class="block text-[9px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
-                                            <div class="flex gap-0.5">
-                                                <span class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-600 text-white">#{{ ii+1 }}</span>
-                                                <button @click="openEdit(img,'image')" class="flex-1 text-[8px] font-black py-0.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                                <button @click="openAssignDetailModal(img,'image')" class="text-[8px] font-black py-0.5 px-1 rounded bg-indigo-700 hover:bg-indigo-600 text-white">↗</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -1156,16 +949,14 @@
                         </div>
                         <div v-if="activePost.sections['conclusion']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.conclusion?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" 
-                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
-                                 draggable="true"
-                                 @dragstart="handleSectionAssetDragStart($event, v, 'video', 'conclusion')">
+                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
                                 <video v-if="previewMode" muted loop preload="none" :poster="thumbUrl(v)" :src="mediaUrl(v)" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video',null,'conclusion')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                 <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
                                 <div class="flex gap-1">
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v,'conclusion','video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(v,'video',null,'conclusion')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
+                                    <button @click="openMoveModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
                         </div>
@@ -1177,16 +968,14 @@
                         </div>
                         <div v-if="activePost.sections['conclusion']._selImageOpen !== false" class="grid grid-cols-6 gap-1 mt-1">
                             <div v-for="img in (activePost.sections?.conclusion?.images||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="img.relativePath" 
-                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative"
-                                 draggable="true"
-                                 @dragstart="handleSectionAssetDragStart($event, img, 'image', 'conclusion')">
+                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
                                 <img v-if="previewMode" :src="thumbUrl(img)" loading="lazy" @click="openPreview(img,'image',null,'conclusion')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
                                 <a v-else :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
                                 <div class="flex gap-1">
                                     <span class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img,'conclusion','image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase bg-green-600 transition-colors">✓</button>
                                     <button @click="openEdit(img,'image',null,'conclusion')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
-                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
+                                    <button @click="openMoveModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
                         </div>
@@ -1213,7 +1002,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v, 'conclusion', 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
+                                    <button @click="openMoveModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
                         </div>
@@ -1240,7 +1029,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img, 'conclusion', 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
-                                    <button @click="openAssignDetailModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Gán vào detail">↗</button>
+                                    <button @click="openMoveModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
                         </div>
@@ -1512,6 +1301,10 @@
                         <input type="file" accept="video/mp4" class="hidden" @change="uploadLipsSyncFile('video', $event)">
                     </label>
                 </div>
+                <div class="flex items-center gap-2 pt-1">
+                    <button @click="openLipsLib" class="text-[11px] text-pink-400 hover:text-pink-300 font-bold">🗓️ Thư viện video theo thứ →</button>
+                    <span class="text-[10px] text-gray-500">· để trống ô trên thì dự án mới tự lấy video của thứ hôm nay</span>
+                </div>
             </div>
 
             <!-- Content type + guidance scale -->
@@ -1701,6 +1494,120 @@
 
             <div class="flex justify-end pt-2">
                 <button @click="introOutroModal.open=false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-400">Đóng</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- THƯ VIỆN VIDEO KHUÔN MẶT (LIPS) THEO THỨ -->
+    <div v-if="lipsLib.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[720px] max-h-[88vh] overflow-y-auto space-y-4">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xl font-black text-white">🗓️ Video khuôn mặt theo thứ</h3>
+                <button @click="lipsLib.open=false" class="text-gray-500 hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+            <div class="flex gap-1.5 flex-wrap">
+                <button v-for="t in LIPS_TABS" :key="t.key" @click="switchLipsGenre(t.key)"
+                        class="px-3 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-widest transition-all"
+                        :class="lipsLib.genre === t.key ? 'bg-pink-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">
+                    {{ t.label }}
+                </button>
+            </div>
+            <p class="text-[11px] text-gray-400 leading-relaxed">
+                Dự án bật Lips Sync mà <b>không chọn video cụ thể</b> sẽ tự lấy video của <b>thứ tạo dự án</b>, theo đúng thể loại.
+                <template v-if="lipsLib.genre">Ô nào chưa upload ở tab này sẽ <b>kế thừa</b> bộ “Dùng chung”.</template>
+                <template v-else>Đây là bộ <b>Dùng chung</b> cho mọi thể loại.</template>
+            </p>
+            <table class="w-full text-[11px]">
+                <thead><tr class="text-gray-500 uppercase tracking-widest text-[10px]">
+                    <th class="text-left py-2 w-24">Thứ</th><th class="text-left py-2">Video khuôn mặt</th>
+                </tr></thead>
+                <tbody>
+                    <tr v-for="w in lipsLib.items" :key="w.weekday" class="border-t border-gray-800 align-top">
+                        <td class="py-3 font-bold" :class="w.weekday === lipsLib.today ? 'text-pink-400' : 'text-gray-300'">
+                            {{ w.label }}<div v-if="w.weekday === lipsLib.today" class="text-[9px] font-normal text-pink-500">hôm nay</div>
+                        </td>
+                        <td class="py-3 space-y-1.5">
+                            <div v-if="w.video" class="flex items-center gap-2">
+                                <span :class="w.own || !lipsLib.genre ? 'text-green-400' : 'text-gray-500'">{{ w.own || !lipsLib.genre ? '✅' : '↳' }}</span>
+                                <span class="truncate flex-1" :class="w.own || !lipsLib.genre ? 'text-gray-300' : 'text-gray-500 italic'">
+                                    {{ w.video.split('/').pop() }}<span v-if="lipsLib.genre && !w.own" class="text-[9px]"> · kế thừa</span>
+                                </span>
+                                <button @click="useLipsVideo(w.video)" class="text-pink-400 hover:text-pink-300 text-[10px] font-bold uppercase" title="Điền video này vào ô Video của modal Lips Sync">Dùng</button>
+                                <button v-if="w.own || !lipsLib.genre" @click="removeLipsLib(w.weekday)" class="text-red-400 hover:text-red-300 text-[10px] font-bold uppercase">Xoá</button>
+                            </div>
+                            <div v-else class="text-gray-600">— chưa có —</div>
+                            <video v-if="w.video" :src="'/api/lips-sync/preview?path=' + encodeURIComponent(w.video) + '&t=' + lipsLib.cacheBust"
+                                   controls preload="metadata" class="w-full rounded bg-black max-h-40"></video>
+                            <input type="file" accept="video/mp4" @change="uploadLipsLib(w.weekday, $event)" :disabled="lipsLib.uploading"
+                                   class="block w-full text-[10px] text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-pink-700 file:text-white file:font-bold file:cursor-pointer hover:file:bg-pink-600 disabled:opacity-40">
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <div v-if="lipsLib.uploading" class="space-y-1">
+                <div class="h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                    <div class="h-full bg-pink-500 rounded-full transition-all duration-150" :style="{ width: (lipsLib.progress || 0) + '%' }"></div>
+                </div>
+                <div class="text-center text-pink-400 text-[11px] font-bold">Đang upload... {{ lipsLib.progress || 0 }}%</div>
+            </div>
+            <div class="flex justify-end pt-1">
+                <button @click="lipsLib.open=false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-400">Đóng</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CHẠY TAY 1 DÒNG SHEET ĐỊA CHÍNH TRỊ -->
+    <div v-if="geoSheet.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" @click.self="geoSheet.open=false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-[860px] max-h-[88vh] overflow-y-auto space-y-4">
+            <div class="flex items-center justify-between">
+                <h3 class="text-xl font-black text-white">🌏 Chủ đề Địa chính trị (Google Sheet)</h3>
+                <button @click="geoSheet.open=false" class="text-gray-500 hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+            <div class="flex items-center gap-3 flex-wrap text-[11px]">
+                <span class="text-gray-400">Lịch tự động: <b class="text-amber-400">{{ (geoSheet.runTimes||[]).join(' & ') || '—' }}</b> · {{ geoSheet.perRun }} dự án/lượt</span>
+                <span class="text-gray-500">·</span>
+                <span class="text-gray-400">Job đang chạy: <b :class="geoSheet.activeJobs ? 'text-blue-400' : 'text-gray-300'">{{ geoSheet.activeJobs }}/{{ geoSheet.maxJobs }}</b></span>
+                <button @click="loadGeoSheet" :disabled="geoSheet.loading" class="ml-auto px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold uppercase tracking-widest disabled:opacity-40">🔄 Làm mới</button>
+            </div>
+            <p class="text-[11px] text-gray-400">Bấm <b>Chạy ngay</b> để trigger dòng đó lập tức, không cần chờ khung giờ. Lượt chạy tay <b>không ăn vào</b> chỉ tiêu {{ geoSheet.perRun }} dự án/lượt của lịch.</p>
+
+            <div v-if="geoSheet.loading" class="text-center text-gray-500 py-6 text-[12px]">Đang tải sheet…</div>
+            <div v-else-if="geoSheet.error" class="text-center text-red-400 py-6 text-[12px]">❌ {{ geoSheet.error }}</div>
+            <div v-else-if="!geoSheet.rows.length" class="text-center text-gray-500 py-6 text-[12px]">Sheet chưa có chủ đề nào.</div>
+            <table v-else class="w-full text-[11px]">
+                <thead><tr class="text-gray-500 uppercase tracking-widest text-[10px]">
+                    <th class="text-left py-2">Chủ đề</th><th class="text-left py-2 w-28">Trạng thái</th>
+                    <th class="text-left py-2 w-32">Lần chạy gần nhất</th><th class="text-left py-2">Ghi chú</th><th class="w-24"></th>
+                </tr></thead>
+                <tbody>
+                    <tr v-for="r in geoSheet.rows" :key="r.index" class="border-t border-gray-800 align-top">
+                        <td class="py-3 pr-3">
+                            <div class="text-gray-200 font-bold whitespace-pre-line">{{ r.topic.split('\n').slice(0,3).join('\n') }}<span v-if="r.topic.split('\n').length>3" class="text-gray-500"> …</span></div>
+                            <div class="text-[10px] text-gray-500 mt-0.5">
+                                {{ r.lang || 'ja' }}<span v-if="r.voiceOn"> · 🎙️ voice</span><span v-if="r.lipsOn"> · 👄 lips</span>
+                            </div>
+                        </td>
+                        <td class="py-3 pr-3">
+                            <span v-if="r.running" class="text-blue-400 font-bold">▶️ đang chạy</span>
+                            <span v-else-if="r.enabled" class="text-green-400 font-bold">✅ bật</span>
+                            <span v-else class="text-gray-500 font-bold">⏸️ tắt</span>
+                        </td>
+                        <td class="py-3 pr-3 text-gray-400">{{ r.lastRun || '—' }}</td>
+                        <td class="py-3 pr-3 text-gray-400">{{ r.note || '—' }}</td>
+                        <td class="py-3">
+                            <button @click="runGeoRow(r)" :disabled="r.running || geoSheet.running || geoSheet.activeJobs >= geoSheet.maxJobs"
+                                    class="px-3 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-600 text-white font-black text-[10px] uppercase tracking-widest disabled:opacity-40 disabled:cursor-not-allowed">
+                                ▶️ Chạy ngay
+                            </button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <p v-if="geoSheet.rows.length && !geoSheet.rows.some(r => r.enabled)" class="text-[11px] text-amber-400">
+                ⚠️ Mọi dòng đang <b>Tắt</b> (cột “Bật?” = Không) → lịch tự động sẽ không chạy dòng nào. Chạy tay vẫn được.
+            </p>
+            <div class="flex justify-end pt-1">
+                <button @click="geoSheet.open=false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest bg-gray-800 hover:bg-gray-700 text-gray-400">Đóng</button>
             </div>
         </div>
     </div>
@@ -2035,6 +1942,25 @@
                     </div>
                 </div>
                 <button @click="scoreModal.open = false" class="text-gray-500 hover:text-white text-xl leading-none">×</button>
+            </div>
+
+            <!-- Lịch sử đánh giá: bản đầu -> bản viết lại (chỉ hiện khi đã có viết lại) -->
+            <div v-if="scoreModal.history?.length > 1" class="space-y-2">
+                <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Lịch sử đánh giá</p>
+                <div class="flex items-center gap-2 flex-wrap">
+                    <template v-for="(h, hi) in scoreModal.history" :key="hi">
+                        <span v-if="hi" class="text-gray-600 text-sm">→</span>
+                        <span class="px-2.5 py-1 rounded-lg border text-[12px] flex items-center gap-1.5"
+                            :class="h.used ? scoreClass(h.score) : 'border-gray-800 bg-gray-800/40 text-gray-500 line-through'">
+                            <span class="font-bold">{{ h.stage === 'initial' ? 'Bản đầu' : 'Viết lại' }}</span>
+                            <span class="font-mono font-black">{{ h.score == null ? '—' : h.score }}</span>
+                            <span v-if="h.used" class="text-[9px] uppercase opacity-70 no-underline">đang dùng</span>
+                        </span>
+                    </template>
+                </div>
+                <p class="text-[11px] text-gray-500 italic">
+                    Điểm dưới ngưỡng nên hệ thống đã gọi AI viết lại 1 lần; bản điểm cao hơn được giữ lại.
+                </p>
             </div>
 
             <!-- Tiêu chí -->
@@ -2424,96 +2350,6 @@
 
     <!-- MOVE ASSET MODAL -->
     <!-- Assign to Detail Modal - Expandable Sections -->
-    <div v-if="assignDetailModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50" @click.self="assignDetailModal.open = false">
-        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-[600px] space-y-3">
-            <div class="flex justify-between items-center">
-                <h3 class="text-sm font-black text-white">🎯 Gán Asset vào Detail</h3>
-                <button @click="assignDetailModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
-            </div>
-            
-            <div class="space-y-2 max-h-[500px] overflow-y-auto pr-1">
-                <!-- Hook Section -->
-                <div class="border border-gray-700 rounded-lg overflow-hidden">
-                    <button @click="selectTargetSection('hook')" 
-                            @dblclick="assignToSection('hook')"
-                            class="w-full text-left px-3 py-2 bg-gray-800 hover:bg-gray-700 text-[11px] font-bold text-gray-300 transition-colors flex items-center justify-between">
-                        <span>🎬 Mở bài (Hook)</span>
-                        <span class="text-gray-500">{{ assignDetailModal.selectedTarget === 'hook' ? '▼' : '▶' }}</span>
-                    </button>
-                    <div v-if="assignDetailModal.selectedTarget === 'hook'" class="bg-gray-900 border-t border-gray-700 p-2 space-y-1">
-                        <div v-if="!assignDetailModal.details.length" class="text-[10px] text-gray-600 italic px-2 py-2">Chưa có Hook Details</div>
-                        <button v-for="(d, i) in assignDetailModal.details" :key="d.id" 
-                                @click="expandDetail(d)"
-                                @dblclick="assignAssetToDetail(d.id)" 
-                                class="w-full text-left px-3 py-2 rounded bg-gray-800 hover:bg-blue-600 text-[10px] text-gray-300 transition-colors">
-                            📝 Detail #{{ i + 1 }}: {{ (d.content_vi || d.content || '').slice(0, 70) }}...
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- Summary Section -->
-                <div class="border border-gray-700 rounded-lg overflow-hidden">
-                    <button @click="selectTargetSection('summary')" 
-                            @dblclick="assignToSection('summary')"
-                            class="w-full text-left px-3 py-2 bg-gray-800 hover:bg-gray-700 text-[11px] font-bold text-gray-300 transition-colors flex items-center justify-between">
-                        <span>📝 Tóm tắt (Summary)</span>
-                        <span class="text-gray-500">{{ assignDetailModal.selectedTarget === 'summary' ? '▼' : '▶' }}</span>
-                    </button>
-                    <div v-if="assignDetailModal.selectedTarget === 'summary'" class="bg-gray-900 border-t border-gray-700 p-2 space-y-1">
-                        <div v-if="!assignDetailModal.details.length" class="text-[10px] text-gray-600 italic px-2 py-2">Chưa có Summary Details</div>
-                        <button v-for="(d, i) in assignDetailModal.details" :key="d.id" 
-                                @click="expandDetail(d)"
-                                @dblclick="assignAssetToDetail(d.id)" 
-                                class="w-full text-left px-3 py-2 rounded bg-gray-800 hover:bg-blue-600 text-[10px] text-gray-300 transition-colors">
-                            📝 Detail #{{ i + 1 }}: {{ (d.content_vi || d.content || '').slice(0, 70) }}...
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- Conclusion Section -->
-                <div class="border border-gray-700 rounded-lg overflow-hidden">
-                    <button @click="selectTargetSection('conclusion')" 
-                            @dblclick="assignToSection('conclusion')"
-                            class="w-full text-left px-3 py-2 bg-gray-800 hover:bg-gray-700 text-[11px] font-bold text-gray-300 transition-colors flex items-center justify-between">
-                        <span>🎯 Kết bài (Conclusion)</span>
-                        <span class="text-gray-500">{{ assignDetailModal.selectedTarget === 'conclusion' ? '▼' : '▶' }}</span>
-                    </button>
-                    <div v-if="assignDetailModal.selectedTarget === 'conclusion'" class="bg-gray-900 border-t border-gray-700 p-2 space-y-1">
-                        <div v-if="!assignDetailModal.details.length" class="text-[10px] text-gray-600 italic px-2 py-2">Chưa có Conclusion Details</div>
-                        <button v-for="(d, i) in assignDetailModal.details" :key="d.id" 
-                                @click="expandDetail(d)"
-                                @dblclick="assignAssetToDetail(d.id)" 
-                                class="w-full text-left px-3 py-2 rounded bg-gray-800 hover:bg-blue-600 text-[10px] text-gray-300 transition-colors">
-                            📝 Detail #{{ i + 1 }}: {{ (d.content_vi || d.content || '').slice(0, 70) }}...
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="border-t border-gray-700 my-2"></div>
-                
-                <!-- Paragraph Sections -->
-                <div v-for="(para, i) in (activePost?.paragraphs || [])" :key="para.id" class="border border-gray-700 rounded-lg overflow-hidden">
-                    <button @click="selectTargetParagraph(para.id)" 
-                            @dblclick="assignToParagraph(para.id)"
-                            class="w-full text-left px-3 py-2 bg-gray-800 hover:bg-gray-700 text-[11px] font-bold text-gray-300 transition-colors flex items-center justify-between">
-                        <span>🎬 Cảnh {{ i + 1 }}<span v-if="para.title_vi" class="text-gray-500 ml-1 font-normal">— {{ para.title_vi.slice(0,35) }}</span></span>
-                        <span class="text-gray-500">{{ assignDetailModal.selectedTarget === para.id ? '▼' : '▶' }}</span>
-                    </button>
-                    <div v-if="assignDetailModal.selectedTarget === para.id" class="bg-gray-900 border-t border-gray-700 p-2 space-y-1">
-                        <div v-if="!assignDetailModal.details.length" class="text-[10px] text-gray-600 italic px-2 py-2">Chưa có Paragraph Details</div>
-                        <button v-for="(d, j) in assignDetailModal.details" :key="d.id" 
-                                @click="expandDetail(d)"
-                                @dblclick="assignAssetToDetail(d.id)" 
-                                class="w-full text-left px-3 py-2 rounded bg-gray-800 hover:bg-blue-600 text-[10px] text-gray-300 transition-colors">
-                            📝 Detail #{{ j + 1 }}: {{ (d.content_vi || d.content || '').slice(0, 70) }}...
-                        </button>
-                    </div>
-                </div>
-            </div>
-            
-            <button @click="assignDetailModal.open = false" class="w-full py-2 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
-        </div>
-    </div>
 
     <div v-if="moveModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50" @click.self="moveModal.open = false">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-[420px] space-y-3">
@@ -2920,14 +2756,47 @@ createApp({
             return { pairs, errors, langs, srcLang, targetLang: tl, valid };
         });
         const genreChooser = ref({ open: false });
+        // Chạy tay 1 dòng sheet Địa chính trị (không chờ khung giờ)
+        const geoSheet = ref({ open: false, loading: false, running: false, error: '', rows: [], runTimes: [], perRun: 2, activeJobs: 0, maxJobs: 1 });
+
+        async function loadGeoSheet() {
+            geoSheet.value.loading = true; geoSheet.value.error = '';
+            try {
+                const r = await (await fetch('/api/geo-sheet/rows')).json();
+                if (r.error) { geoSheet.value.error = r.error; geoSheet.value.rows = []; }
+                else {
+                    geoSheet.value.rows = r.rows || [];
+                    geoSheet.value.runTimes = r.runTimes || [];
+                    geoSheet.value.perRun = r.perRun ?? 2;
+                    geoSheet.value.activeJobs = r.activeJobs ?? 0;
+                    geoSheet.value.maxJobs = r.maxJobs ?? 1;
+                }
+            } catch (e) { geoSheet.value.error = e.message; }
+            finally { geoSheet.value.loading = false; }
+        }
+
+        async function openGeoSheet() { geoSheet.value.open = true; await loadGeoSheet(); }
+
+        async function runGeoRow(row) {
+            if (!confirm(`Chạy ngay chủ đề này?\n\n${row.topic.split('\n')[0]}\n\nSẽ crawl tin + sinh kịch bản` + (row.voiceOn ? ' + tạo voice' : '') + (row.lipsOn ? ' + lips sync' : '') + '.')) return;
+            geoSheet.value.running = true;
+            try {
+                const r = await (await fetch('/api/geo-sheet/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: row.topic }) })).json();
+                if (r.success) { showToast('▶️ Đã trigger — theo dõi ở cột Ghi chú / log server'); await loadGeoSheet(); }
+                else showToast('❌ ' + (r.error || 'Lỗi'));
+            } catch (e) { showToast('❌ ' + e.message); }
+            finally { geoSheet.value.running = false; }
+        }
+
         const pageChooser = ref({ open: false });
-        const scoreModal = ref({ open: false, score: 0, reason: '', detail: null });
+        const scoreModal = ref({ open: false, score: 0, reason: '', detail: null, history: [] });
         function openScoreDetail() {
             const p = activePost.value;
             if (!p || p.content_score == null) return;
-            let detail = null;
+            let detail = null, history = [];
             try { detail = p.content_score_detail ? JSON.parse(p.content_score_detail) : null; } catch (_) { detail = null; }
-            scoreModal.value = { open: true, score: p.content_score, reason: p.content_score_reason || '', detail };
+            try { history = p.content_score_history ? JSON.parse(p.content_score_history) : []; } catch (_) { history = []; }
+            scoreModal.value = { open: true, score: p.content_score, reason: p.content_score_reason || '', detail, history };
         }
 
         function openGenre(genre) {
@@ -3526,7 +3395,6 @@ createApp({
             } catch (err) { showToast('❌ ' + err.message); }
             xCrawlLoading.value = false;
         }
-        const assignDetailModal = ref({ open: false, asset: null, type: '', selectedTarget: null, detailType: null, details: [] });
 
         function openMoveModal(asset, type) {
             moveModal.value = { open: true, asset, type };
@@ -3959,8 +3827,6 @@ createApp({
 
         function onSelMediaDragStart(e, para, item) {
             reorderDrag.value = { paraId: para.id, relativePath: item.relativePath };
-            // Giữ tương thích: vẫn cho phép kéo asset thả vào detail (handleDetailDrop đọc key 'asset')
-            e.dataTransfer.setData('asset', JSON.stringify({ assetId: item.id, type: item.type, paraId: para.id, source: 'paragraph' }));
             e.dataTransfer.effectAllowed = 'move';
         }
 
@@ -4573,14 +4439,12 @@ createApp({
             if (s >= 60) return 'bg-yellow-600/20 text-yellow-300 border-yellow-600/40';
             return 'bg-red-600/20 text-red-400 border-red-600/40';
         }
-        // Tổng giây media của 1 section = pool đã chọn (sections[key]) + media gán theo từng detail
+        // Tổng giây media đã chọn của 1 section
         function sectionSelectedSec(key) {
-            const post = activePost.value; if (!post) return 0;
-            const sec = post.sections?.[key] || {};
-            const details = post[key + '_details'] || [];
-            const pool = [...(sec.videos || []), ...(sec.images || [])].filter(a => a.selected);
-            const detailMedia = details.flatMap(d => [...(d.videos || []), ...(d.images || [])]);
-            return [...pool, ...detailMedia].reduce((s, x) => s + (Number(x.duration) || 0), 0);
+            const sec = activePost.value?.sections?.[key] || {};
+            return [...(sec.videos || []), ...(sec.images || [])]
+                .filter(a => a.selected)
+                .reduce((s, x) => s + (Number(x.duration) || 0), 0);
         }
         // Độ dài giọng đọc 1 section = tổng audio các detail -> activePost._secNarr[key] = {vi, target}
         async function computeSectionNarration(key) {
@@ -4742,6 +4606,62 @@ createApp({
         }
 
         // ===== Intro / Outro =====
+        // Thư viện video khuôn mặt (lips) theo thứ × thể loại
+        const LIPS_TABS = [
+            { key: '', label: 'Dùng chung' },
+            { key: 'geo', label: 'Địa chính trị' },
+            { key: 'naze', label: 'Tại sao' },
+            { key: 'drama', label: 'Drama' },
+        ];
+        const lipsLib = ref({ open: false, uploading: false, progress: 0, today: 1, items: [], genre: '', cacheBust: 0 });
+
+        async function loadLipsLib(genre) {
+            const g = genre === undefined ? lipsLib.value.genre : genre;
+            try {
+                const r = await (await fetch('/api/lips-lib' + (g ? `?genre=${encodeURIComponent(g)}` : ''))).json();
+                lipsLib.value.items = r.items || [];
+                lipsLib.value.today = r.today || 1;
+                lipsLib.value.genre = g || '';
+            } catch (e) { console.error('load thư viện lips lỗi', e); }
+        }
+        async function openLipsLib() {
+            lipsLib.value.open = true;
+            lipsLib.value.cacheBust = Date.now();
+            await loadLipsLib(activePost.value?.genre || '');
+        }
+
+        // Điền video thư viện vào ô Video của modal Lips Sync (chạy ngay cho dự án đang mở)
+        function useLipsVideo(absPath) {
+            lipsSyncModal.value.videoPath = absPath;
+            lipsLib.value.open = false;
+            showToast('✅ Đã chọn ' + absPath.split('/').pop());
+        }
+        async function switchLipsGenre(g) { await loadLipsLib(g); }
+
+        async function uploadLipsLib(weekday, event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            lipsLib.value.uploading = true; lipsLib.value.progress = 0;
+            try {
+                const fd = new FormData();
+                fd.append('file', file); fd.append('weekday', String(weekday));
+                if (lipsLib.value.genre) fd.append('genre', lipsLib.value.genre);
+                const r = await xhrUpload('/api/lips-lib/upload', fd, pct => { lipsLib.value.progress = pct; });
+                if (r.success) { showToast('✅ Đã lưu video'); lipsLib.value.cacheBust = Date.now(); await loadLipsLib(); }
+                else showToast('❌ ' + (r.error || 'Lỗi upload'));
+            } catch (e) { showToast('❌ ' + e.message); }
+            finally { lipsLib.value.uploading = false; event.target.value = ''; }
+        }
+
+        async function removeLipsLib(weekday) {
+            if (!confirm('Xoá video của thứ này khỏi thư viện?')) return;
+            try {
+                const r = await (await fetch('/api/lips-lib/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ weekday, genre: lipsLib.value.genre || null }) })).json();
+                if (r.success) { showToast('🗑️ Đã xoá'); await loadLipsLib(); }
+                else showToast('❌ ' + (r.error || 'Lỗi'));
+            } catch (e) { showToast('❌ ' + e.message); }
+        }
+
         const introOutroModal = ref({ open: false, uploading: false, progress: 0, cacheBust: 0 });
 
         function openIntroOutroModal() {
@@ -5001,104 +4921,6 @@ createApp({
             }
         };
 
-        function openAssignDetailModal(asset, type) {
-            assignDetailModal.value = { open: true, asset, type, selectedTarget: null, detailType: null, details: [] };
-        }
-
-        function expandDetail(detail) {
-            // Single click on detail - just show highlight or do nothing
-            console.log('[expandDetail]', detail.id);
-        }
-
-        async function assignToSection(section) {
-            // Double-click on section header - assign to section (old behavior)
-            const { asset } = assignDetailModal.value;
-            const post = activePost.value;
-            await fetch('/api/move-asset', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ assetId: asset.id, targetPostId: post.id, targetSection: section })
-            });
-            assignDetailModal.value.open = false;
-            await reloadCurrentPost();
-        }
-
-        async function assignToParagraph(paraId) {
-            // Double-click on paragraph header - assign to paragraph (old behavior)
-            const { asset } = assignDetailModal.value;
-            await fetch('/api/move-asset', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ assetId: asset.id, targetParagraphId: paraId })
-            });
-            assignDetailModal.value.open = false;
-            await reloadCurrentPost();
-        }
-
-        function selectTargetSection(section) {
-            // Toggle expand/collapse
-            if (assignDetailModal.value.selectedTarget === section) {
-                assignDetailModal.value.selectedTarget = null;
-                assignDetailModal.value.detailType = null;
-                assignDetailModal.value.details = [];
-                return;
-            }
-            
-            let details = [];
-            let detailType = null;
-            if (section === 'hook') {
-                details = activePost.value.hook_details || [];
-                detailType = 'hook_detail';
-            } else if (section === 'summary') {
-                details = activePost.value.summary_details || [];
-                detailType = 'summary_detail';
-            } else if (section === 'conclusion') {
-                details = activePost.value.conclusion_details || [];
-                detailType = 'conclusion_detail';
-            }
-            assignDetailModal.value.selectedTarget = section;
-            assignDetailModal.value.detailType = detailType;
-            assignDetailModal.value.details = details;
-        }
-
-        async function assignToSection(section) {
-            const { asset } = assignDetailModal.value;
-            const post = activePost.value;
-            await fetch('/api/move-asset', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ assetId: asset.id, targetPostId: post.id, targetSection: section })
-            });
-            assignDetailModal.value.open = false;
-            await reloadCurrentPost();
-        }
-
-        function selectTargetParagraph(paraId) {
-            // Toggle expand/collapse
-            if (assignDetailModal.value.selectedTarget === paraId) {
-                assignDetailModal.value.selectedTarget = null;
-                assignDetailModal.value.detailType = null;
-                assignDetailModal.value.details = [];
-                return;
-            }
-            
-            const para = activePost.value.paragraphs.find(p => p.id === paraId);
-            assignDetailModal.value.selectedTarget = paraId;
-            assignDetailModal.value.detailType = 'paragraph_detail';
-            assignDetailModal.value.details = para?.details || [];
-        }
-
-        async function assignAssetToDetail(detailId) {
-            const { asset, detailType } = assignDetailModal.value;
-            await fetch('/api/move-asset', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ assetId: asset.id, targetDetailId: detailId, detailType })
-            });
-            assignDetailModal.value.open = false;
-            await reloadCurrentPost();
-        }
-
         // Live sync tự động ĐÃ TẮT (trước đây poll /api/posts/:id mỗi 2s — mỗi lần là 1 query DB
         // nặng + hàng trăm asset trả về). Giờ chỉ sync khi bấm nút 🔄 Refresh.
         const refreshing = ref(false);
@@ -5147,38 +4969,6 @@ createApp({
                 loadPosts();
             }
         };
-
-        function handleSectionAssetDragStart(e, asset, type, section) {
-            e.dataTransfer.setData('asset', JSON.stringify({ assetId: asset.id, type, section, source: 'section' }));
-        }
-
-        function handleParaAssetDragStart(e, asset, type, para) {
-            e.dataTransfer.setData('asset', JSON.stringify({ assetId: asset.id, type, paraId: para.id, source: 'paragraph' }));
-        }
-
-        async function handleDetailDrop(e, detail, detailType) {
-            const data = JSON.parse(e.dataTransfer.getData('asset'));
-            await fetch('/api/move-asset', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ assetId: data.assetId, targetDetailId: detail.id, detailType })
-            });
-            await reloadCurrentPost();
-        }
-
-        function handleAssetDragStart(e, asset, type, detail, detailType) {
-            e.dataTransfer.setData('asset', JSON.stringify({ assetId: asset.id, type, detailId: detail.id, detailType }));
-        }
-
-        async function deleteDetailAsset(asset, detail, detailType) {
-            if (!confirm('Xóa asset này?')) return;
-            await fetch('/api/delete-asset', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ assetId: asset.id })
-            });
-            await reloadCurrentPost();
-        }
 
         // Mở modal confirm xóa nội dung (khối / luận điểm / câu / dòng detail)
         function askDeleteContent(type, id, message) {
@@ -5482,23 +5272,10 @@ createApp({
             deleteSectionAll,
             deleteSelectedSectionAssets,
             deleteSelectedParaAssets,
-            handleDetailDrop,
-            handleAssetDragStart,
-            handleSectionAssetDragStart,
-            handleParaAssetDragStart,
-            deleteDetailAsset,
             confirmModal,
             askDeleteContent,
             runDeleteContent,
             uploadSectionAsset,
-            assignDetailModal,
-            openAssignDetailModal,
-            selectTargetSection,
-            selectTargetParagraph,
-            assignAssetToDetail,
-            assignToSection,
-            assignToParagraph,
-            expandDetail,
             moveModal,
             openMoveModal,
             doMoveAsset,
@@ -5557,6 +5334,7 @@ createApp({
             genAudio,
             downloadVoice,
             downloadSrt,
+            lipsLib, LIPS_TABS, openLipsLib, switchLipsGenre, uploadLipsLib, removeLipsLib, useLipsVideo,
             pollingTimer,
             startPollingVoice,
             crawling, thumbLoading, createThumbnail, selectThumbnail, capcutExporting, capcutRendering, capcutLang, showCapcutMenu, showVoiceMenu, showMediaMenu, matteLips, matteState,
@@ -5601,6 +5379,7 @@ createApp({
             nazeModal,
             genreChooser,
             pageChooser,
+            geoSheet, openGeoSheet, loadGeoSheet, runGeoRow,
             scoreModal, openScoreDetail,
             openGenre,
             submitNaze,

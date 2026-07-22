@@ -9,6 +9,7 @@ import { crawlKeywordImageRotate } from '../crawlers/imageCrawlRotate.js';   // 
 import { crawlX } from '../x/x_crawler.js';
 import { fetchIPv4 as fetch } from '../lib/fetchIPv4.js';
 import { claimNextStockPath } from '../lib/stockNaming.js';
+import { aiChat, aiStructured, aiProviderName, modelFor, logUsage } from '../lib/ai.js';
 import fs from 'fs';
 
 const OPENAI_KEY = process.env.OPENAI_KEY;
@@ -169,35 +170,16 @@ Task:
 6. NEVER cite sources, never add URLs, never add footnotes or references.
 7. Output clean sentences only with no citations whatsoever.`;
 
-    const res = await httpsPost(
-        'https://api.openai.com/v1/responses',
-        { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-        {
-            model: 'gpt-5',
-            reasoning: { effort: 'high' },
-            tools: [{ type: 'web_search_preview' }],
-            max_output_tokens: 32000,
-            text: {
-                format: {
-                    type: 'json_schema',
-                    name: 'naze_content',
-                    schema,
-                    strict: true
-                }
-            },
-            input: systemPrompt + '\n\nTopic: ' + topic
-        }
-    );
-
-    if (res.status !== 200) throw new Error(`GPT loi ${res.status}: ${res.body.slice(0, 200)}`);
-    const data = JSON.parse(res.body);
-    const usage = data.usage;
-    console.log(`[GPT-5] tokens - input: ${usage?.input_tokens}, output: ${usage?.output_tokens}, reasoning: ${usage?.output_tokens_details?.reasoning_tokens}`);
-    if (data.status === 'incomplete') {
-        throw new Error(`GPT-5 incomplete: ${data.incomplete_details?.reason}. Tokens: ${usage?.output_tokens}/32000`);
-    }
-    const outputText = data.output?.find(o => o.type === 'message')?.content?.find(c => c.type === 'output_text')?.text;
-    if (!outputText) throw new Error('GPT-5 no output: ' + JSON.stringify(data).slice(0, 200));
+    console.log(`[naze] Gọi ${aiProviderName()} (${modelFor('main')}) sinh nội dung: ${topic}`);
+    const { outputText, usage } = await aiStructured({
+        schema,
+        schemaName: 'naze_content',
+        input: systemPrompt + '\n\nTopic: ' + topic,
+        effort: 'high',
+        maxTokens: 32000,
+        webSearch: true,      // OpenAI dùng web_search_preview; DeepSeek tự bỏ qua
+    });
+    logUsage('naze', usage);
 
     const parsed = JSON.parse(outputText);
     const stripCitations = s => s.replace(/\s*\([^)]*\(https?:[^)]+\)[^)]*\)/g, '').replace(/\s*\(https?:\/\/[^)]+\)/g, '').trim();
@@ -248,34 +230,15 @@ Task:
 8. NEVER cite sources, never add URLs, never add footnotes or references.
 9. Output clean narration only with no citations whatsoever.`;
 
-    const res = await httpsPost(
-        'https://api.openai.com/v1/responses',
-        { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-        {
-            model: 'gpt-5',
-            reasoning: { effort: 'high' },
-            max_output_tokens: 32000,
-            text: {
-                format: {
-                    type: 'json_schema',
-                    name: 'drama_content',
-                    schema,
-                    strict: true
-                }
-            },
-            input: systemPrompt + '\n\nCase information:\n' + info
-        }
-    );
-
-    if (res.status !== 200) throw new Error(`GPT loi ${res.status}: ${res.body.slice(0, 200)}`);
-    const data = JSON.parse(res.body);
-    const usage = data.usage;
-    console.log(`[GPT-5 drama] tokens - input: ${usage?.input_tokens}, output: ${usage?.output_tokens}, reasoning: ${usage?.output_tokens_details?.reasoning_tokens}`);
-    if (data.status === 'incomplete') {
-        throw new Error(`GPT-5 incomplete: ${data.incomplete_details?.reason}. Tokens: ${usage?.output_tokens}/32000`);
-    }
-    const outputText = data.output?.find(o => o.type === 'message')?.content?.find(c => c.type === 'output_text')?.text;
-    if (!outputText) throw new Error('GPT-5 no output: ' + JSON.stringify(data).slice(0, 200));
+    console.log(`[drama] Gọi ${aiProviderName()} (${modelFor('main')}) sinh nội dung`);
+    const { outputText, usage } = await aiStructured({
+        schema,
+        schemaName: 'drama_content',
+        input: systemPrompt + '\n\nCase information:\n' + info,
+        effort: 'high',
+        maxTokens: 32000,
+    });
+    logUsage('drama', usage);
 
     const parsed = JSON.parse(outputText);
     const stripCitations = s => s.replace(/\s*\([^)]*\(https?:[^)]+\)[^)]*\)/g, '').replace(/\s*\(https?:\/\/[^)]+\)/g, '').trim();
@@ -291,28 +254,17 @@ Task:
 }
 
 async function getKeywordsFromGPT(sentence) {
-    const res = await httpsPost(
-        'https://api.openai.com/v1/chat/completions',
-        { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-        {
-            model: 'gpt-4o-mini',
-            messages: [
-                {
-                    role: 'system',
-                    content: 'You are an image search expert. Given a science/educational sentence, return exactly 6 specific Japanese image search queries for stock photo sites. Focus on visual concepts, nature, science diagrams, real phenomena. Write every query in Japanese. Return ONLY a raw JSON array. Example: ["海の塩の結晶 クローズアップ", "水中の塩の鉱物", "海水の蒸発"]'
-                },
-                { role: 'user', content: sentence }
-            ],
-            temperature: 0.3
-        }
-    );
-    if (res.status !== 200) {
-        if (res.status === 401) throw new Error(`GPT loi 401: API key khong hop le`);
-        if (res.status === 429) throw new Error(`GPT loi 429: Rate limit`);
-        throw new Error(`GPT loi ${res.status}`);
-    }
-    const data = JSON.parse(res.body);
-    let content = data.choices?.[0]?.message?.content || '[]';
+    const r = await aiChat({
+        tier: 'mini', temperature: 0.3,
+        messages: [
+            {
+                role: 'system',
+                content: 'You are an image search expert. Given a science/educational sentence, return exactly 6 specific Japanese image search queries for stock photo sites. Focus on visual concepts, nature, science diagrams, real phenomena. Write every query in Japanese. Return ONLY a raw JSON array. Example: ["海の塩の結晶 クローズアップ", "水中の塩の鉱物", "海水の蒸発"]'
+            },
+            { role: 'user', content: sentence }
+        ],
+    });
+    let content = r.content || '[]';
     content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     try {
         const parsed = JSON.parse(content);
@@ -329,12 +281,9 @@ async function getKeywordsFromGPT(sentence) {
 // Sinh 3 keyword tiếng NHẬT để tìm bài trên X (Twitter) từ nội dung đoạn
 async function getXKeywordsJa(caseInfo) {
     try {
-        const res = await httpsPost(
-            'https://api.openai.com/v1/chat/completions',
-            { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-            {
-                model: 'gpt-4o',
-                messages: [
+        const r = await aiChat({
+            tier: 'std', temperature: 0.2,
+            messages: [
                     {
                         role: 'system',
                         content: [
@@ -352,12 +301,8 @@ async function getXKeywordsJa(caseInfo) {
                     },
                     { role: 'user', content: String(caseInfo).slice(0, 6000) }
                 ],
-                temperature: 0.2
-            }
-        );
-        if (res.status !== 200) return [];
-        const data = JSON.parse(res.body);
-        let content = (data.choices?.[0]?.message?.content || '[]').replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        });
+        let content = (r.content || '[]').replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
         try { const p = JSON.parse(content); if (Array.isArray(p)) return p.slice(0, 3); } catch (_) {}
         const m = content.match(/\[.*?\]/s);
         if (m) { try { return JSON.parse(m[0]).slice(0, 3); } catch (_) {} }
@@ -460,27 +405,22 @@ except Exception as e:
             const langName = { vi: 'Vietnamese', en: 'English', ja: 'Japanese', ko: 'Korean', zh: 'Chinese', fr: 'French', es: 'Spanish' }[lang] || lang;
             console.log(`[naze] Smoothing ${sentences.length} sentences in ${langName}...`);
             const text = sentences.join(' ');
-            const res = await httpsPost(
-                'https://api.openai.com/v1/chat/completions',
-                { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-                {
-                    model: 'gpt-4o',
+            let r;
+            try {
+                r = await aiChat({
+                    tier: 'std', temperature: 0.3, json: true,
                     messages: [
                         { role: 'system', content: `You are a subtitle editor. Given raw auto-generated subtitle text in ${langName}, clean it up:
 1. Fix broken sentences (subtitles are often cut mid-sentence - rejoin them).
 2. Remove filler words, stutters, repeated words.
 3. Split into complete, natural sentences suitable for voice-over (10-25 words each).
 4. KEEP all content and meaning, do NOT summarize or remove information.
-5. Return ONLY a JSON array of clean sentences: ["sentence 1", "sentence 2", ...]` },
+5. Return ONLY a json object with an array of clean sentences: {"sentences": ["sentence 1", "sentence 2", ...]}` },
                         { role: 'user', content: text.slice(0, 12000) }
                     ],
-                    temperature: 0.3,
-                    response_format: { type: 'json_object' }
-                }
-            );
-            if (res.status !== 200) { console.error(`[naze] GPT smooth error ${res.status}`); return sentences; }
-            const data = JSON.parse(res.body);
-            const parsed = JSON.parse(data.choices[0].message.content);
+                });
+            } catch (e) { console.error(`[naze] GPT smooth error: ${e.message}`); return sentences; }
+            const parsed = JSON.parse(r.content);
             const result = Array.isArray(parsed) ? parsed : Object.values(parsed)[0];
             console.log(`[naze] Smoothed: ${result.length} sentences`);
             const clean = (Array.isArray(result) ? result : sentences).map(s => String(s).replace(/^\d+\.\s*/, '').trim()).filter(Boolean);
@@ -492,22 +432,17 @@ except Exception as e:
             const toLangName = { vi: 'Vietnamese', en: 'English', ja: 'Japanese', ko: 'Korean', zh: 'Chinese', fr: 'French', es: 'Spanish' }[toLang] || toLang;
             console.log(`[naze] Translating ${sentences.length} sentences to ${toLangName}...`);
             const numbered = sentences.map((s, i) => `${i+1}. ${s}`).join('\n');
-            const res = await httpsPost(
-                'https://api.openai.com/v1/chat/completions',
-                { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-                {
-                    model: 'gpt-4o',
+            let r;
+            try {
+                r = await aiChat({
+                    tier: 'std', temperature: 0.2, json: true,
                     messages: [
-                        { role: 'system', content: `Translate each numbered sentence to ${toLangName}. Keep numbering. Return JSON: {"sentences": ["translated 1", "translated 2", ...]}` },
+                        { role: 'system', content: `Translate each numbered sentence to ${toLangName}. Keep numbering. Return json: {"sentences": ["translated 1", "translated 2", ...]}` },
                         { role: 'user', content: numbered.slice(0, 12000) }
                     ],
-                    temperature: 0.2,
-                    response_format: { type: 'json_object' }
-                }
-            );
-            if (res.status !== 200) { console.error(`[naze] GPT translate error`); return sentences; }
-            const data = JSON.parse(res.body);
-            const parsed = JSON.parse(data.choices[0].message.content);
+                });
+            } catch (e) { console.error(`[naze] GPT translate error: ${e.message}`); return sentences; }
+            const parsed = JSON.parse(r.content);
             return (parsed.sentences || sentences).map(s => String(s).replace(/^\d+\.\s*/, '').trim()).filter(Boolean);
         };
 
@@ -631,21 +566,15 @@ except Exception as e:
 
             // Sinh image_suggestion bằng GPT-4o-mini
             try {
-                const sugRes = await httpsPost(
-                    'https://api.openai.com/v1/chat/completions',
-                    { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-                    {
-                        model: 'gpt-4o-mini',
-                        messages: [
-                            { role: 'system', content: 'You are an image/video suggestion expert. Read the given text and return a JSON array of Vietnamese search terms (5-8 terms) describing visuals that would illustrate the content. Return ONLY a JSON array, no explanation. Example: ["bầu trời đầy sao", "vũ trụ nhìn từ không gian", "trái đất từ vệ tinh"]' },
-                            { role: 'user', content: text }
-                        ],
-                        temperature: 0.3
-                    }
-                );
-                if (sugRes.status === 200) {
-                    const sugData = JSON.parse(sugRes.body);
-                    const raw = sugData.choices?.[0]?.message?.content || '[]';
+                const sugRes = await aiChat({
+                    tier: 'mini', temperature: 0.3,
+                    messages: [
+                        { role: 'system', content: 'You are an image/video suggestion expert. Read the given text and return a JSON array of Vietnamese search terms (5-8 terms) describing visuals that would illustrate the content. Return ONLY a JSON array, no explanation. Example: ["bầu trời đầy sao", "vũ trụ nhìn từ không gian", "trái đất từ vệ tinh"]' },
+                        { role: 'user', content: text }
+                    ],
+                });
+                {
+                    const raw = sugRes.content || '[]';
                     let sugs = [];
                     try { sugs = JSON.parse(raw); } catch(_) {
                         const m = raw.match(/\[.*\]/s);
@@ -708,6 +637,14 @@ except Exception as e:
                     if (kw) await db.run('INSERT INTO Keyword (post_id, section, content, type) VALUES (?, ?, ?, ?)', [postId, 'x', kw, 'x_ja']);
                 }
                 const xOut = path.join(MEDIA_DIR, projectId, 'assets', 'x');
+                const insertAsset = async (absPath, type, srcUrl) => {
+                    const rel = path.relative(MEDIA_DIR, absPath);
+                    const ex = await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
+                    if (!ex) await db.run('INSERT INTO Asset (post_id, section, type, file_path, source_url) VALUES (?, ?, ?, ?, ?)', [postId, 'x', type, rel, srcUrl || null]);
+                };
+
+                // (1) Search TRẦN + urls: giữ nguyên để CHỤP MÀN HÌNH tweet phản ứng (kể cả tweet chữ).
+                //     Không gộp query media vào đây, kẻo tweet nhiều media chiếm hết suất chụp.
                 const { manifest } = await crawlX({
                     profileName: X_PROFILE,
                     outDir: xOut,
@@ -715,18 +652,33 @@ except Exception as e:
                     urls: X_TWEET_URLS,
                     limit: 12, max: 12, captureMax: xCaptureBudget,
                 });
-                const insertAsset = async (absPath, type, srcUrl) => {
-                    const rel = path.relative(MEDIA_DIR, absPath);
-                    const ex = await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
-                    if (!ex) await db.run('INSERT INTO Asset (post_id, section, type, file_path, source_url) VALUES (?, ?, ?, ?, ?)', [postId, 'x', type, rel, srcUrl || null]);
-                };
                 for (const t of manifest) {
                     for (const img of t.images) await insertAsset(img, 'image', t.url);
                     for (const vid of t.videos) await insertAsset(vid, 'video', t.url);
                     if (t.screenshot) await insertAsset(t.screenshot, 'image', t.url);
                     if (t.recording) await insertAsset(t.recording, 'video', t.url);
                 }
-                console.log(`    [X] ${manifest.length} bài → block X (section='x')`);
+                console.log(`    [X] ${manifest.length} bài (chụp màn hình) → block X`);
+
+                // (2) Search RIÊNG cho media thật: filter:media gần như chỉ ra ẢNH,
+                //     phải hỏi thêm filter:native_video mới có VIDEO (đo thực tế: 24 video vs 1).
+                let mi = 0, mv = 0;
+                if (xKeywords.length) {
+                    try {
+                        const { manifest: mm } = await crawlX({
+                            profileName: X_PROFILE,
+                            outDir: xOut,
+                            keywords: xKeywords.flatMap(k => [`${k} filter:media`, `${k} filter:native_video`]).join('|'),
+                            limit: 16, max: 32, captureMax: 0, maxImages: 5, maxVideos: 5,
+                            scrapeTimeoutMs: 90000,
+                        });
+                        for (const t of mm) {
+                            for (const img of t.images) { await insertAsset(img, 'image', t.url); mi++; }
+                            for (const vid of t.videos) { await insertAsset(vid, 'video', t.url); mv++; }
+                        }
+                    } catch (e) { console.error(`    [X] lấy media lỗi: ${e.message}`); }
+                }
+                console.log(`    [X] +${mi} ảnh + ${mv} video từ search media riêng`);
             } catch (e) { console.error(`    [X] lỗi: ${e.message}`); }
         }
 

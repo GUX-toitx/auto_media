@@ -21,7 +21,16 @@
     .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
     button.btn { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
     button.btn:hover { border-color: var(--accent); }
+    button.btn.danger { border-color: rgba(255,91,110,.4); color: var(--danger); }
+    button.btn.danger:hover { background: rgba(255,91,110,.12); border-color: var(--danger); }
+    button.btn:disabled { opacity: .45; cursor: not-allowed; }
     label.auto { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+    .runlist { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+    .runitem { font-size: 12px; color: var(--text); }
+    .runitem b { color: var(--info); font-weight: 700; }
+    .runitem code { color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; }
+    .waitgrp { font-size: 12px; color: var(--muted); }
+    .waitgrp b { color: var(--text); }
 
     .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
     .worker { display: flex; gap: 22px; flex-wrap: wrap; align-items: center; }
@@ -60,6 +69,7 @@
 
     <div class="toolbar">
         <button class="btn" onclick="load()">🔄 Làm mới</button>
+        <button class="btn danger" id="clearBtn" onclick="clearAll()">🧹 Xoá toàn bộ hàng đợi</button>
         <label class="auto"><input type="checkbox" id="auto" checked> Tự làm mới 5s</label>
         <span class="muted" id="updated"></span>
     </div>
@@ -112,14 +122,44 @@
     function renderWorker(q) {
         const w = $('#worker');
         if (!q) { w.innerHTML = '<span class="muted">Không kết nối được server inference (:8010) — chỉ hiển thị số từ DB.</span>'; return; }
-        const running = (q.running || []);
-        const waiting = (q.waiting || []).length;
+        const runInfo = q.runningInfo || (q.running || []).map(id => ({ jobId: id }));
+        const waitInfo = q.waitingInfo || (q.waiting || []).map(id => ({ jobId: id }));
+        // Job đang chạy: hiện TÊN DỰ ÁN + số câu (job_id trần rất khó tra)
+        const runHtml = runInfo.length
+            ? `<div class="runlist">${runInfo.map(r => `
+                <div class="runitem">▶️ <b>${escapeHtml(r.title || '(không tra được dự án)')}</b>
+                ${r.idx != null ? ` · câu #${r.idx}` : ''} <code>${escapeHtml(r.jobId || '')}</code></div>`).join('')}</div>`
+            : '<div class="run">—</div>';
+        // Đang chờ: gom theo dự án cho dễ nhìn (703 job trần thì không đọc nổi)
+        const grp = {};
+        for (const r of waitInfo) { const k = r.title || '(không rõ dự án)'; grp[k] = (grp[k] || 0) + 1; }
+        const waitHtml = Object.keys(grp).length
+            ? `<div class="runlist">${Object.entries(grp).sort((a, b) => b[1] - a[1]).map(([t, n]) =>
+                `<div class="waitgrp">⏳ <b>${escapeHtml(t)}</b> — ${n} câu</div>`).join('')}</div>`
+            : '<div class="run">—</div>';
         w.innerHTML = `
-            <div class="stat"><b>${q.workers ?? '—'}</b><span>Worker</span></div>
-            <div class="stat"><b>${running.length}</b><span>Đang chạy</span></div>
-            <div class="stat"><b>${waiting}</b><span>Đang chờ</span></div>
-            <div class="stat" style="flex:1; min-width:200px"><span>Job đang chạy</span><div class="run">${running.length ? running.join(', ') : '—'}</div></div>
+            <div style="display:flex; gap:22px; flex-wrap:wrap; width:100%">
+                <div class="stat"><b>${q.workers ?? '—'}</b><span>Worker</span></div>
+                <div class="stat"><b>${runInfo.length}</b><span>Đang chạy</span></div>
+                <div class="stat"><b>${waitInfo.length}</b><span>Đang chờ</span></div>
+            </div>
+            <div style="flex:1; min-width:260px"><span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">Job đang chạy</span>${runHtml}</div>
+            <div style="flex:1; min-width:260px"><span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">Đang chờ theo dự án</span>${waitHtml}</div>
         `;
+    }
+
+    async function clearAll() {
+        const btn = $('#clearBtn');
+        if (!confirm('Xoá TOÀN BỘ hàng đợi lips sync của mọi dự án?\n\nJob đang chạy sẽ được chạy nốt, phần còn lại bị huỷ.')) return;
+        btn.disabled = true;
+        const old = btn.textContent;
+        btn.textContent = '⏳ Đang xoá...';
+        try {
+            const r = await (await fetch('/api/lips-sync/clear-all', { method: 'POST' })).json();
+            if (r.ok) alert(`✅ Đã huỷ ${r.cancelled} job.` + (r.running?.length ? `\n${r.running.length} job đang chạy sẽ chạy nốt.` : ''));
+            else alert('❌ ' + (r.error || 'Lỗi'));
+        } catch (e) { alert('❌ ' + e.message); }
+        finally { btn.disabled = false; btn.textContent = old; load(); }
     }
     function renderRows(projects) {
         if (!projects.length) { $('#rows').innerHTML = '<tr><td colspan="7" class="empty">Chưa có job lips sync nào.</td></tr>'; return; }

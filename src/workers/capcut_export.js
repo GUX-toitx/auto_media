@@ -46,6 +46,13 @@ function getMediaInfo(filePath) {
 
 const WIN_DRAFT_ROOT = 'C:/Users/trinh/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft';
 
+// ===== Vị trí clip Lips Sync trên khung hình (khớp panel "Biến đổi" của CapCut) =====
+// Tỷ lệ = %, Vị trí X/Y = pixel so với tâm canvas 1920x1080 (X dương = sang phải, Y dương = lên trên).
+// draft_content lưu transform theo NỬA canvas → x = X/960, y = Y/540.
+const LIPS_SCALE = Number(process.env.LIPS_CLIP_SCALE ?? 0.65);   // 65%
+const LIPS_POS_X = Number(process.env.LIPS_CLIP_X ?? 1050);       // px
+const LIPS_POS_Y = Number(process.env.LIPS_CLIP_Y ?? -378);       // px
+
 // Build video material dựa trên template thật
 function buildVideoMaterial(matId, assetLocalPath, duration, name, isVideo, draftId) {
     const info = isVideo ? getMediaInfo(assetLocalPath) : { width: 1920, height: 1080 };
@@ -407,6 +414,10 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
         const srcDur = Math.min(lipsDur, slotDur);
         const { segment, extraMaterials } = buildVideoSegment(matId, start, slotDur, srcDur, videoIndex++, info.width, info.height, true);
         segment.volume = 0.0;
+        // Thu nhỏ + đẩy về góc theo cấu hình (không cover full khung như b-roll).
+        segment.clip.scale = { x: LIPS_SCALE, y: LIPS_SCALE };
+        segment.clip.transform = { x: LIPS_POS_X / 960, y: LIPS_POS_Y / 540 };
+        segment.uniform_scale = { on: true, value: LIPS_SCALE };
         lipsSegments.push(segment);
         content.materials.speeds.push({ ...JSON.parse(JSON.stringify(templateContent.materials.speeds[0])), id: extraMaterials.speedId });
         content.materials.canvases.push({ ...JSON.parse(JSON.stringify(templateContent.materials.canvases[0])), id: extraMaterials.canvasId });

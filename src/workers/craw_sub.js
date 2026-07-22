@@ -18,6 +18,7 @@ import { fetchFromCnnBot } from '../crawlers/cnnCrawler.js';
 import { fetchFromGoogleImageBot } from '../crawlers/googleImageCrawler.js';
 import { fetchFromStoryblocksBot } from '../crawlers/storyblocksCrawler.js';
 import { claimNextStockPath } from '../lib/stockNaming.js';
+import { openaiSdkConfig, modelFor } from '../lib/ai.js';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -35,7 +36,7 @@ const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY;
 const VIDEOS_PER_SOURCE = 4;
 const IMAGES_PER_SOURCE = 4;
 
-const openai = new OpenAI({ apiKey: OPENAI_KEY });
+const openai = new OpenAI(openaiSdkConfig());   // openai | deepseek theo .env AI_PROVIDER
 const parser = new Parser();
 const creds = JSON.parse(fs.readFileSync('./config/google_sheet.json', 'utf8'));
 
@@ -249,7 +250,7 @@ async function enhanceContent(rawText, targetLang = null) {
     try {
         const langInstruction = targetLang ? `Viết lại bằng ngôn ngữ: ${targetLang}.` : 'Giữ nguyên ngôn ngữ gốc.';
         const response = await openai.chat.completions.create({
-            model: "gpt-4o",
+            model: modelFor('std'),
             messages: [{ role: "system", content: `Bạn là một Copywriter xuất sắc. Viết lại nội dung cho bay bổng, tự nhiên, phù hợp làm Voice-over. ${langInstruction} KHÔNG thêm tiêu đề, chỉ trả về nội dung.` }, { role: "user", content: rawText }],
             temperature: 0.7 
         });
@@ -292,7 +293,7 @@ async function splitAndTranslateSentences_DEPRECATED(originalText, targetLang) {
     try {
         const numbered = viSentences.map((s, i) => (i + 1) + '. ' + s).join('\n');
         const response = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: modelFor('std'),
             response_format: { type: 'json_object' },
             messages: [
                 {
@@ -323,7 +324,7 @@ async function splitAndTranslateSentences_DEPRECATED(originalText, targetLang) {
 async function translateText(text, targetLang) {
     try {
         const response = await openai.chat.completions.create({
-            model: "gpt-4o",
+            model: modelFor('std'),
             messages: [{ role: "system", content: `You are a translator. Translate to '${targetLang}'. Return ONLY translated text.` }, { role: "user", content: text }],
             temperature: 0.2
         });
@@ -353,7 +354,7 @@ async function rewriteAsJournalist(rawText, targetLang) {
     const langName = getLangName(targetLang);
     try {
         const response = await openai.chat.completions.create({
-            model: "gpt-4o",
+            model: modelFor('std'),
             messages: [
                 {
                     role: "system",
@@ -405,7 +406,7 @@ async function splitIntoScenesWithKeywords(targetText, targetLang) {
     ].join('\n')
     try {
         const response = await openai.chat.completions.create({
-            model: "gpt-4o",
+            model: modelFor('std'),
             response_format: { type: "json_object" },
             messages: [
                 {
@@ -455,7 +456,7 @@ async function splitSentencesAndTranslateToVi(sceneText, targetLang) {
     try {
         const numbered = targetSentences.map((s, i) => (i + 1) + '. ' + s).join('\n');
         const response = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: modelFor('std'),
             response_format: { type: 'json_object' },
             messages: [
                 {

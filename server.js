@@ -39,6 +39,7 @@ import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { JWT } from 'google-auth-library';
 import crypto from 'crypto';
 import os from 'os';
+import { listLipsLib, lipsLibVideo, saveLipsLibFile, removeLipsLibFile, resolveLipsVideo, lipsWeekday, normLipsGenre, LIPS_GENRES, LIPS_GENRE_LABELS } from './src/lib/lipsVideoLib.js';
 
 // IP LAN của máy (cho người cùng mạng truy cập) — ưu tiên 192.168.*, rồi 10.*, tránh docker 172.17/172.18.
 function getLanIp() {
@@ -92,7 +93,7 @@ app.get('/api/posts', async (req, res) => {
 app.get('/api/posts/:postId', async (req, res) => {
     try {
         const db = await getDb();
-        const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, summary, summary_vi, summary_audio, summary_vi_audio, summary_target, summary_target_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio, intro_path, outro_path, seo_title, content_score, content_score_reason, content_score_detail, silence_duration, voice_content_type FROM Post WHERE id = ?', [req.params.postId]);
+        const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, summary, summary_vi, summary_audio, summary_vi_audio, summary_target, summary_target_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio, intro_path, outro_path, seo_title, content_score, content_score_reason, content_score_detail, content_score_history, silence_duration, voice_content_type, genre FROM Post WHERE id = ?', [req.params.postId]);
         if (!post) return res.status(404).json({ error: 'Post not found' });
 
         // HookDetail
@@ -100,41 +101,24 @@ app.get('/api/posts/:postId', async (req, res) => {
             'SELECT id, content, content_vi, content_audio, content_vi_audio, content_wt, content_vi_wt, "order" FROM HookDetail WHERE post_id = ? ORDER BY "order"',
             [post.id]
         );
-        // Load assets for each hook_detail
-        for (const detail of post.hook_details) {
-            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE hook_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
-            detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
-            detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
-        }
         
         // ConclusionDetail
         post.conclusion_details = await db.all(
             'SELECT id, content, content_vi, content_audio, content_vi_audio, content_wt, content_vi_wt, "order" FROM ConclusionDetail WHERE post_id = ? ORDER BY "order"',
             [post.id]
         );
-        for (const detail of post.conclusion_details) {
-            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE conclusion_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
-            detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
-            detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
-        }
-        
+
         // SummaryDetail
         post.summary_details = await db.all(
             'SELECT id, content, content_vi, content_audio, content_vi_audio, content_wt, content_vi_wt, "order" FROM SummaryDetail WHERE post_id = ? ORDER BY "order"',
             [post.id]
         );
-        // Load assets for each summary_detail
-        for (const detail of post.summary_details) {
-            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE summary_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
-            detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
-            detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
-        }
 
         // Lấy keywords và assets cho từng section của post
         const sections = {};
         for (const section of ['hook', 'summary', 'conclusion', 'thumbnail', 'x']) {
             const kws = await db.all('SELECT id, content, type FROM Keyword WHERE post_id = ? AND section = ? ORDER BY id', [post.id, section]);
-            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration, source_url FROM Asset WHERE post_id = ? AND section = ? AND hook_detail_id IS NULL AND summary_detail_id IS NULL AND conclusion_detail_id IS NULL ORDER BY selected DESC, COALESCE(source_id, id), id', [post.id, section]);
+            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration, source_url FROM Asset WHERE post_id = ? AND section = ? ORDER BY selected DESC, COALESCE(source_id, id), id', [post.id, section]);
             const projectId = (post.project_id || '').replace(/_[a-z]{2}$/, '');
             sections[section] = {
                 keywords: kws,
@@ -160,12 +144,6 @@ app.get('/api/posts/:postId', async (req, res) => {
                 'SELECT id, content, content_vi, content_audio, content_vi_audio, content_wt, content_vi_wt, "order" FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"',
                 [para.id]
             );
-            // Load assets for each paragraph_detail
-            for (const detail of para.details) {
-                const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE paragraph_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
-                detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
-                detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
-            }
             const rawSentences = await db.all(
                 'SELECT id, content, content_vi, title, title_vi, content_audio, content_vi_audio, title_audio, title_vi_audio, title_wt, title_vi_wt, audio, sentence_uuid, "order" FROM Sentence WHERE paragraph_id = ? ORDER BY "order"',
                 [para.id]
@@ -175,12 +153,6 @@ app.get('/api/posts/:postId', async (req, res) => {
                     'SELECT id, content, content_vi, content_audio, content_vi_audio, content_wt, content_vi_wt, "order" FROM SentenceDetail WHERE sentence_id = ? ORDER BY "order"',
                     [s.id]
                 );
-                // Load assets for each sentence_detail
-                for (const detail of details) {
-                    const assets = await db.all('SELECT id, type, selected, "order", file_path, duration FROM Asset WHERE sentence_detail_id = ? ORDER BY selected DESC, "order", id', [detail.id]);
-                    detail.videos = assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
-                    detail.images = assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0 }));
-                }
                 return { ...s, sentenceUuid: s.sentence_uuid, audioUrl: s.audio ? (s.audio.startsWith('http') ? s.audio : `/${s.audio}`) : null, details };
             }));
 
@@ -192,7 +164,7 @@ app.get('/api/posts/:postId', async (req, res) => {
 
             // File media từ DB (exclude assets assigned to details)
             const assets = await db.all(
-                'SELECT id, type, selected, "order", file_path, sentence_id, paragraph_id, duration FROM Asset WHERE (paragraph_id = ? OR sentence_id IN (SELECT id FROM Sentence WHERE paragraph_id = ?)) AND paragraph_detail_id IS NULL AND sentence_detail_id IS NULL ORDER BY id',
+                'SELECT id, type, selected, "order", file_path, sentence_id, paragraph_id, duration FROM Asset WHERE (paragraph_id = ? OR sentence_id IN (SELECT id FROM Sentence WHERE paragraph_id = ?)) ORDER BY id',
                 [para.id, para.id]
             );
             para.videos = assets
@@ -253,47 +225,13 @@ app.post('/api/add-keyword', async (req, res) => {
 
 // API: Di chuyển asset sang section/paragraph khác
 app.post('/api/move-asset', async (req, res) => {
-    const { assetId, targetParagraphId, targetPostId, targetSection, targetDetailId, detailType } = req.body;
+    const { assetId, targetParagraphId, targetPostId, targetSection } = req.body;
     try {
         const db = await getDb();
         const asset = await db.get('SELECT * FROM Asset WHERE id = ?', [assetId]);
         if (!asset) { await db.close(); return res.status(404).json({ error: 'Asset not found' }); }
 
-        const isFromSection = !!(asset.post_id && asset.section &&
-            !asset.hook_detail_id && !asset.summary_detail_id && !asset.conclusion_detail_id &&
-            !asset.paragraph_detail_id && !asset.sentence_detail_id);
-        const isFromDetail = !!(asset.hook_detail_id || asset.summary_detail_id || asset.conclusion_detail_id ||
-            asset.paragraph_detail_id || asset.sentence_detail_id);
-
-        const detailCols = {
-            hook_detail: 'hook_detail_id', summary_detail: 'summary_detail_id',
-            conclusion_detail: 'conclusion_detail_id', paragraph_detail: 'paragraph_detail_id',
-            sentence_detail: 'sentence_detail_id'
-        };
-
-        if (detailType && targetDetailId) {
-            const col = detailCols[detailType];
-            if (isFromSection) {
-                // Copy file
-                const srcPath = path.join(MEDIA_DIR, asset.file_path);
-                const ext = path.extname(asset.file_path);
-                const newFileName = path.basename(asset.file_path, ext) + `_copy_${Date.now()}` + ext;
-                const newFilePath = path.join(path.dirname(srcPath), newFileName);
-                if (fs.existsSync(srcPath)) fs.copyFileSync(srcPath, newFilePath);
-                const newRel = path.relative(MEDIA_DIR, newFilePath);
-                // Insert asset mới gán vào detail
-                await db.run(`INSERT INTO Asset (${col}, type, file_path, duration) VALUES (?, ?, ?, ?)`,
-                    [targetDetailId, asset.type, newRel, asset.duration]);
-            } else {
-                // Từ paragraph/sentence -> detail: update và xóa sạch các foreign key cũ
-                await db.run(`UPDATE Asset SET
-                    hook_detail_id = NULL, summary_detail_id = NULL, conclusion_detail_id = NULL,
-                    paragraph_detail_id = NULL, sentence_detail_id = NULL,
-                    post_id = NULL, section = NULL, paragraph_id = NULL, sentence_id = NULL
-                    WHERE id = ?`, [assetId]);
-                await db.run(`UPDATE Asset SET ${col} = ? WHERE id = ?`, [targetDetailId, assetId]);
-            }
-        } else if (targetPostId && targetSection) {
+        if (targetPostId && targetSection) {
             await db.run('UPDATE Asset SET paragraph_id = NULL, sentence_id = NULL, post_id = ?, section = ?, hook_detail_id = NULL, summary_detail_id = NULL, conclusion_detail_id = NULL, paragraph_detail_id = NULL, sentence_detail_id = NULL WHERE id = ?',
                 [targetPostId, targetSection, assetId]);
         } else if (targetParagraphId) {
@@ -957,11 +895,12 @@ app.post('/api/create-project', async (req, res) => {
         fs.writeFileSync(path.join(targetDir, 'original_content.txt'), (content?.trim()) || kwArr.join('\n'));
         // Auto voice: lưu cấu hình để orchestrator tự chạy sau khi crawl xong
         if (voiceAuto && speakerUuid) {
+            const genreForLips = 'geo';
             writeVoiceAutoConfig(projectId, {
                 speakerUuid,
                 contentType: voiceContentType,
                 dictionaryUuids,
-                lips: (lipsAuto && lipsVideo) ? { video: lipsVideo, guidanceScale: lipsGuidance } : null,
+                lips: lipsAuto && resolveLipsVideo(lipsVideo, genreForLips) ? { video: resolveLipsVideo(lipsVideo, genreForLips), guidanceScale: lipsGuidance } : null,
                 speed: voiceSpeed,
             });
         }
@@ -1306,7 +1245,7 @@ app.post('/api/create-naze-srt', upload.fields([{ name: 'srt', maxCount: 1 }, { 
         if (isYes(voiceAuto) && speakerUuid) {
             writeVoiceAutoConfig(projectId, {
                 speakerUuid, contentType: voiceContentType || 'content', dictionaryUuids: dicts,
-                lips: (isYes(lipsAuto) && lipsVideo) ? { video: lipsVideo, guidanceScale: parseFloat(lipsGuidance) || 2.2 } : null,
+                lips: isYes(lipsAuto) && resolveLipsVideo(lipsVideo, genreForLips) ? { video: resolveLipsVideo(lipsVideo, genreForLips), guidanceScale: parseFloat(lipsGuidance) || 2.2 } : null,
                 speed: voiceSpeed,
             });
         }
@@ -1409,8 +1348,9 @@ app.post('/api/create-naze-youtube', express.json(), async (req, res) => {
         const targetDir = path.join(MEDIA_DIR, projectId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
         if (voiceAuto && speakerUuid) {
+            const genreForLips = 'naze';   // luồng YouTube luôn là naze
             writeVoiceAutoConfig(projectId, { speakerUuid, contentType: voiceContentType, dictionaryUuids,
-                lips: (lipsAuto && lipsVideo) ? { video: lipsVideo, guidanceScale: lipsGuidance } : null, speed: voiceSpeed });
+                lips: lipsAuto && resolveLipsVideo(lipsVideo, genreForLips) ? { video: resolveLipsVideo(lipsVideo, genreForLips), guidanceScale: lipsGuidance } : null, speed: voiceSpeed });
         }
         const args = ['src/workers/naze_content.js', '--youtube', url.trim(), projectId];
         if (targetLang) args.push(targetLang);
@@ -1433,8 +1373,9 @@ app.post('/api/create-naze', express.json(), async (req, res) => {
         const targetDir = path.join(MEDIA_DIR, projectId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
         if (voiceAuto && speakerUuid) {
+            const genreForLips = (genre === 'drama' ? 'drama' : 'naze');
             writeVoiceAutoConfig(projectId, { speakerUuid, contentType: voiceContentType, dictionaryUuids,
-                lips: (lipsAuto && lipsVideo) ? { video: lipsVideo, guidanceScale: lipsGuidance } : null, speed: voiceSpeed });
+                lips: lipsAuto && resolveLipsVideo(lipsVideo, genreForLips) ? { video: resolveLipsVideo(lipsVideo, genreForLips), guidanceScale: lipsGuidance } : null, speed: voiceSpeed });
         }
         const args = ['src/workers/naze_content.js', topic.trim(), projectId, targetLang || 'vi', genre === 'drama' ? 'drama' : 'naze'];
         const env = { ...process.env };
@@ -1676,6 +1617,31 @@ app.post('/api/remove-intro-outro', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+
+// ---- THƯ VIỆN VIDEO KHUÔN MẶT (LIPS SYNC) THEO THỨ × THỂ LOẠI ----
+app.get('/api/lips-lib', (req, res) => {
+    try {
+        res.json({ today: lipsWeekday(), genre: normLipsGenre(req.query.genre),
+                   genres: LIPS_GENRES, genreLabels: LIPS_GENRE_LABELS, items: listLipsLib(req.query.genre) });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/lips-lib/upload', upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'Thiếu file' });
+        const abs = saveLipsLibFile(req.body.weekday, req.file.path, req.file.originalname, normLipsGenre(req.body.genre));
+        res.json({ success: true, weekday: Number(req.body.weekday), genre: normLipsGenre(req.body.genre), path: abs });
+    } catch (e) {
+        try { if (req.file) fs.unlinkSync(req.file.path); } catch (_) {}
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/lips-lib/remove', (req, res) => {
+    try { removeLipsLibFile(req.body.weekday, normLipsGenre(req.body.genre)); res.json({ success: true }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/save-duration', async (req, res) => {
     const { relativePath, duration } = req.body;
     try {
@@ -1724,41 +1690,36 @@ app.post('/api/trim', async (req, res) => {
         await runFfmpeg(['-ss', String(start), '-t', String(dur), '-i', fullPath, '-c', 'copy', '-avoid_negative_ts', 'make_zero', '-y', trimmedPath]);
 
         const db = await getDb();
-        const orig = await db.get('SELECT id, paragraph_id, sentence_id, post_id, section, type, selected, "order" FROM Asset WHERE file_path = ?', [relativePath]);
+        // Lấy ĐỦ mọi cột "chủ sở hữu" — bỏ sót cột nào thì mảnh cắt rơi khỏi chỗ đứng cũ, thành asset mồ côi.
+        const OWNER_COLS = ['post_id', 'section', 'paragraph_id', 'sentence_id'];
+        const orig = await db.get(`SELECT id, ${OWNER_COLS.join(', ')}, type, selected, "order" FROM Asset WHERE file_path = ?`, [relativePath]);
         if (orig) {
-            const isSection = !!(orig.post_id && orig.section);
+            // Insert 1 mảnh cắt, giữ nguyên chỗ đứng (section / luận điểm / câu) của file gốc.
+            const insertPiece = (owner, filePath, selected, order, dur) => db.run(
+                `INSERT INTO Asset (${OWNER_COLS.join(', ')}, type, selected, "order", duration, source_id, file_path)
+                 VALUES (${OWNER_COLS.map(() => '?').join(', ')}, ?, ?, ?, ?, ?, ?)`,
+                [...OWNER_COLS.map(c => owner[c] ?? null), orig.type, selected, order, dur || null, orig.id, filePath]
+            );
             // Xóa file gốc khỏi DB
             await db.run('DELETE FROM Asset WHERE id = ?', [orig.id]);
-            // File trim chính - kế thừa selected/order của file gốc
-            if (isSection) {
-                await db.run(
-                    'INSERT INTO Asset (post_id, section, type, selected, "order", duration, source_id, file_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                    [orig.post_id, orig.section, orig.type, orig.selected, orig.order, duration || null, orig.id, trimmedRelative]
-                );
-            } else {
-                await db.run(
-                    'INSERT INTO Asset (paragraph_id, sentence_id, type, selected, "order", duration, source_id, file_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                    [orig.paragraph_id, orig.sentence_id, orig.type, orig.selected, orig.order, duration || null, orig.id, trimmedRelative]
-                );
+            // File trim chính - kế thừa selected/order + chỗ đứng của file gốc
+            await insertPiece(orig, trimmedRelative, orig.selected, orig.order, duration);
+
+            // Phần thừa (trước/sau): cùng chỗ với file gốc nhưng CHƯA CHỌN → rơi xuống pool bên dưới,
+            // không nằm lại ô đã chọn. Asset gắn thẳng vào 1 câu thì đẩy lên cấp luận điểm cho dễ dùng lại.
+            const leftoverOwner = { ...orig };
+            if (!leftoverOwner.paragraph_id && leftoverOwner.sentence_id) {
+                leftoverOwner.paragraph_id = await db.get('SELECT paragraph_id FROM Sentence WHERE id = ?', [leftoverOwner.sentence_id]).then(r => r?.paragraph_id || null);
             }
+            if (leftoverOwner.paragraph_id) leftoverOwner.sentence_id = null;
+
             // Phần trước [0, start]
             if (start > 0.5) {
                 const beforePath = `${base}_trim_before_${ts}${ext}`;
                 const beforeRelative = path.relative(MEDIA_DIR, beforePath);
                 try {
                     await runFfmpeg(['-ss', '0', '-t', String(start), '-i', fullPath, '-c', 'copy', '-y', beforePath]);
-                    if (isSection) {
-                        await db.run(
-                            'INSERT INTO Asset (post_id, section, type, selected, "order", duration, source_id, file_path) VALUES (?, ?, ?, 0, 0, ?, ?, ?)',
-                            [orig.post_id, orig.section, orig.type, Math.round(start * 10) / 10, orig.id, beforeRelative]
-                        );
-                    } else {
-                        const paraId = orig.paragraph_id || await db.get('SELECT paragraph_id FROM Sentence WHERE id = ?', [orig.sentence_id]).then(r => r?.paragraph_id);
-                        await db.run(
-                            'INSERT INTO Asset (paragraph_id, sentence_id, type, selected, "order", duration, source_id, file_path) VALUES (?, NULL, ?, 0, 0, ?, ?, ?)',
-                            [paraId, orig.type, Math.round(start * 10) / 10, orig.id, beforeRelative]
-                        );
-                    }
+                    await insertPiece(leftoverOwner, beforeRelative, 0, 0, Math.round(start * 10) / 10);
                 } catch(e) { console.error('[trim before error]', e.message); }
             }
             // Phần sau [end, total]
@@ -1769,18 +1730,7 @@ app.post('/api/trim', async (req, res) => {
                 console.log('[trim] totalDur:', totalDur, 'end:', end, 'after duration:', totalDur - end, 'afterPath:', afterPath);
                 try {
                     await runFfmpeg(['-ss', String(end), '-i', fullPath, '-c', 'copy', '-y', afterPath]);
-                    if (isSection) {
-                        await db.run(
-                            'INSERT INTO Asset (post_id, section, type, selected, "order", duration, source_id, file_path) VALUES (?, ?, ?, 0, 0, ?, ?, ?)',
-                            [orig.post_id, orig.section, orig.type, Math.round((totalDur - end) * 10) / 10, orig.id, afterRelative]
-                        );
-                    } else {
-                        const paraId = orig.paragraph_id || await db.get('SELECT paragraph_id FROM Sentence WHERE id = ?', [orig.sentence_id]).then(r => r?.paragraph_id);
-                        await db.run(
-                            'INSERT INTO Asset (paragraph_id, sentence_id, type, selected, "order", duration, source_id, file_path) VALUES (?, NULL, ?, 0, 0, ?, ?, ?)',
-                            [paraId, orig.type, Math.round((totalDur - end) * 10) / 10, orig.id, afterRelative]
-                        );
-                    }
+                    await insertPiece(leftoverOwner, afterRelative, 0, 0, Math.round((totalDur - end) * 10) / 10);
                 } catch(e) { console.error('[trim after error]', e.message); }
             } else {
                 console.log('[trim] skip after: totalDur=', totalDur, 'end=', end);
@@ -2736,14 +2686,76 @@ app.get('/api/lips-sync/queues', async (req, res) => {
             FROM LipsSyncJob j LEFT JOIN Post p ON p.id = j.post_id
             GROUP BY j.post_id
             ORDER BY updatedAt DESC`);
-        await db.close();
         // Trạng thái worker inference (best-effort, không có cũng không sao)
         let queue = null;
         try {
             const r = await globalThis.fetch(`${LIPS_SYNC_BASE}/queue`);
             if (r.ok) queue = await r.json();
         } catch (_) {}
+        // Worker chỉ trả job_id trần (vd "d0156fa4f703") → tra ngược ra TÊN DỰ ÁN cho dễ nhận.
+        if (queue) {
+            const ids = [...(queue.running || []), ...(queue.waiting || [])].filter(Boolean);
+            const byId = {};
+            if (ids.length) {
+                const ph = ids.map(() => '?').join(',');
+                const rows = await db.all(
+                    `SELECT j.job_id AS jobId, j.idx AS idx, j.post_id AS postId,
+                            p.project_id AS projectId, COALESCE(p.title, p.project_id) AS title
+                       FROM LipsSyncJob j LEFT JOIN Post p ON p.id = j.post_id
+                      WHERE j.job_id IN (${ph})`, ids);
+                for (const r of rows) byId[r.jobId] = r;
+            }
+            const info = (jid) => ({ jobId: jid, ...(byId[jid] || {}) });
+            queue.runningInfo = (queue.running || []).map(info);
+            queue.waitingInfo = (queue.waiting || []).map(info);
+        }
+        await db.close();
         res.json({ projects, queue });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Huỷ TOÀN BỘ job lips còn dang dở (mọi dự án). Job đang chạy để nó chạy nốt (không cắt giữa chừng).
+app.post('/api/lips-sync/clear-all', async (req, res) => {
+    try {
+        const db = await getDb();
+        const has = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='LipsSyncJob'");
+        if (!has) { await db.close(); return res.json({ ok: true, cancelled: 0, running: [] }); }
+        const rows = await db.all(
+            "SELECT job_id AS jobId FROM LipsSyncJob WHERE job_id IS NOT NULL AND status NOT IN ('done','error','cancelled')"
+        );
+        // Hàng đợi worker có thể chứa job KHÔNG còn dấu vết trong DB (job mồ côi từ lần chạy trước,
+        // đổi nhánh/reset DB...). Chỉ dựa vào DB thì xoá không sạch → gộp thêm id lấy thẳng từ worker.
+        const fromDb = rows.map(r => r.jobId).filter(Boolean);
+        let fromWorker = [];
+        try {
+            const qr = await globalThis.fetch(`${LIPS_SYNC_BASE}/queue`);
+            if (qr.ok) {
+                const q = await qr.json();
+                fromWorker = [...(q.running || []), ...(q.waiting || [])].filter(Boolean);
+            }
+        } catch (_) {}
+        const jobIds = [...new Set([...fromDb, ...fromWorker])];
+        const orphans = fromWorker.filter(id => !fromDb.includes(id)).length;
+        if (orphans) console.log(`[lips-sync/clear-all] ${orphans} job trong worker không có trong DB (mồ côi) — vẫn huỷ.`);
+        let running = [];
+        try {
+            const r = await globalThis.fetch(`${LIPS_SYNC_BASE}/jobs/cancel`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ job_ids: jobIds }),
+            });
+            const data = await r.json().catch(() => ({}));
+            running = Array.isArray(data.running) ? data.running : [];
+        } catch (e) { console.warn('[lips-sync/clear-all] Không gọi được cancel :8010:', e.message); }
+        const now = Date.now();
+        let cancelled = 0;
+        for (const jid of jobIds) {
+            if (running.includes(jid)) continue;      // đang chạy → để chạy nốt
+            await db.run("UPDATE LipsSyncJob SET status = 'cancelled', updated_at = ? WHERE job_id = ?", [now, jid]);
+            cancelled++;
+        }
+        await db.close();
+        console.log(`[lips-sync/clear-all] Đã huỷ ${cancelled} job, ${running.length} job đang chạy để chạy nốt.`);
+        res.json({ ok: true, cancelled, running });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -3205,8 +3217,9 @@ async function sheetPollTick() {
                 let lips = null;
                 if (lipsOn) {
                     if (voiceContentType !== 'content') { await errRow('Lips sync chỉ chạy khi Loại giọng = Target (ngôn ngữ đích)'); continue; }
-                    const lipsVideo = sheetCleanLips(row.get(SHEET_COL.lipsVideo));
-                    if (!lipsVideo) { await errRow('Đã chọn Lips sync = Có nhưng chưa chọn Video khuôn mặt'); continue; }
+                    // Ô trống -> tự lấy video của THỨ hôm nay trong thư viện (theo thể loại của dòng)
+                    const lipsVideo = resolveLipsVideo(sheetCleanLips(row.get(SHEET_COL.lipsVideo)), genre === 'drama' ? 'drama' : 'naze');
+                    if (!lipsVideo) { await errRow('Bật Lips sync nhưng chưa chọn Video khuôn mặt và thư viện chưa có video cho thứ hôm nay'); continue; }
                     lips = { video: lipsVideo, guidanceScale: parseFloat(row.get(SHEET_COL.lipsGuidance)) || 2.2 };
                 }
                 voice = { speakerUuid, contentType: voiceContentType, dictionaryUuids, lips, speed };
@@ -3265,11 +3278,21 @@ const GEO_SHEET_HEADERS = [GEO_COL.topic, GEO_COL.sources, GEO_COL.lang, GEO_COL
     SHEET_COL.voiceOn, SHEET_COL.speed, SHEET_COL.speaker, SHEET_COL.voiceType, SHEET_COL.dict,
     SHEET_COL.lipsOn, SHEET_COL.lipsVideo, SHEET_COL.lipsGuidance,
     GEO_COL.lastRun, GEO_COL.lastNew, GEO_COL.total, GEO_COL.note, GEO_COL.xAccounts];
-const GEO_POLL_MS = 2 * 60 * 1000;
-const MAX_GEO_JOBS = 1;                            // geo nặng (RSS+FlareSolverr+GPT-5) → chạy 1 lúc
+// LỊCH CHẠY: 2 lần/ngày, mỗi lần tạo tối đa GEO_PROJECTS_PER_RUN dự án (mặc định 2) → 4 dự án/ngày.
+// Tick mỗi phút chỉ để DÒ tới khung giờ; ngoài khung giờ thì không làm gì (budget = 0).
+const GEO_POLL_MS = 60 * 1000;
+const GEO_RUN_TIMES = (process.env.GEO_RUN_TIMES || '07:00,19:00')
+    .split(',').map(s => s.trim()).filter(s => /^\d{1,2}:\d{2}$/.test(s));
+const GEO_PROJECTS_PER_RUN = Math.max(1, parseInt(process.env.GEO_PROJECTS_PER_RUN, 10) || 2);
+const MAX_GEO_JOBS = 1;                            // geo nặng (RSS+FlareSolverr+GPT) → chạy 1 lúc
 const GEO_SEEN_DIR = path.join(__dirname, 'rss_seen');
 let geoTickRunning = false;
 let activeGeoJobs = 0;
+// Số dự án CÒN PHẢI TẠO của khung giờ đang mở. 0 = ngoài giờ, không chạy gì.
+// Đếm theo dự án THẬT SỰ tạo được (code 0), nên chủ đề nào không có tin mới sẽ không phí suất.
+let geoSlotBudget = 0;
+const geoFiredSlots = new Set();                   // 'YYYY-M-D 07:00' đã kích hoạt (chống bắn lại trong cùng phút)
+const geoTriedThisSlot = new Set();                // chủ đề đã thử trong khung giờ này (hết thì đóng khung giờ)
 const geoRunning = new Set();                      // key chủ đề đang chạy (chống chồng khi run > 2 phút)
 // Lần chạy gần nhất theo chủ đề. Mỗi tick chỉ chạy được MAX_GEO_JOBS dòng, nên phải XOAY VÒNG:
 // ưu tiên dòng lâu chưa chạy nhất (chưa chạy lần nào = 0 → chạy trước). Không có cái này thì tick nào
@@ -3339,8 +3362,27 @@ async function setGeoRow(topic, fields) {
     } catch (e) { console.error('[geo-sheet] update row lỗi:', e.message); }
 }
 
+// Tới khung giờ chạy chưa? Nếu tới thì MỞ khung giờ (cấp budget) — mỗi khung giờ chỉ mở 1 lần/ngày.
+function geoOpenSlotIfDue() {
+    const d = new Date();
+    const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const day = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+    for (const t of GEO_RUN_TIMES) {
+        const norm = t.padStart(5, '0');
+        const key = `${day} ${norm}`;
+        if (hhmm === norm && !geoFiredSlots.has(key)) {
+            geoFiredSlots.add(key);
+            geoSlotBudget = GEO_PROJECTS_PER_RUN;
+            geoTriedThisSlot.clear();
+            console.log(`[geo-sheet] ⏰ Khung giờ ${norm} — mở lượt, tạo tối đa ${GEO_PROJECTS_PER_RUN} dự án.`);
+        }
+    }
+}
+
 async function geoSheetTick() {
     if (!sheetAuth || geoTickRunning) return;
+    geoOpenSlotIfDue();
+    if (geoSlotBudget <= 0) return;              // ngoài khung giờ / đã đủ chỉ tiêu → nghỉ
     geoTickRunning = true;
     try {
         const doc = new GoogleSpreadsheet(SHEET_ID, sheetAuth);
@@ -3385,63 +3427,136 @@ async function geoSheetTick() {
                 if (!topic) return false;
                 const on = (row.get(GEO_COL.on) || '').trim().toLowerCase();
                 if (['không', 'khong', 'no', 'off', 'tắt', 'tat'].includes(on)) return false;   // tạm dừng (trống = bật)
-                return !geoRunning.has(geoSeenPath(topic));                                     // đang chạy dở → bỏ qua nhịp này
+                if (geoRunning.has(geoSeenPath(topic))) return false;                            // đang chạy dở → bỏ qua nhịp này
+                return !geoTriedThisSlot.has(topic);                                             // đã thử trong lượt này → không thử lại
             })
             .sort((a, b) => ((geoLastRun.get(a.topic) || 0) - (geoLastRun.get(b.topic) || 0)) || (a.i - b.i));
 
+        // Hết chủ đề để thử mà chưa đủ chỉ tiêu → đóng lượt, chờ khung giờ sau (tránh quay vòng vô ích)
+        if (!queue.length && !activeGeoJobs) {
+            if (geoSlotBudget > 0) console.log(`[geo-sheet] Hết chủ đề để thử, còn thiếu ${geoSlotBudget} dự án → đóng lượt, chờ khung giờ sau.`);
+            geoSlotBudget = 0;
+            return;
+        }
         if (queue.length) {
             const waiting = queue.filter(q => !geoLastRun.has(q.topic)).length;
-            console.log(`[geo-sheet] ${queue.length} dòng sẵn sàng (${waiting} chưa chạy lần nào), chạy tối đa ${MAX_GEO_JOBS} dòng/nhịp`);
+            console.log(`[geo-sheet] ${queue.length} dòng sẵn sàng (${waiting} chưa chạy lần nào) — còn cần ${geoSlotBudget} dự án`);
         }
 
         for (const { row, topic } of queue) {
-            if (activeGeoJobs >= MAX_GEO_JOBS) break;
-            const key = geoSeenPath(topic);
-            // Nhiều nguồn: mỗi nguồn 1 dòng (hoặc phẩy). Bỏ http/path/www → domain thuần cho site: filter.
-            const sources = (row.get(GEO_COL.sources) || '').split(/[\n,]/).map(s => s.trim().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '')).filter(Boolean);
-            // Account X: mỗi dòng/phẩy 1 account (bỏ @ và URL x.com/twitter.com → username thuần).
-            const xAccounts = (row.get(GEO_COL.xAccounts) || '').split(/[\n,]/).map(s => s.trim().replace(/^@/, '').replace(/^https?:\/\/(x|twitter)\.com\//i, '').split(/[/?]/)[0]).filter(Boolean);
-            // Ngôn ngữ đích: ô trống → tiếng Nhật (ja). Điền 'Tiếng Việt'/vi... → theo đó.
-            const targetLang = sheetMapLang(row.get(GEO_COL.lang), 'ja');
-            const prevTotal = parseInt(row.get(GEO_COL.total)) || 0;
-            // Voice + lips (tuỳ chọn, giống tab naze). Bật voice mà chưa chọn giọng hợp lệ → vẫn crawl, chỉ bỏ voice.
-            let voice = null;
-            if (sheetIsYes(row.get(SHEET_COL.voiceOn))) {
-                const speakerUuid = await sheetResolveSpeaker(row.get(SHEET_COL.speaker), 'vi');
-                if (speakerUuid) {
-                    const voiceContentType = sheetMapContentType(row.get(SHEET_COL.voiceType));
-                    const dictionaryUuids = (row.get(SHEET_COL.dict) || '').split(',').map(s => s.trim()).filter(Boolean);
-                    const speed = sheetParseSpeed(row.get(SHEET_COL.speed));   // tốc độ đọc (ttsmin)
-                    let lips = null;
-                    if (sheetIsYes(row.get(SHEET_COL.lipsOn)) && voiceContentType === 'content') {
-                        const lipsVideo = sheetCleanLips(row.get(SHEET_COL.lipsVideo));
-                        if (lipsVideo) lips = { video: lipsVideo, guidanceScale: parseFloat(row.get(SHEET_COL.lipsGuidance)) || 2.2 };
-                    }
-                    voice = { speakerUuid, contentType: voiceContentType, dictionaryUuids, lips, speed };
-                } else {
-                    console.warn(`[geo-sheet] '${topic}': bật Tạo giọng đọc nhưng chưa chọn Giọng đọc hợp lệ → bỏ qua voice.`);
-                }
-            }
-            geoRunning.add(key); activeGeoJobs++;
-            geoLastRun.set(topic, Date.now());   // đánh dấu NGAY để dòng này lùi xuống cuối hàng, nhường lượt dòng sau
-            setGeoRow(topic, { [GEO_COL.note]: '⏳ Đang crawl...', [GEO_COL.lastRun]: nowVN() });
-            console.log(`[geo-sheet] ▶ '${topic}' (nguồn: ${sources.join(',') || 'tất cả'}${voice ? ', +voice' + (voice.lips ? '+lips' : '') : ''})`);
-            runGeoMonitor({ topic, sources, xAccounts, targetLang, voice })
-                .then(res => {
-                    if (res.code === 0) setGeoRow(topic, { [GEO_COL.lastRun]: nowVN(), [GEO_COL.lastNew]: res.new, [GEO_COL.total]: prevTotal + (res.new || 0), [GEO_COL.note]: `✅ ${res.new} tin mới → ${res.projectId || ''}` });
-                    else if (res.code === 2) setGeoRow(topic, { [GEO_COL.lastRun]: nowVN(), [GEO_COL.lastNew]: 0, [GEO_COL.note]: 'Không có tin mới' });
-                    else setGeoRow(topic, { [GEO_COL.lastRun]: nowVN(), [GEO_COL.note]: '❌ Lỗi (xem log server)' });
-                })
-                .finally(() => { geoRunning.delete(key); activeGeoJobs--; geoLastRun.set(topic, Date.now()); });
+            if (activeGeoJobs >= MAX_GEO_JOBS || geoSlotBudget <= 0) break;
+            geoTriedThisSlot.add(topic);
+            await startGeoRow(row, topic, { countsToBudget: true });
         }
     } catch (e) { console.error('[geo-sheet] poll lỗi:', e.message); }
     finally { geoTickRunning = false; }
 }
 
+// Chạy 1 DÒNG sheet địa chính trị. Dùng chung cho lịch tự động và nút bấm tay (/api/geo-sheet/run).
+// countsToBudget=false → chạy tay, KHÔNG ăn vào chỉ tiêu 2 dự án/lượt của lịch.
+async function startGeoRow(row, topic, { countsToBudget = false } = {}) {
+    const key = geoSeenPath(topic);
+    if (geoRunning.has(key)) return { started: false, reason: 'Chủ đề này đang chạy dở' };
+    // Nhiều nguồn: mỗi nguồn 1 dòng (hoặc phẩy). Bỏ http/path/www → domain thuần cho site: filter.
+    const sources = (row.get(GEO_COL.sources) || '').split(/[\n,]/).map(s => s.trim().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '')).filter(Boolean);
+    // Account X: mỗi dòng/phẩy 1 account (bỏ @ và URL x.com/twitter.com → username thuần).
+    const xAccounts = (row.get(GEO_COL.xAccounts) || '').split(/[\n,]/).map(s => s.trim().replace(/^@/, '').replace(/^https?:\/\/(x|twitter)\.com\//i, '').split(/[/?]/)[0]).filter(Boolean);
+    // Ngôn ngữ đích: ô trống → tiếng Nhật (ja). Điền 'Tiếng Việt'/vi... → theo đó.
+    const targetLang = sheetMapLang(row.get(GEO_COL.lang), 'ja');
+    const prevTotal = parseInt(row.get(GEO_COL.total)) || 0;
+    // Voice + lips (tuỳ chọn, giống tab naze). Bật voice mà chưa chọn giọng hợp lệ → vẫn crawl, chỉ bỏ voice.
+    let voice = null;
+    if (sheetIsYes(row.get(SHEET_COL.voiceOn))) {
+        const speakerUuid = await sheetResolveSpeaker(row.get(SHEET_COL.speaker), 'vi');
+        if (speakerUuid) {
+            const voiceContentType = sheetMapContentType(row.get(SHEET_COL.voiceType));
+            const dictionaryUuids = (row.get(SHEET_COL.dict) || '').split(',').map(s => s.trim()).filter(Boolean);
+            const speed = sheetParseSpeed(row.get(SHEET_COL.speed));   // tốc độ đọc (ttsmin)
+            let lips = null;
+            if (sheetIsYes(row.get(SHEET_COL.lipsOn)) && voiceContentType === 'content') {
+                // Ô trống -> tự lấy video của THỨ hôm nay trong thư viện geo
+                const lipsVideo = resolveLipsVideo(sheetCleanLips(row.get(SHEET_COL.lipsVideo)), 'geo');
+                if (lipsVideo) lips = { video: lipsVideo, guidanceScale: parseFloat(row.get(SHEET_COL.lipsGuidance)) || 2.2 };
+            }
+            voice = { speakerUuid, contentType: voiceContentType, dictionaryUuids, lips, speed };
+        } else {
+            console.warn(`[geo-sheet] '${topic}': bật Tạo giọng đọc nhưng chưa chọn Giọng đọc hợp lệ → bỏ qua voice.`);
+        }
+    }
+    geoRunning.add(key); activeGeoJobs++;
+    geoLastRun.set(topic, Date.now());   // đánh dấu NGAY để dòng này lùi xuống cuối hàng, nhường lượt dòng sau
+    setGeoRow(topic, { [GEO_COL.note]: '⏳ Đang crawl...', [GEO_COL.lastRun]: nowVN() });
+    console.log(`[geo-sheet] ▶ '${topic}'${countsToBudget ? '' : ' (chạy tay)'} (nguồn: ${sources.join(',') || 'tất cả'}${voice ? ', +voice' + (voice.lips ? '+lips' : '') : ''})`);
+    runGeoMonitor({ topic, sources, xAccounts, targetLang, voice })
+        .then(res => {
+            // Chỉ trừ chỉ tiêu khi THẬT SỰ tạo được dự án — chủ đề không có tin mới không phí suất.
+            if (res.code === 0 && countsToBudget) {
+                geoSlotBudget = Math.max(0, geoSlotBudget - 1);
+                console.log(`[geo-sheet] ✅ '${topic}' xong — còn cần ${geoSlotBudget} dự án cho lượt này.`);
+            }
+            if (res.code === 0) setGeoRow(topic, { [GEO_COL.lastRun]: nowVN(), [GEO_COL.lastNew]: res.new, [GEO_COL.total]: prevTotal + (res.new || 0), [GEO_COL.note]: `✅ ${res.new} tin mới → ${res.projectId || ''}` });
+            else if (res.code === 2) setGeoRow(topic, { [GEO_COL.lastRun]: nowVN(), [GEO_COL.lastNew]: 0, [GEO_COL.note]: 'Không có tin mới' });
+            else setGeoRow(topic, { [GEO_COL.lastRun]: nowVN(), [GEO_COL.note]: '❌ Lỗi (xem log server)' });
+        })
+        .finally(() => { geoRunning.delete(key); activeGeoJobs--; geoLastRun.set(topic, Date.now()); });
+    return { started: true };
+}
+
+// ---- Xem + chạy tay 1 dòng sheet Địa chính trị (không cần chờ khung giờ) ----
+app.get('/api/geo-sheet/rows', async (req, res) => {
+    if (!sheetAuth) return res.status(503).json({ error: 'Chưa cấu hình Google Sheet' });
+    try {
+        const doc = new GoogleSpreadsheet(SHEET_ID, sheetAuth);
+        await doc.loadInfo();
+        const sheet = doc.sheetsByTitle[GEO_SHEET_TAB];
+        if (!sheet) return res.json({ rows: [], runTimes: GEO_RUN_TIMES, perRun: GEO_PROJECTS_PER_RUN });
+        const rows = await sheet.getRows();
+        const out = rows.map((row, i) => {
+            const topic = (row.get(GEO_COL.topic) || '').trim();
+            if (!topic) return null;
+            const on = (row.get(GEO_COL.on) || '').trim().toLowerCase();
+            return {
+                index: i, topic, onRaw: (row.get(GEO_COL.on) || ''),
+                enabled: !['không', 'khong', 'no', 'off', 'tắt', 'tat'].includes(on),
+                sources: (row.get(GEO_COL.sources) || '').trim(),
+                lang: (row.get(GEO_COL.lang) || '').trim(),
+                xAccounts: (row.get(GEO_COL.xAccounts) || '').trim(),
+                lastRun: (row.get(GEO_COL.lastRun) || '').trim(),
+                lastNew: (row.get(GEO_COL.lastNew) || '').trim(),
+                total: (row.get(GEO_COL.total) || '').trim(),
+                note: (row.get(GEO_COL.note) || '').trim(),
+                voiceOn: sheetIsYes(row.get(SHEET_COL.voiceOn)),
+                lipsOn: sheetIsYes(row.get(SHEET_COL.lipsOn)),
+                running: geoRunning.has(geoSeenPath(topic)),
+            };
+        }).filter(Boolean);
+        res.json({ rows: out, runTimes: GEO_RUN_TIMES, perRun: GEO_PROJECTS_PER_RUN, activeJobs: activeGeoJobs, maxJobs: MAX_GEO_JOBS });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/geo-sheet/run', async (req, res) => {
+    if (!sheetAuth) return res.status(503).json({ error: 'Chưa cấu hình Google Sheet' });
+    const { topic } = req.body || {};
+    if (!topic) return res.status(400).json({ error: 'Thiếu topic' });
+    if (activeGeoJobs >= MAX_GEO_JOBS) return res.status(409).json({ error: `Đang có ${activeGeoJobs} job geo chạy (tối đa ${MAX_GEO_JOBS}) — thử lại sau` });
+    try {
+        const doc = new GoogleSpreadsheet(SHEET_ID, sheetAuth);
+        await doc.loadInfo();
+        const sheet = doc.sheetsByTitle[GEO_SHEET_TAB];
+        if (!sheet) return res.status(404).json({ error: `Không thấy tab '${GEO_SHEET_TAB}'` });
+        const rows = await sheet.getRows();
+        const row = rows.find(r => (r.get(GEO_COL.topic) || '').trim() === String(topic).trim());
+        if (!row) return res.status(404).json({ error: 'Không thấy chủ đề trong sheet' });
+        const r = await startGeoRow(row, String(topic).trim(), { countsToBudget: false });
+        if (!r.started) return res.status(409).json({ error: r.reason || 'Không khởi chạy được' });
+        res.json({ success: true, topic });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 if (sheetAuth && process.env.GEO_SHEET_SYNC !== 'off') {
     setInterval(geoSheetTick, GEO_POLL_MS);
-    geoSheetTick();
-    console.log(`[geo-sheet] Bật monitor Địa chính trị tab '${GEO_SHEET_TAB}' mỗi ${GEO_POLL_MS / 1000}s (RSS Nhật, when:1d).`);
+    console.log(`[geo-sheet] Bật monitor Địa chính trị tab '${GEO_SHEET_TAB}': chạy lúc ${GEO_RUN_TIMES.join(' & ')} mỗi ngày, `
+        + `${GEO_PROJECTS_PER_RUN} dự án/lượt (tổng ${GEO_RUN_TIMES.length * GEO_PROJECTS_PER_RUN}/ngày).`);
 }
 
 // Dọn row kẹt status='crawling' từ lần chạy trước: restart server giết mọi crawl con (spawn từ server),
@@ -3456,6 +3571,7 @@ if (sheetAuth && process.env.GEO_SHEET_SYNC !== 'off') {
         await d.run('ALTER TABLE Post ADD COLUMN content_score INTEGER DEFAULT NULL').catch(() => {});
         await d.run('ALTER TABLE Post ADD COLUMN content_score_reason TEXT DEFAULT NULL').catch(() => {});
         await d.run('ALTER TABLE Post ADD COLUMN content_score_detail TEXT DEFAULT NULL').catch(() => {});
+        await d.run('ALTER TABLE Post ADD COLUMN content_score_history TEXT DEFAULT NULL').catch(() => {});
         await d.close();
         if (r?.changes) console.log(`[startup] Dọn ${r.changes} post kẹt status='crawling' từ lần chạy trước.`);
     } catch (e) { console.error('[startup] dọn crawling lỗi:', e.message); }

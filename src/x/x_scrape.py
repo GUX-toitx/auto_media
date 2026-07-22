@@ -49,7 +49,10 @@ def tweet_to_dict(t):
 
 async def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cookies", required=True, help='"auth_token=..; ct0=.."')
+    ap.add_argument("--cookies", default="", help='"auth_token=..; ct0=.." (1 account; nên dùng --accounts-stdin)')
+    ap.add_argument("--accounts-stdin", action="store_true",
+                    help='đọc JSON [{"name":..,"cookies":..}] từ stdin — NHIỀU account để twscrape xoay vòng, '
+                         'và không lộ cookie trong `ps`')
     ap.add_argument("--search", default="", help="query, nhiều query cách nhau bởi |")
     ap.add_argument("--urls", default="", help="url1,url2,...")
     ap.add_argument("--users", default="", help="username1,username2,... (bỏ @) — lấy tweet mới nhất của từng account")
@@ -57,12 +60,42 @@ async def main():
     ap.add_argument("--db", default="accounts.db")
     a = ap.parse_args()
 
+    # Gom danh sách account cần nạp vào pool.
+    # MỖI account phải có TÊN RIÊNG — trước đây ghim cứng "x_session" nên mọi profile đè lên nhau,
+    # pool mãi chỉ có 1 account => không xoay vòng được, dính rate-limit ngay.
+    accounts = []
+    if a.accounts_stdin:
+        try:
+            accounts = [x for x in json.load(sys.stdin) if x.get("cookies")]
+        except Exception as e:
+            print(f"[x_scrape] đọc accounts từ stdin lỗi: {e}", file=sys.stderr)
+    elif a.cookies.strip():
+        accounts = [{"name": "x_session", "cookies": a.cookies}]
+    if not accounts:
+        print("[x_scrape] không có account nào (thiếu --cookies / --accounts-stdin)", file=sys.stderr)
+        print("[]")
+        return
+
     api = API(a.db)
-    # Đăng ký account từ cookies (bỏ qua nếu đã tồn tại)
-    try:
-        await api.pool.add_account("x_session", "x_session", "x@session.local", "x", cookies=a.cookies)
-    except Exception as e:
-        print(f"[x_scrape] add_account: {e}", file=sys.stderr)
+    added = 0
+    for acc in accounts:
+        name = str(acc.get("name") or "x_session")
+        ck = acc["cookies"]
+        try:
+            await api.pool.add_account(name, name, f"{name}@session.local", "x", cookies=ck)
+            added += 1
+        except Exception:
+            # Đã tồn tại -> cập nhật lại cookie (tên hàm khác nhau giữa các bản twscrape)
+            for fn in ("set_cookies", "update_cookies"):
+                f = getattr(api.pool, fn, None)
+                if f:
+                    try:
+                        await f(name, ck)
+                        break
+                    except Exception:
+                        pass
+            added += 1
+    print(f"[x_scrape] pool: {added}/{len(accounts)} account sẵn sàng", file=sys.stderr)
 
     out, seen = [], set()
 

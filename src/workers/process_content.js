@@ -15,6 +15,7 @@ import { collectFromXAccounts } from '../x/x_source.js';
 import { crawlX } from '../x/x_crawler.js';
 import { readStockSource } from '../lib/stockNaming.js';
 import { setLogProject, logCrawlInfo, logCrawlError } from '../lib/crawlLogger.js';
+import { aiChat, aiStructured, aiProviderName, modelFor, logUsage } from '../lib/ai.js';
 
 // Nuốt lỗi vô hại của puppeteer-extra-stealth khi tạo page lúc nhiều browser bung cùng lúc
 // ("Requesting main frame too early!") — nếu không, unhandledRejection có thể kill cả tiến trình giữa chừng.
@@ -43,6 +44,9 @@ const daysArg = parseInt(getArg('--days'), 10);
 const newsDays = Number.isFinite(daysArg) && daysArg > 0 ? daysArg : 1;   // cửa sổ tin "when:Nd" (mặc định 1 ngày = chỉ tin trong 24h)
 const seenFile = getArg('--seenFile');   // (monitor sheet) file JSON lưu tin đã xử lý → dedup xuyên lần chạy
 // Crawl LẠI media cho project đã có (nút trên dashboard): chỉ cào lại ảnh/video, không đụng kịch bản/GPT.
+// Điểm nội dung dưới ngưỡng này -> gọi GPT viết lại kịch bản ĐÚNG 1 LẦN rồi chấm lại (--rewriteBelow 0 để tắt).
+const rewriteBelowArg = parseInt(getArg('--rewriteBelow'), 10);
+const REWRITE_SCORE_THRESHOLD = Number.isFinite(rewriteBelowArg) ? rewriteBelowArg : 75;
 const mediaOnly = args.includes('--mediaOnly');
 const mediaOnlyPostId = parseInt(getArg('--postId'), 10);
 const forceAll = args.includes('--force');   // mặc định: chỉ bù cảnh đang 0 asset
@@ -95,21 +99,16 @@ function stripLinks(text) {
 
 async function translateText(text, lang) {
     if (!lang || lang === 'vi') return text;
-    const res = await httpsPost(
-        'https://api.openai.com/v1/chat/completions',
-        { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-        {
-            model: 'gpt-4o-mini',
+    try {
+        const { content } = await aiChat({
+            tier: 'mini', temperature: 0.2,
             messages: [
                 { role: 'system', content: `Translate to ${lang}. Return ONLY translated text, no explanation.` },
-                { role: 'user', content: text }
+                { role: 'user', content: text },
             ],
-            temperature: 0.2
-        }
-    );
-    if (res.status !== 200) return text;
-    const data = JSON.parse(res.body);
-    return data.choices?.[0]?.message?.content?.trim() || text;
+        });
+        return content?.trim() || text;
+    } catch (e) { console.warn('[process_content] dịch lỗi:', e.message); return text; }
 }
 
 function httpsGet(url) {
@@ -190,14 +189,11 @@ async function detectRegionQueries(topic) {
         const sys = forced
             ? `Người dùng đưa chủ đề tin tức (tiếng Việt). Quốc gia ưu tiên: ${countryGl}, ngôn ngữ địa phương (mã hl): ${countryHl}. Trả JSON: {"en":"<truy vấn tìm kiếm tiếng Anh, gồm quốc gia + chủ đề>","local":"<truy vấn bằng ngôn ngữ ${countryHl}>"}. CHỈ trả JSON.`
             : 'Người dùng đưa một chủ đề tin tức (tiếng Việt). Trả về JSON: {"en":"<truy vấn tìm kiếm tiếng Anh, gồm quốc gia + chủ đề chính>","local":"<truy vấn bằng ngôn ngữ chính của quốc gia liên quan, để rỗng nếu mang tính toàn cầu hoặc không rõ nước>","hl":"<mã ngôn ngữ địa phương: ja, zh-Hans, ko, ru, fr, de, ar...; rỗng nếu không>","gl":"<mã quốc gia: JP, CN, KR, RU, FR, DE, IL...; rỗng nếu không>"}. CHỈ trả JSON.';
-        const res = await httpsPost(
-            'https://api.openai.com/v1/chat/completions',
-            { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-            { model: 'gpt-4o-mini', temperature: 0, response_format: { type: 'json_object' },
-              messages: [{ role: 'system', content: sys }, { role: 'user', content: topic }] }
-        );
-        if (res.status !== 200) return forced ? { en: topic, local: '', hl: countryHl, gl: countryGl } : null;
-        const j = JSON.parse(JSON.parse(res.body).choices[0].message.content);
+        const { content } = await aiChat({
+            tier: 'mini', temperature: 0, json: true,
+            messages: [{ role: 'system', content: sys }, { role: 'user', content: topic }],
+        });
+        const j = JSON.parse(content);
         if (forced) { j.hl = countryHl; j.gl = countryGl; } // ép theo lựa chọn người dùng
         return j;
     } catch (e) { return forced ? { en: topic, local: '', hl: countryHl, gl: countryGl } : null; }
@@ -422,105 +418,166 @@ function downloadYtVideo(url, destPath) {
     });
 }
 
-async function analyzeWithGPT5(topic, newsTitles, sources) {
-    const schema = {
-        type: 'object',
-        properties: {
-            title: { type: 'string' },
-            hook_sentences: {
-                type: 'array',
-                items: {
-                    type: 'object',
-                    properties: {
-                        vi: { type: 'string' },
-                        en: { type: 'string' }
-                    },
-                    required: ['vi', 'en'],
-                    additionalProperties: false
-                }
-            },
-            hook_keywords_factual: { type: 'array', items: { type: 'string' } },
-            hook_keywords_cinematic: { type: 'array', items: { type: 'string' } },
-            luan_diem: {
-                type: 'array',
-                items: {
-                    type: 'object',
-                    properties: {
-                        title_vi: { type: 'string' },
-                        title_target: { type: 'string' },
-                        content_sentences: {
-                            type: 'array',
-                            items: {
-                                type: 'object',
-                                properties: {
-                                    vi: { type: 'string' },
-                                    en: { type: 'string' }
-                                },
-                                required: ['vi', 'en'],
-                                additionalProperties: false
-                            }
-                        },
-                        keywords_factual: { type: 'array', items: { type: 'string' } },
-                        keywords_cinematic: { type: 'array', items: { type: 'string' } },
-                        luan_cu: {
-                            type: 'array',
-                            items: {
-                                type: 'object',
-                                properties: {
-                                    // Luận cứ KHÔNG có title riêng (bỏ theo yêu cầu) — chỉ còn nội dung + keyword.
-                                    content_sentences: {
-                                        type: 'array',
-                                        items: {
-                                            type: 'object',
-                                            properties: {
-                                                vi: { type: 'string' },
-                                                en: { type: 'string' }
-                                            },
-                                            required: ['vi', 'en'],
-                                            additionalProperties: false
-                                        }
-                                    },
-                                    keywords_factual: { type: 'array', items: { type: 'string' } },
-                                    keywords_cinematic: { type: 'array', items: { type: 'string' } }
-                                },
-                                required: ['content_sentences', 'keywords_factual', 'keywords_cinematic'],
-                                additionalProperties: false
-                            }
+// Gom tat ca cap song ngu {vi, en} trong ket qua GPT (hook + ket + luan diem + luan cu).
+function collectBilingualPairs(result) {
+    const pairs = [];
+    const push = (arr) => { for (const p of (arr || [])) if (p && typeof p === 'object') pairs.push(p); };
+    push(result.hook_sentences);
+    push(result.conclusion_sentences);
+    for (const ld of (result.luan_diem || [])) {
+        push(ld.content_sentences);
+        for (const lc of (ld.luan_cu || [])) push(lc.content_sentences);
+    }
+    return pairs;
+}
+
+// Tien to ngon ngu model hay nhet vao dau chuoi: "ja: ...", "en：..."
+const LANG_PREFIX_RE = /^\s*(ja|jp|japanese|en|english|target|vi|vietnamese)\s*[:：]\s*/i;
+
+// Luoi an toan cho ban target (tieng Nhat) truoc khi ghi DB:
+//   1. Model dat sai ten key (ja/jp/target) -> map ve 'en'
+//   2. Bo tien to ngon ngu thua o dau chuoi
+//   3. Cau nao van thieu ban target -> dich bu tu tieng Viet
+// Khong co buoc nay thi mot lan GPT tra 'en' rong la ca project mat sub (xem post 473).
+async function ensureTargetSentences(result) {
+    const pairs = collectBilingualPairs(result);
+    if (!pairs.length) return;
+
+    let renamed = 0, stripped = 0;
+    const missing = [];
+    for (const p of pairs) {
+        if (!(typeof p.en === 'string' && p.en.trim())) {
+            const alt = [p.ja, p.jp, p.target, p.JA].find(v => typeof v === 'string' && v.trim());
+            if (alt) { p.en = alt; renamed++; }
+        }
+        for (const k of ['vi', 'en']) {
+            if (typeof p[k] === 'string' && LANG_PREFIX_RE.test(p[k])) {
+                p[k] = p[k].replace(LANG_PREFIX_RE, '').trim();
+                stripped++;
+            }
+        }
+        if (!(typeof p.en === 'string' && p.en.trim())) missing.push(p);
+    }
+    if (renamed) console.warn(`[process_content] ⚠ ${renamed} câu GPT trả sai tên key (ja/jp/target) → đã map về 'en'`);
+    if (stripped) console.warn(`[process_content] ⚠ ${stripped} câu dính tiền tố ngôn ngữ ("ja: ") → đã bỏ`);
+    if (!missing.length) return;
+
+    const queue = missing.filter(p => typeof p.vi === 'string' && p.vi.trim());
+    console.warn(`[process_content] ⚠ ${missing.length}/${pairs.length} câu thiếu bản ${targetLang} → dịch bù từ tiếng Việt (${queue.length} câu dịch được)`);
+
+    // Dich song song 5 luong cho do lau (kich ban thuong 90-110 cau).
+    let idx = 0, filled = 0;
+    await Promise.all(Array.from({ length: Math.min(5, queue.length) }, async () => {
+        while (idx < queue.length) {
+            const p = queue[idx++];
+            const t = await translateText(p.vi, targetLang);
+            // translateText tra lai nguyen van tieng Viet khi loi -> khong nhan, de rong con hon sub sai ngon ngu.
+            if (t && t.trim() && t.trim() !== p.vi.trim()) { p.en = t.trim(); filled++; }
+        }
+    }));
+    console.warn(`[process_content] ⚠ dịch bù xong: ${filled}/${queue.length} câu`);
+}
+
+// Schema JSON của kịch bản song ngữ — dùng chung cho bước sinh mới và bước viết lại theo đánh giá.
+const SCRIPT_SCHEMA = {
+    type: 'object',
+    properties: {
+        title: { type: 'string' },
+        hook_sentences: {
+            type: 'array',
+            items: {
+                type: 'object',
+                properties: {
+                    vi: { type: 'string' },
+                    en: { type: 'string' }
+                },
+                required: ['vi', 'en'],
+                additionalProperties: false
+            }
+        },
+        hook_keywords_factual: { type: 'array', items: { type: 'string' } },
+        hook_keywords_cinematic: { type: 'array', items: { type: 'string' } },
+        luan_diem: {
+            type: 'array',
+            items: {
+                type: 'object',
+                properties: {
+                    title_vi: { type: 'string' },
+                    title_target: { type: 'string' },
+                    content_sentences: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                vi: { type: 'string' },
+                                en: { type: 'string' }
+                            },
+                            required: ['vi', 'en'],
+                            additionalProperties: false
                         }
                     },
-                    // Đã xóa image và video khỏi required
-                    required: ['title_vi', 'title_target', 'content_sentences', 'keywords_factual', 'keywords_cinematic', 'luan_cu'],
-                    additionalProperties: false
-                }
-            },
-            conclusion_sentences: {
-                type: 'array',
-                items: {
-                    type: 'object',
-                    properties: {
-                        vi: { type: 'string' },
-                        en: { type: 'string' }
-                    },
-                    required: ['vi', 'en'],
-                    additionalProperties: false
-                }
-            },
-            conclusion_keywords_factual: { type: 'array', items: { type: 'string' } },
-            conclusion_keywords_cinematic: { type: 'array', items: { type: 'string' } },
+                    keywords_factual: { type: 'array', items: { type: 'string' } },
+                    keywords_cinematic: { type: 'array', items: { type: 'string' } },
+                    luan_cu: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                // Luận cứ KHÔNG có title riêng (bỏ theo yêu cầu) — chỉ còn nội dung + keyword.
+                                content_sentences: {
+                                    type: 'array',
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            vi: { type: 'string' },
+                                            en: { type: 'string' }
+                                        },
+                                        required: ['vi', 'en'],
+                                        additionalProperties: false
+                                    }
+                                },
+                                keywords_factual: { type: 'array', items: { type: 'string' } },
+                                keywords_cinematic: { type: 'array', items: { type: 'string' } }
+                            },
+                            required: ['content_sentences', 'keywords_factual', 'keywords_cinematic'],
+                            additionalProperties: false
+                        }
+                    }
+                },
+                // Đã xóa image và video khỏi required
+                required: ['title_vi', 'title_target', 'content_sentences', 'keywords_factual', 'keywords_cinematic', 'luan_cu'],
+                additionalProperties: false
+            }
         },
-        required: [
-            'title',
-            'hook_sentences',
-            'hook_keywords_factual',
-            'hook_keywords_cinematic',
-            'luan_diem',
-            'conclusion_sentences',
-            'conclusion_keywords_factual',
-            'conclusion_keywords_cinematic',
-        ],
-        additionalProperties: false
-    };
+        conclusion_sentences: {
+            type: 'array',
+            items: {
+                type: 'object',
+                properties: {
+                    vi: { type: 'string' },
+                    en: { type: 'string' }
+                },
+                required: ['vi', 'en'],
+                additionalProperties: false
+            }
+        },
+        conclusion_keywords_factual: { type: 'array', items: { type: 'string' } },
+        conclusion_keywords_cinematic: { type: 'array', items: { type: 'string' } },
+    },
+    required: [
+        'title',
+        'hook_sentences',
+        'hook_keywords_factual',
+        'hook_keywords_cinematic',
+        'luan_diem',
+        'conclusion_sentences',
+        'conclusion_keywords_factual',
+        'conclusion_keywords_cinematic',
+    ],
+    additionalProperties: false
+};
 
+async function analyzeWithGPT5(topic, newsTitles, sources) {
     // Tin thật từ Google News (đã thu thập sẵn theo từ khóa + nguồn) — GPT bám sự kiện có thật, không bịa
     const news = newsTitles || [];
     const newsBlock = news.length ? [
@@ -531,156 +588,116 @@ async function analyzeWithGPT5(topic, newsTitles, sources) {
 
     const input = [
         'TAO NOI DUNG YOUTUBE DIA CHINH TRI THE GIOI THEO KIEU CINEMATIC STORYTELLING (THI TRUONG NHAT BAN)',
-        '',
-        'CHU DE: ' + topic,
-        '',
-        ...newsBlock,
-        '',
-        'MUC TIEU:',
-        '- Tao bai phan tich dia chinh tri theo phong cach documentary YouTube hien dai danh rieng cho thi truong Nhat Ban.',
-        '- TONG QUAN PHONG CACH: 70% Phan tich bao chi thuc te (Thong tin, du lieu, dien bien) + 30% Dan chuyen storytelling de giu retention.',
-        '- Giong mot geopolitical documentary chuyen nghiep nhu NHK Special / BBC: Khach quan, tinh te, chinh xac, de tiep can khan gia dai chung.',
-        '- DO DAI TARGET: Dat thoi luong voice-over 8-10 phut nhung KHONG DUOC NOI LAN MAN CHIET HOC. Do dai phai den tu CHIEU SAU GOC NHIN chu khong phai tu ngu thua thai.',
-        '',
-        'CHI TIEU SO LUONG OBJECT JSON (BAT BUOC DE DAT 8-10 PHUT):',
-        '- TOAN BAI BAT BUOC PHAI XUAT DU TU 90 DEN 110 OBJECT JSON (Chinh la 90-110 cau thoai doc lap).',
-        '- PHAN BO SO LUONG OBJECT CUNG NHU SAU:',
-        '  + MO BAI: Bat buoc dung tu 5 den 8 Object JSON.',
-        '  + THAN BAI (Phan tich qua 6 Lop): Bat buoc co tu 80 den 90 Object JSON.',
-        '  + KET BAI: Bat buoc dung tu 5 den 8 Object JSON.',
-        '- TONG SO OBJECT DUOI 90 LA THAT BAI.',
-        '',
-        'KY THUAT STORYTELLING & AN DU CHUAN VAN HOA NHAT BAN (TIET CHE & DUY MY):',
-        '- THIET KE AN DU TINH TE (Dung 3-4 lan trong toan bai o Hook, Climax va Conclusion, KHONG lam dung):',
-        '  + Su dung cac an du mang dam triet ly va van phong Nhat: "Bat co Shogi" (đon hy sinh/quan co am tham), "Vung nuoc lang chua song ngam" (静水流深), "Dau hieu tren bang mong" (薄氷), "Chiec dong ho khong tieng dong".',
-        '  + TUYET DOI KHONG dung an du phuong Tay sao rong nhu "hop Pandora", "ngua Trojan".',
-        '- GIONG KE CINEMATIC STORYTELLING: Khong phan tich kho khan nhu doc bao. Hãy ke nhu mot cuoc dau tri am tham, noi ma moi nuoc đi ngoai giao/quan su deu mang tinh sinh ton.',
-        '',
-        'QUY TAC CHONG LONG VONG - MO RONG CHIEU SAU (CRITICAL):',
-        '- CAU VAN NGAN GON: Moi cau chi chua 1 y duy nhat, tinh te, cinematic, de nghe voice-over. TUYET DOI KHONG viet cau dai ngoang, phuc tap, ranh ma.',
-        '- KHONG LAP Y: Tuyet doi khong dung 2 cau de noi cung 1 thong tin theo cach khac nhau.',
-        '- KEO DAI BANG KHACH QUAN GOC NHIN (De co du noi dung, BAT BUOC phai phan tich du 6 Lop Moi sau day):',
-        '  1. Su kien be noi: Chuyen gi vua xay ra? (Dien bien moi nhat).',
-        '  2. Boi canh lich su/tien le: Trong qua khu, vu viec tuong tu da tung xay ra chua?',
-        '  3. Dong co an cua cac ben: Ben trong noi bo cua doi thu dang gap khung hoang gi ma phai ra don nay?',
-        '  4. Anh huong nguoi dan Nhat: Ty gia Yen, gia xang, hoa don dien, chuoi cung ung thuc pham,... bi de doa ra sao?',
-        '  5. Ban do an ninh bien gioi: Tuyen duong hang hai (Sea Lanes) va khu vuc Senkaku bi dat vao the bao dong ra sao?',
-        '  6. Kich ban tuong lai 3-5 nam: Cuc dien nay se dan the gioi ve dau?',
-        '',
-        'CONG THUC STORYTELLING SAC BEN (DAI CHUNG DE HIEU):',
-        '- MICRO-TO-MACRO: Luon ket noi mot su kien dia chinh tri vi mo ve tac dong chot lam thay doi cuoc song cua nguoi dan Nhat Ban.',
-        '- THUC THE HOA DONG CO: Boc tach ro ranh gioi giua "loi noi ngoai giao" va "tinh toan thuc te".',
-        '- TAO SU TONG THANH: Dat su "an binh bat dong" tren be noi doi lap voi "su bao mon am tham" ben duoi cua trat tu cu.',
-        '- CON SO KICH TINH: Bien con so thanh thoi gian dem nguoc hoac ranh gioi mong manh giua an toan va khung hoang.',
-        '- KIEU KET DOAN (OPEN LOOP): Cuoi moi luan diem, BAT BUOC dat ra 1 cau hoi mo hoac 1 nghich ly moi de kich thich nguoi xem phai xem tiep phan sau.',
-        '',
-        'LAP TRUONG CHU QUYEN & AN NINH QUOC GIA NHAT BAN (BAT BUOC):',
-        '- LUON DUNG TREN LAP TRUONG CHU QUYEN VA LOI ICH QUOC GIA CUA NHAT BAN.',
-        '- QUY TAC TEN GOI:',
-        '  + BAT BUOC dung "尖閣諸島" (Quan dao Senkaku). TUYET DOI KHONG nhac ten tieng Trung (Dieu Ngu/Diaoyu) hay cach goi trung lap cua ben thu ba.',
-        '  + Goi hanh vi tau nuoc ngoai vao vung bien Senkaku la "領海侵入" (Xam nhap hai phan) hoac "接続水域の入域" (Vao vung tiep giap).',
-        '  + Goi hanh dong cua Luc luong Bao ve bo bien Nhat (JCG) la "警告・排除" (Canh bao/Tuyen truyen canh gioi de bao ve trat tu phap ly).',
-        '- GOC NHIN DIA CHINH TRI: Moi su kien quoc te deu phai lien ket voi an ninh va kinh te Nhat Ban.',
-        '',
-        'VAN HOA & VAN PHONG NHAT BAN:',
-        '- Binh tinh, diem tinh (冷静), khach quan va kiem che. TUYET DOI KHONG giat gan re tien, KHONG ho hao.',
-        '- Tao cam giac "moi de doat tham lang nhung sat suon" (静かなる脅威 / 漸進的な圧力).',
-        '- BAT BUOC DUNG THE VAN CHOTAI (常体) CHUYEN NGHIEP NHK SPECIAL:',
-        '  + Su dung linh hoat va da dang cac kieu ket cau CHOTAI: だ, である, のだ, 体言止め (ngu phap danh tu hoa cuoi cau), ...のだ/である.',
-        '  + TUYET DOI KHONG KET THUC TAT CA CAC CAU BANG MOT TU "だ".',
-        '',
-        'QUY TAC CHUYEN LUAN CU & TRANSITIONS (DE KICH BAN CUC KY MUOT MA):',
-        '- MOI KHI CHUYEN SANG LUAN CU MOI, BAT BUOC phai co 1-2 cau chuyen doan (Narrative Bridge) dua tren cac cong thuc:',
-        '  1. Paradox: "Mat nuoc quan su thi suc soi, nhung ben duoi dong chay kinh te lai..." (軍事の表面がどれほど沸き立とうとも、その底流にある経済の動きは…)',
-        '  2. Cause-Effect Layering: "Su be tac tren bien nhanh chong lan sang phong hop cua tap doan..." (海上の膠着状態は、直ちに企業の取締役会へと波及する…)',
-        '  3. Zoom-out/Zoom-in: "Chiec tau tuan tra tren bien chi la mot nua buc tranh, nua con lai nam o..." (現場の巡視船は絵の半分に過ぎない。もう半分は…)',
-        '- NÊN DÙNG CAC TU NOI TAO NHIP DOCUMENTARY: "しかし、本当の戦線は…", "この静寂の裏で…", "数字が語る真実のは…", "安全保障の鋭い刃のすぐ隣で…"',
-        '',
-        'MO BAI: (BAT BUOC DU 5 - 8 OBJECT SONG NGU)',
-        '- Hook vao ngay trung tam van de, tao tension, dat ra 1 cau hoi lon khien nguoi xem phai xem den cuoi.',
-        '',
-        'THAN BAI: (BAT BUOC CHIA LAM 6 PHAN - MOI PHAN DANG TU 13-15 OBJECT SONG NGU, TONG 80-90 OBJECT)',
-        '- Lop 1 (13-15 Object): Su kien be noi va chi tiet dien bien thuc te.',
-        '- Lop 2 (13-15 Object): Boi canh lich su va cac tien le tuong tu.',
-        '- Lop 3 (13-15 Object): Dong co an noi bo cua doi thu va tinh toan ngoai giao.',
-        '- Lop 4 (13-15 Object): Tac dong vi tien, gia ca, nang luong cua nguoi dan Nhat Ban.',
-        '- Lop 5 (13-15 Object): Ban do an ninh bien gioi va tuyen duong hang hai Senkaku.',
-        '- Lop 6 (13-15 Object): Kich ban va du bao tuong lai 3-5 nam.',
-        '',
-        'KET BAI: (BAT BUOC DU 5 - 8 OBJECT SONG NGU)',
-        '- Tra loi cau hoi mo va keu goi hanh dong mot cach tu nhien.',
-        '',
-        '-> TONG TOAN BAI BAT BUOC PHAI CO TU 90 DEN 110 OBJECT JSON (Chinh la 90-110 cau thoai). Neu duoi 90 Object la THAT BAI.',
-        '',
-        'TUYET DOI KHONG:',
-        '- KHONG LAP LAI TU / CAU HUU HAN THANH VONG LAP (Chong lap tu vo han nhu "だ。だ。だ。").',
-        '- KHONG in cac tu nhan, tieu de phan doan bang tieng Nhat vao van ban voice-over (Vi du cam in: 「表層の出来事」「歴史の文脈」「内在する動機」「生活への波及」「海の安全保障地図」「三～五年のシナリオ」「問い」「逆説」「ズームアウト」「ズームイン」「第一章」...). 全てナレーションとしてそのまま読めるテキストのみを出力すること。',
-        '- KHONG duoc chen cac tieu de kieu "Dai 1 chuong" (第一章), "Chuong 1", "Phan 1" vao van ban voice-over.',
-        '- KHONG viet theo dang bao cao, hoc thuat, hay dung qua nhieu tu chuyen nganh kho hieu.',
-        '- KHONG viet long vong, noi di noi lai 1 y.',
-        '',
-        'QUY DINH NGON NGU DANG SONG NGU (TOI UU TOAN BO OUTPUT TOKEN):',
-        '- Ngon ngu muc tieu: _target = ' + targetLang + ' (Chinh la TIENG NHAT / JAPANESE).',
-        '- BAT BUOC: Tat ca content_sentences, hook_sentences, conclusion_sentences PHAI LA ARRAY CUA CAC OBJECT SONG NGU CAP {vi, ja}.',
-        '- Truong [vi] (O BEN TRAI): Phai la TIENG VIET dich muot, tu nhien, de hieu.',
-        '- Truong [ja] (O BEN PHAI): Phai la TIENG NHAT CHUAN VAN PHONG NHK (duoi cau CHOTAI). TUYET DOI KHONG TAU THEMA KEY [target] DE TRON TONG DUNG LUONG TOKEN.',
-        '  [',
-        '    {',
-        '      vi: "Tokyo dang ve lai mot tam ban do moi cho an ninh.",',
-        '      ja: "東京は安全保障の新たな地図を描き直している。"',
-        '    }',
-        '  ]',
-        '',
-        'MEDIA KEYWORDS:',
-        '- Voi moi object sentence, BAT BUOC tao keywords_factual (su kien) va keywords_cinematic (nghe thuat) bang tieng Anh.',
-        '',
-        'OUTPUT PHAI CAM GIAC NHU:',
-        '- Mot documentary geopolitical hien dai cua NHK Special / BBC, dai va sau (Dat du 90-110 Object JSON), de hieu va rat thu hut.'
+'',
+'CHU DE: ' + topic,
+'',
+...newsBlock,
+'',
+'MUC TIEU:',
+'- Tao bai phan tich dia chinh tri theo phong cach thoi su/documentary hien dai danh rieng cho thi truong Nhat Ban.',
+'- PHONG CACH PHAN TICH STORYTELLING: 70% phan tich bao chi thuc te (thong tin, du lieu, dien bien, logic nguyen nhan - hau qua) + 30% dan chuyen storytelling cuon hut de giu retention cao.',
+'- TUYET DOI KHONG DUNG PHEP AN DU: Khong dung cac tu ngu mang tinh an dụ, triet ly, van chuong bay borig hay kich hoa. Viet theo giong bao chi phan tich thoi su truyen hinh khach quan, chinh xac, de hieu.',
+'- Giong mot geopolitical documentary chuyen nghiep nhu NHK Special / BBC.',
+'- DO DAI TARGET: Dat thoi luong voice-over 8-10 phut nhung KHONG DUOC NOI LAN MAN. Do dai phai den tu CHIEU SAU THONG TIN va GOC NHIN.',
+'',
+'CHI TIEU SO LUONG OBJECT JSON (BAT BUOC DE DAT 8-10 PHUT):',
+'- TOAN BAI BAT BUOC PHAI XUAT DU TU 90 DEN 110 OBJECT JSON (Chinh la 90-110 cau thoai doc lap).',
+'- PHAN BO SO LUONG OBJECT CUNG NHU SAU:',
+'  + MO BAI: Bat buoc dung tu 5 den 8 Object JSON.',
+'  + THAN BAI: Bat buoc co tu 80 den 90 Object JSON.',
+'  + KET BAI: Bat buoc dung tu 5 den 8 Object JSON.',
+'- TONG SO OBJECT DUOI 90 LA THAT BAI.',
+'',
+'QUY TAC NGHIEP NGAC: TUYET DOI KHONG TAO OBJECT CHUA TIEU DE / NHAN PHAN DOAN (CRITICAL FIX):',
+'- TUYET DOI KHONG duoc tao bat ky Object JSON nao chi de chua ten tieu de, ten lop hay ten phan doan.',
+'- CAM TOAN BO CAC CUM TU NHAN TRONG CA TIENG VIET VOI TIENG NHAT:',
+'  + Khong duoc co cac cau nhu: "Lop 1...", "Lop 2...", "Su kien be noi:", "Boi canh lich su:", "Dong co an:", "Tac dong nguoi dan:", "Ban do an ninh:", "Kich ban 3-5 nam:".',
+'  + Cấm tuyệt đối tiếng Nhật: 「表層の動き」「歴史の文脈」「内在する動機」「生活への波及」「海の安全保障」「シナリオ」「問い」「逆説」「第一章」...',
+'- MOI OBJECT JSON PHAI LA MOT CAU THOAI TRUOC TIEP CUNG CAP THONG TIN/PHAN TICH. Toan bo danh sach Object phai la DONG THOAI KHI DOC NOI TIEP NHAU THA THUAM KHONG BI NGAT NHO BOI TIEU DE.',
+'',
+'QUY TAC TRIEN KHAI NOI DUNG THAN BAI (DE TUDUYT LOGIC, KHONG IN TIEN LOP RA TEXT):',
+'- Noi dung Than bai phai lan luot di qua 6 khia canh phan tich thuc te sau:',
+'  1. Dien bien thuc te va su kien be noi moi nhat.',
+'  2. Boi canh lich su va cac tien le tuong tu trong qua khu.',
+'  3. Dong co an noi bo cua cac ben va tinh toan ngoai giao thuc te.',
+'  4. Tac dong den doi song, vi tien, ty gia Yen, gia xang, hoa don dien cua nguoi dan Nhat Ban.',
+'  5. Tuyen duong hang hai (Sea Lanes) va thoi tran an ninh tai khu vuc Senkaku.',
+'  6. Kich ban du bao tuong lai trong 3-5 nam toi.',
+'',
+'LAP TRUONG CHU QUYEN & AN NINH QUOC GIA NHAT BAN (BAT BUOC):',
+'- LUON DUNG TREN LAP TRUONG CHU QUYEN VA LOI ICH QUOC GIA CUA NHAT BAN.',
+'- QUY TAC TEN GOI:',
+'  + BAT BUOC dung "尖閣諸島" (Quan dao Senkaku). TUYET DOI KHONG nhac ten tieng Trung (Dieu Ngu/Diaoyu) hay cach goi trung lap cua ben thu ba.',
+'  + Goi hanh vi tau nuoc ngoai vao vung bien Senkaku la "領海侵入" (Xam nhap hai phan) hoac "接続水域の入域" (Vao vung tiep giap).',
+'  + Goi hanh dong cua Luc luong Bao ve bo bien Nhat (JCG) la "警告・排除" (Canh bao/Tuyen truyen canh gioi de bao ve trat tu phap ly).',
+'- GOC NHIN DIA CHINH TRI: Moi su kien quoc te deu phai lien ket voi an ninh va kinh te Nhat Ban.',
+'',
+'VAN HOA & VAN PHONG NHAT BAN:',
+'- Binh tinh, diem tinh (冷静), khach quan va kiem che. TUYET DOI KHONG giat gan re tien, KHONG ho hao.',
+'- BAT BUOC DUNG THE VAN CHOTAI (常体) CHUYEN NGHIEP NHK SPECIAL:',
+'  + Su dung linh hoat va da dang cac kieu ket cau CHOTAI: だ, である, のだ, 体言止め (ngu phap danh tu hoa cuoi cau), ...のだ/である.',
+'  + TUYET DOI KHONG KET THUC TAT CA CAC CAU BANG MOT TU "だ".',
+'',
+'QUY TAC CHUYEN LUAN CU & TRANSITIONS (DE KICH BAN CUC KY MUOT MA):',
+'- MOI KHI CHUYEN SANG LUAN CU MOI, BAT BUOC phai co 1-2 cau chuyen doan (Narrative Bridge) dua tren logic nguyen nhan - hau qua hoac thuc te doi lap.',
+'- NÊN DÙNG CAC TU NOI TAO NHIP DOCUMENTARY: "しかし、本当の焦点は…", "この状況の裏で…", "数字が示す現実は…", "安全保障の議論と同時に…"',
+'',
+'MO BAI: (BAT BUOC DU 5 - 8 OBJECT SONG NGU)',
+'- Nêu ngay su kien trung tam, di vao thuc te van de, dat ra nghi van/khia canh chinh can phan tich. Tuyet doi khong in nhan tiêu đề.',
+'',
+'THAN BAI: (BAT BUOC DU 80 - 90 OBJECT SONG NGU)',
+'- Phai phan tich chi tiet qua du 6 khia canh goc nhin da neu o tren. Tuyet doi khong in bat ky nhan tieu de nao.',
+'',
+'KET BAI: (BAT BUOC DU 5 - 8 OBJECT SONG NGU)',
+'- Tong ket ngan gon logic van de va keu goi dang ky kenh, de lai binh luan mot cach tu nhien.',
+'',
+'TUYET DOI KHONG:',
+'- KHONG LAP LAI TU / CAU HUU HAN THANH VONG LAP (Chong lap tu vo han nhu "だ。だ。だ。").',
+'- KHONG viet theo dang bao cao hoc thuat kho hieu, cung khong viet kieu van hoc bay borig.',
+'- KHONG viet long vong, noi di noi lai 1 y.',
+'',
+'QUY DINH NGON NGU DANG SONG NGU (TOI UU TOAN BO OUTPUT TOKEN):',
+'- Ngon ngu muc tieu: _target = ' + targetLang + ' (Chinh la TIENG NHAT / JAPANESE).',
+'- BAT BUOC: Tat ca content_sentences, hook_sentences, conclusion_sentences PHAI LA ARRAY CUA CAC OBJECT SONG NGU CAP {vi, en}.',
+'- TEN KEY CHI DUOC LA "vi" VA "en" (dung y nhu schema). TUYET DOI KHONG dat ten key la "ja", "jp", "target"... — schema se tu choi va cau do bi MAT.',
+'- Truong [vi] (O BEN TRAI): Phai la TIENG VIET dich muot, tu nhien, de hieu.',
+'- Truong [en] (O BEN PHAI): KEY TEN LA "en" NHUNG NOI DUNG BAT BUOC LA TIENG NHAT chuan van phong NHK (duoi cau CHOTAI).',
+'  + TUYET DOI KHONG de rong, KHONG viet tieng Anh, KHONG chep lai y nguyen tieng Viet.',
+'  + KHONG them tien to ngon ngu vao dau chuoi (khong viet "ja: ...", "en: ...") — chi ghi noi dung thuan.',
+'  [',
+'    {',
+'      vi: "Tokyo đang vẽ lại một tấm bản đồ mới cho an ninh.",',
+'      en: "東京は安全保障の新たな地図を描き直している。"',
+'    }',
+'  ]',
+'',
+'MEDIA KEYWORDS:',
+'- Voi moi object sentence, BAT BUOC tao keywords_factual (su kien) va keywords_cinematic (nghe thuat) bang tieng Anh.',
+'',
+'OUTPUT PHAI CAM GIAC NHU:',
+'- Mot bai phan tich thoi su dia chinh tri thuc te, khach quan, chinh xac, dai va sau (Dat du 90-110 Object JSON), de hieu va doc lien tuc khong dinh bat ky nhan tieu de nao.'
             ].join('\n');
 
-    console.log(`[process_content] Gọi GPT-5 Responses API cho: ${topic}`);
+    console.log(`[process_content] Gọi ${aiProviderName()} (${modelFor('main')}) sinh kịch bản cho: ${topic}`);
 
-    const res = await httpsPost(
-        'https://api.openai.com/v1/responses',
-        {
-            'Authorization': `Bearer ${OPENAI_KEY}`,
-            'Content-Type': 'application/json'
-        },
-        {
-            model: 'gpt-5',
-            reasoning: { effort: 'medium' },
-            max_output_tokens: 40000,
-            tools: [{ type: 'web_search_preview' }],
-            text: {
-                format: {
-                    type: 'json_schema',
-                    name: 'phan_tich_dia_chinh_tri',
-                    schema,
-                    strict: true
-                }
-            },
-            input
-        }
-    );
+    const { outputText, usage } = await aiStructured({
+        schema: SCRIPT_SCHEMA,
+        schemaName: 'phan_tich_dia_chinh_tri',
+        input,
+        effort: 'medium',
+        maxTokens: 40000,
+        webSearch: true,      // OpenAI dùng web_search_preview; DeepSeek tự bỏ qua
+    });
+    logUsage('process_content', usage);
 
-    if (res.status !== 200) {
-        throw new Error(`GPT-5 API lỗi: ${res.status} ${res.body}`);
-    }
-
-    const data = JSON.parse(res.body);
-    const usage = data.usage;
-    console.log(`[process_content] 📊 Tokens - input: ${usage?.input_tokens}, output: ${usage?.output_tokens}, reasoning: ${usage?.output_tokens_details?.reasoning_tokens}`);
-    const outputText = data.output?.find(o => o.type === 'message')
-        ?.content?.find(c => c.type === 'output_text')?.text;
-
-    if (!outputText) throw new Error('Không lấy được output từ API: ' + JSON.stringify(data).slice(0, 200));
-    
     // Log output GPT để phân tích
     console.log('[process_content] === GPT OUTPUT ===');
     console.log(outputText);
     console.log('[process_content] === END GPT OUTPUT ===');
     
     const result = JSON.parse(outputText);
+    // Vá bản target (tiếng Nhật) nếu GPT trả sai key / bỏ trống -> tránh mất sub cả project.
+    await ensureTargetSentences(result);
     result._news = news;   // danh sách tiêu đề tin (để ghi log RSS)
     return result;
 }
@@ -721,14 +738,11 @@ async function scoreContentWithGPT(result) {
             ' "criteria": [{"name":"Chiều sâu phân tích địa chính trị","score":<0-20>,"comment":"<nhận xét>"}, ... đủ 5 tiêu chí theo đúng thứ tự trên],',
             ' "strengths": ["<điểm mạnh>", ...], "weaknesses": ["<điểm yếu>", ...], "suggestions": ["<gợi ý cải thiện>", ...]}',
         ].join('\n');
-        const res = await httpsPost(
-            'https://api.openai.com/v1/chat/completions',
-            { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-            { model: 'gpt-4o-mini', temperature: 0, response_format: { type: 'json_object' },
-              messages: [{ role: 'system', content: sys }, { role: 'user', content: script }] }
-        );
-        if (res.status !== 200) { console.warn('[process_content] chấm điểm GPT lỗi:', res.status); return null; }
-        const j = JSON.parse(JSON.parse(res.body).choices[0].message.content);
+        const { content } = await aiChat({
+            tier: 'mini', temperature: 0, json: true,
+            messages: [{ role: 'system', content: sys }, { role: 'user', content: script }],
+        });
+        const j = JSON.parse(content);
         let score = Math.round(Number(j.score));
         if (!Number.isFinite(score)) return null;
         score = Math.max(0, Math.min(100, score));
@@ -744,29 +758,88 @@ async function scoreContentWithGPT(result) {
     } catch (e) { console.warn('[process_content] chấm điểm lỗi:', e.message); return null; }
 }
 
+// Bỏ các key nội bộ (_news, _articles...) trước khi đưa kịch bản cho GPT — chúng rất nặng và vô ích với model.
+function stripInternalKeys(obj) {
+    return JSON.parse(JSON.stringify(obj, (k, v) => (k.startsWith('_') ? undefined : v)));
+}
+
+// Đánh giá -> văn bản để GPT biết phải sửa gì.
+function formatEvaluation(scoreObj) {
+    const d = scoreObj.detail || {};
+    const list = (title, arr) => (arr || []).length ? [title, ...arr.map(s => '- ' + s)].join('\n') : '';
+    return [
+        `DIEM HIEN TAI: ${scoreObj.score}/100 — ${scoreObj.reason || ''}`,
+        (d.criteria || []).length ? 'CHI TIET TUNG TIEU CHI:\n' + d.criteria.map(c => `- ${c.name}: ${c.score}/20 — ${c.comment}`).join('\n') : '',
+        list('DIEM MANH (BAT BUOC GIU LAI, KHONG DUOC LAM YEU DI):', d.strengths),
+        list('DIEM YEU (BAT BUOC SUA TRIET DE):', d.weaknesses),
+        list('GOI Y CAI THIEN (BAT BUOC AP DUNG):', d.suggestions),
+    ].filter(Boolean).join('\n\n');
+}
+
+// Viết lại kịch bản DUY NHẤT 1 LẦN khi điểm dưới ngưỡng: đưa nguyên kịch bản cũ + toàn bộ đánh giá
+// (ưu/nhược/gợi ý) cho GPT sửa. Trả kịch bản mới (đã vá bản target) hoặc null nếu lỗi.
+async function rewriteContentWithGPT(result, scoreObj) {
+    try {
+        const draft = JSON.stringify(stripInternalKeys(result));
+        const input = [
+            'Ban la bien tap vien truong cua kenh documentary dia chinh tri tieng Nhat.',
+            `Kich ban duoi day bi cham ${scoreObj.score}/100 — DUOI NGUONG DAT (${REWRITE_SCORE_THRESHOLD}). Nhiem vu: VIET LAI TOAN BO cho dat diem cao nhat co the.`,
+            '',
+            '===== DANH GIA CUA BIEN TAP VIEN (PHAI XU LY HET) =====',
+            formatEvaluation(scoreObj),
+            '',
+            '===== YEU CAU VIET LAI =====',
+            '- GIU NGUYEN cau truc JSON, so luong luan diem va tong so Object JSON (90-110 cau) nhu ban cu.',
+            '- GIU NGUYEN chu de, cac su kien co that va so lieu trong ban cu — TUYET DOI KHONG bia them su kien moi.',
+            '- Sua triet de tung DIEM YEU va ap dung tung GOI Y o tren; giu lai nhung DIEM MANH da co.',
+            '- Van phong NHK Special, the CHOTAI (常体), khach quan, khong an du, khong giat gan, khong nhan tieu de trong cau thoai.',
+            '- Moi cau van la object song ngu {vi, en}: [vi] = TIENG VIET, [en] = key ten "en" nhung NOI DUNG BAT BUOC LA TIENG NHAT.',
+            '- KHONG de trong [en], KHONG viet tieng Anh, KHONG them tien to "ja: ".',
+            '- Giu nguyen keywords_factual / keywords_cinematic bang tieng Anh cho moi doan (co the tinh chinh cho sat noi dung moi).',
+            '',
+            '===== KICH BAN CU (JSON) =====',
+            draft,
+        ].join('\n');
+
+        console.log(`[process_content] ✍️  Điểm ${scoreObj.score} < ${REWRITE_SCORE_THRESHOLD} → gọi ${modelFor('main')} viết lại kịch bản (1 lần duy nhất)`);
+        const { outputText, usage } = await aiStructured({
+            schema: SCRIPT_SCHEMA,
+            schemaName: 'phan_tich_dia_chinh_tri_v2',
+            input,
+            effort: 'medium',
+            maxTokens: 40000,
+        });
+        logUsage('process_content:rewrite', usage);
+
+        const rewritten = JSON.parse(outputText);
+        // Bản viết lại cũng phải qua lưới an toàn tiếng Nhật như bản gốc.
+        await ensureTargetSentences(rewritten);
+        if (!(rewritten.luan_diem || []).length) {
+            console.warn('[process_content] ⚠ bản viết lại rỗng luận điểm -> bỏ, giữ bản cũ');
+            return null;
+        }
+        return rewritten;
+    } catch (e) { console.warn('[process_content] viết lại lỗi:', e.message); return null; }
+}
+
 // Sinh 3 câu tìm kiếm X (Twitter) tiếng NHẬT từ chủ đề + tiêu đề tin — để crawl X kiểu drama.
 async function getGeoXKeywordsJa(caseInfo) {
     try {
-        const res = await httpsPost(
-            'https://api.openai.com/v1/chat/completions',
-            { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-            {
-                model: 'gpt-4o-mini', temperature: 0.2,
-                messages: [
-                    { role: 'system', content: [
-                        'Bạn là chuyên gia tìm kiếm trên X (Twitter) tiếng Nhật cho video địa chính trị.',
-                        'Từ CHỦ ĐỀ + TIÊU ĐỀ TIN, xác định sự kiện cốt lõi (ai/nước nào, làm gì, ở đâu).',
-                        'Tạo ĐÚNG 3 câu tìm kiếm tiếng NHẬT để tìm bài đăng/ảnh/video về CHÍNH sự kiện đó.',
-                        '- Mỗi câu ghép 2-3 từ khóa tiếng Nhật bằng dấu cách (AND); cụm đặc trưng nhất để trong "..." .',
-                        '- Dùng thuật ngữ tiếng Nhật người Nhật thật sự tweet, ưu tiên từ cho nhiều kết quả.',
-                        '- CHỈ trả JSON array gồm 3 chuỗi, không giải thích.',
-                    ].join('\n') },
-                    { role: 'user', content: String(caseInfo).slice(0, 4000) },
-                ],
-            }
-        );
-        if (res.status !== 200) return [];
-        let content = (JSON.parse(res.body).choices?.[0]?.message?.content || '[]').replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const r = await aiChat({
+            tier: 'mini', temperature: 0.2,
+            messages: [
+                { role: 'system', content: [
+                    'Bạn là chuyên gia tìm kiếm trên X (Twitter) tiếng Nhật cho video địa chính trị.',
+                    'Từ CHỦ ĐỀ + TIÊU ĐỀ TIN, xác định sự kiện cốt lõi (ai/nước nào, làm gì, ở đâu).',
+                    'Tạo ĐÚNG 3 câu tìm kiếm tiếng NHẬT để tìm bài đăng/ảnh/video về CHÍNH sự kiện đó.',
+                    '- Mỗi câu ghép 2-3 từ khóa tiếng Nhật bằng dấu cách (AND); cụm đặc trưng nhất để trong "..." .',
+                    '- Dùng thuật ngữ tiếng Nhật người Nhật thật sự tweet, ưu tiên từ cho nhiều kết quả.',
+                    '- CHỈ trả JSON array gồm 3 chuỗi, không giải thích.',
+                ].join('\n') },
+                { role: 'user', content: String(caseInfo).slice(0, 4000) },
+            ],
+        });
+        let content = (r.content || '[]').replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
         try { const p = JSON.parse(content); if (Array.isArray(p)) return p.slice(0, 3); } catch (_) {}
         const m = content.match(/\[.*?\]/s);
         if (m) { try { return JSON.parse(m[0]).slice(0, 3); } catch (_) {} }
@@ -813,25 +886,20 @@ async function getGeoXKeywordsPerScene(sceneTexts) {
     const items = sceneTexts.map((t, i) => `[${i}] ${String(t || '').replace(/\s+/g, ' ').slice(0, 300)}`).join('\n');
     if (!items.trim()) return {};
     try {
-        const res = await httpsPost(
-            'https://api.openai.com/v1/chat/completions',
-            { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-            {
-                model: 'gpt-4o-mini', temperature: 0.2,
-                messages: [
-                    { role: 'system', content: [
-                        'Bạn là chuyên gia tìm kiếm trên X (Twitter) tiếng Nhật cho video địa chính trị.',
-                        'Với MỖI cảnh (đánh số [i]) dưới đây, tạo ĐÚNG 2 câu tìm kiếm tiếng NHẬT bám sát nội dung CHÍNH của cảnh đó để tìm bài đăng/ảnh/video liên quan.',
-                        '- Mỗi câu ghép 2-3 từ khóa tiếng Nhật bằng dấu cách (AND); cụm đặc trưng nhất để trong "..." .',
-                        '- Dùng thuật ngữ người Nhật thật sự tweet, ưu tiên từ cho nhiều kết quả.',
-                        'CHỈ trả JSON object: khóa là số thứ tự cảnh (dạng chuỗi), giá trị là mảng 2 chuỗi. Ví dụ {"0":["...","..."],"1":["...","..."]}',
-                    ].join('\n') },
-                    { role: 'user', content: items.slice(0, 12000) },
-                ],
-            }
-        );
-        if (res.status !== 200) return {};
-        let content = (JSON.parse(res.body).choices?.[0]?.message?.content || '{}').replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const r = await aiChat({
+            tier: 'mini', temperature: 0.2, json: true,
+            messages: [
+                { role: 'system', content: [
+                    'Bạn là chuyên gia tìm kiếm trên X (Twitter) tiếng Nhật cho video địa chính trị.',
+                    'Với MỖI cảnh (đánh số [i]) dưới đây, tạo ĐÚNG 2 câu tìm kiếm tiếng NHẬT bám sát nội dung CHÍNH của cảnh đó để tìm bài đăng/ảnh/video liên quan.',
+                    '- Mỗi câu ghép 2-3 từ khóa tiếng Nhật bằng dấu cách (AND); cụm đặc trưng nhất để trong "..." .',
+                    '- Dùng thuật ngữ người Nhật thật sự tweet, ưu tiên từ cho nhiều kết quả.',
+                    'CHỈ trả json object: khóa là số thứ tự cảnh (dạng chuỗi), giá trị là mảng 2 chuỗi. Ví dụ {"0":["...","..."],"1":["...","..."]}',
+                ].join('\n') },
+                { role: 'user', content: items.slice(0, 12000) },
+            ],
+        });
+        let content = (r.content || '{}').replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
         const m = content.match(/\{[\s\S]*\}/);
         if (m) content = m[0];
         const obj = JSON.parse(content);
@@ -876,7 +944,9 @@ async function crawlXPerSceneForGeo(db, postId, projectId, result) {
             const sc = scenes[i];
             let kws = kwMap[String(i)] ?? kwMap[i] ?? [];
             if (!Array.isArray(kws)) kws = [];
-            kws = kws.filter(Boolean).map(String).slice(0, 2);
+            // CHỈ 1 keyword/cảnh: mỗi query = 1 request X, mà throttle chỉ ~50 req/15 phút cho MỖI account.
+            // 2 keyword × ~25 cảnh = ~50 request -> cháy quota ngay trong 1 dự án.
+            kws = kws.filter(Boolean).map(String).slice(0, 1);
             if (!kws.length) { console.log(`    [X-scene] cảnh ${i} (${sc.kind}) không có keyword → bỏ`); continue; }
             for (const kw of kws) await db.run(
                 'INSERT INTO Keyword (post_id, paragraph_id, sentence_id, content, type) VALUES (?, ?, ?, ?, ?)',
@@ -886,8 +956,16 @@ async function crawlXPerSceneForGeo(db, postId, projectId, result) {
             let manifest = [];
             try {
                 ({ manifest } = await crawlX({
-                    profileName: X_PROFILE, outDir, keywords: kws.join('|'),
-                    limit: 25, max: 25, captureMax: 0, maxImages: 3, maxVideos: 2,
+                    profileName: X_PROFILE, outDir,
+                    // HAI truy vấn cho mỗi cảnh (x_scrape tách theo '|', tự gộp + khử trùng tweet):
+                    //   filter:media        -> gần như chỉ ra ẢNH (đo thực tế: 34 ảnh / 1 video)
+                    //   filter:native_video -> mới ra VIDEO thật sự (đo thực tế: 24 video)
+                    // Chỉ hỏi 1 loại thì 54% số cảnh không có video nào.
+                    keywords: kws.flatMap(k => [`${k} filter:media`, `${k} filter:native_video`]).join('|'),
+                    // max phải đủ lớn để tweet video không bị cắt mất khi sắp xếp theo số media.
+                    // limit là số tweet MỖI truy vấn (<=20 vẫn chỉ tốn 1 request) → nâng để đủ 5 video.
+                    limit: 16, max: 32, captureMax: 0, maxImages: 5, maxVideos: 5,
+                    scrapeTimeoutMs: 90000,   // dính rate-limit thì bỏ cảnh, KHÔNG treo pipeline
                 }));
             } catch (e) { console.error(`    [X-scene] crawl cảnh ${i} (${sc.kind}) lỗi: ${e.message}`); continue; }
             let ni = 0, nv = 0;
@@ -902,7 +980,7 @@ async function crawlXPerSceneForGeo(db, postId, projectId, result) {
     } catch (e) { console.error('    [X-scene] lỗi:', e.message); }
 }
 
-async function saveToDb(projectId, result, scoreObj = null) {
+async function saveToDb(projectId, result, scoreObj = null, scoreHistory = null) {
     const db = await getDb();
     const postTitle = projectId;
 
@@ -926,13 +1004,15 @@ async function saveToDb(projectId, result, scoreObj = null) {
     await db.run('ALTER TABLE Post ADD COLUMN content_score INTEGER DEFAULT NULL').catch(() => {}); // self-heal: điểm chấm nội dung 0-100
     await db.run('ALTER TABLE Post ADD COLUMN content_score_reason TEXT DEFAULT NULL').catch(() => {}); // self-heal: lý do điểm
     await db.run('ALTER TABLE Post ADD COLUMN content_score_detail TEXT DEFAULT NULL').catch(() => {}); // self-heal: đánh giá chi tiết (JSON)
+    await db.run('ALTER TABLE Post ADD COLUMN content_score_history TEXT DEFAULT NULL').catch(() => {}); // self-heal: lịch sử chấm điểm (JSON) — bản đầu + bản viết lại
     await db.run(
-        'UPDATE Post SET title = ?, target_lang = ?, hook = ?, hook_vi = ?, conclusion_vi = ?, conclusion_target = ?, content_score = ?, content_score_reason = ?, content_score_detail = ? WHERE id = ?',
+        'UPDATE Post SET title = ?, target_lang = ?, hook = ?, hook_vi = ?, conclusion_vi = ?, conclusion_target = ?, content_score = ?, content_score_reason = ?, content_score_detail = ?, content_score_history = ? WHERE id = ?',
         [stripLinks(result.title), targetLang, stripLinks(hookTarget), stripLinks(hookVi),
          stripLinks(conclusionVi), stripLinks(conclusionTarget),
          (scoreObj && Number.isFinite(scoreObj.score)) ? scoreObj.score : null,
          (scoreObj && scoreObj.reason) ? scoreObj.reason : null,
-         (scoreObj && scoreObj.detail) ? JSON.stringify(scoreObj.detail) : null, postId]
+         (scoreObj && scoreObj.detail) ? JSON.stringify(scoreObj.detail) : null,
+         (scoreHistory && scoreHistory.length) ? JSON.stringify(scoreHistory) : null, postId]
     );
 
     // HookDetail từ array
@@ -1299,6 +1379,61 @@ async function loadNewsSeen(db, excludeProjectId) {
     return { ids, titles, urls };
 }
 
+// ---------------------------------------------------------------------------
+// CHỐNG TRÙNG VẤN ĐỀ (không chỉ trùng URL).
+// NewsSeen chỉ chặn ĐÚNG bài đã dùng; nhưng nhiều bài KHÁC URL vẫn nói cùng một vấn đề
+// → dự án mới lặp lại nội dung dự án cũ. Ở đây lấy "dấu vân tay vấn đề" của các dự án geo
+// gần đây (tiêu đề dự án + tiêu đề từng luận điểm — có sẵn trong DB, không tốn thêm AI để tạo)
+// rồi nhờ AI đối chiếu với các tin ứng viên, loại tin nào nói lại vấn đề CŨ.
+// ---------------------------------------------------------------------------
+// Post không có cột thời gian → lấy N dự án geo GẦN NHẤT theo id (id tăng dần theo thời gian tạo).
+const DEDUP_LOOKBACK_PROJECTS = Math.max(0, parseInt(process.env.GEO_DEDUP_LOOKBACK, 10) || 20);
+
+async function loadCoveredIssues(db) {
+    if (!DEDUP_LOOKBACK_PROJECTS) return [];
+    const posts = await db.all(
+        `SELECT id, project_id, title FROM Post WHERE genre = 'geo' ORDER BY id DESC LIMIT ?`,
+        [DEDUP_LOOKBACK_PROJECTS]
+    );
+    const out = [];
+    for (const p of posts) {
+        const paras = await db.all('SELECT title FROM Paragraph WHERE post_id = ? ORDER BY id', [p.id]);
+        const points = paras.map(x => (x.title || '').trim()).filter(Boolean);
+        if (p.title || points.length) out.push({ projectId: p.project_id, title: p.title || '', points });
+    }
+    return out;
+}
+
+// Trả về Set index tin ĐƯỢC GIỮ (vấn đề mới). Lỗi/không cấu hình -> giữ tất cả (không chặn pipeline).
+async function filterCoveredIssues(covered, titles) {
+    if (!covered.length || !titles.length) return null;
+    const coveredTxt = covered.map((c, i) =>
+        `[Dự án ${i + 1}] ${c.title}\n   - ${c.points.slice(0, 8).join('\n   - ')}`).join('\n');
+    const candTxt = titles.map((t, i) => `[${i}] ${String(t.title || '').replace(/\s+/g, ' ').slice(0, 200)}`).join('\n');
+    try {
+        const { content } = await aiChat({
+            tier: 'mini', temperature: 0, json: true,
+            messages: [
+                { role: 'system', content: [
+                    'Bạn lọc tin để tránh làm lại video trùng nội dung.',
+                    'Cho DANH SÁCH VẤN ĐỀ ĐÃ LÀM (các dự án trước) và DANH SÁCH TIN ỨNG VIÊN đánh số.',
+                    'Loại tin nào nói LẠI cùng một sự kiện/vấn đề đã làm (dù khác báo, khác cách diễn đạt).',
+                    'GIỮ tin có diễn biến MỚI, sự kiện MỚI, hoặc góc hoàn toàn khác.',
+                    'CHỈ trả json: {"keep":[<số thứ tự tin GIỮ>],"reason":"<1 câu>"}',
+                ].join('\n') },
+                { role: 'user', content: `VẤN ĐỀ ĐÃ LÀM:\n${coveredTxt}\n\nTIN ỨNG VIÊN:\n${candTxt}` },
+            ],
+        });
+        const j = JSON.parse(content);
+        const keep = new Set((j.keep || []).filter(i => Number.isInteger(i) && i >= 0 && i < titles.length));
+        console.log(`[dedup] AI giữ ${keep.size}/${titles.length} tin (${j.reason || ''})`);
+        return keep;
+    } catch (e) {
+        console.warn('[dedup] AI lọc trùng lỗi, giữ nguyên toàn bộ tin:', e.message);
+        return null;
+    }
+}
+
 async function saveNewsSeen(db, articles, projectId) {
     await ensureNewsSeen(db);
     let n = 0;
@@ -1433,17 +1568,75 @@ try {
         console.error('[process_content] Không có tin mới nào (mọi bài đều đã dùng ở dự án trước) -> dừng.');
         process.exit(2);
     }
-    // 2) Đưa title cho GPT-5 xào kịch bản
-    const result = await analyzeWithGPT5(topic, bundle.titles, sources);
+
+    // 1b) CHỐNG TRÙNG VẤN ĐỀ: loại tin nói lại vấn đề các dự án geo trước đã làm.
+    try {
+        const covered = await loadCoveredIssues(seenDb);
+        if (covered.length) {
+            console.log(`[dedup] Đối chiếu với ${covered.length} dự án geo gần đây...`);
+            const keep = await filterCoveredIssues(covered, bundle.titles);
+            if (keep) {
+                const arts = [], tits = [];
+                for (let i = 0; i < bundle.titles.length; i++) {
+                    if (!keep.has(i)) continue;
+                    tits.push(bundle.titles[i]);
+                    if (bundle.articles[i]) arts.push(bundle.articles[i]);
+                }
+                if (!tits.length) {
+                    await seenDb.close();
+                    console.log('[geo-result] ' + JSON.stringify({ new: 0, projectId: null }));
+                    console.log('[process_content] Mọi tin đều trùng vấn đề dự án cũ -> bỏ qua (không tạo dự án).');
+                    process.exit(2);
+                }
+                console.log(`[dedup] Còn ${tits.length}/${bundle.titles.length} tin có vấn đề MỚI`);
+                bundle.titles = tits;
+                if (arts.length) bundle.articles = arts;
+            }
+        }
+    } catch (e) { console.warn('[dedup] bỏ qua lọc trùng:', e.message); }
+
+    // 2) Đưa title cho AI xào kịch bản
+    let result = await analyzeWithGPT5(topic, bundle.titles, sources);
     console.log(`[process_content] GPT-5 trả về ${result.luan_diem?.length || 0} luận điểm`);
     result._articles = bundle.articles;   // media đã cào để gán vào paragraph/section
     // Chấm điểm chất lượng nội dung (1 lần gọi GPT nữa) — không chặn nếu lỗi
-    const scoreObj = await scoreContentWithGPT(result);
+    let scoreObj = await scoreContentWithGPT(result);
+    // Lịch sử đánh giá: bản đầu + (nếu có) bản viết lại, để so sánh trên dashboard.
+    const scoreHistory = [];
+    if (scoreObj) scoreHistory.push({ stage: 'initial', score: scoreObj.score, reason: scoreObj.reason, detail: scoreObj.detail, at: new Date().toISOString(), used: true });
+
+    // Điểm thấp -> viết lại ĐÚNG 1 LẦN dựa trên đánh giá, chấm lại, giữ bản điểm cao hơn.
+    if (scoreObj && REWRITE_SCORE_THRESHOLD > 0 && scoreObj.score < REWRITE_SCORE_THRESHOLD) {
+        const rewritten = await rewriteContentWithGPT(result, scoreObj);
+        if (rewritten) {
+            rewritten._news = result._news;
+            rewritten._articles = bundle.articles;
+            const reScore = await scoreContentWithGPT(rewritten);
+            // Không chấm lại được -> vẫn nhận bản mới (đã sửa theo góp ý) nhưng ghi rõ là chưa chấm.
+            const better = !reScore || reScore.score >= scoreObj.score;
+            scoreHistory.push({
+                stage: 'rewrite',
+                score: reScore ? reScore.score : null,
+                reason: reScore ? reScore.reason : 'không chấm lại được',
+                detail: reScore ? reScore.detail : null,
+                at: new Date().toISOString(),
+                used: better,
+            });
+            if (better) {
+                console.log(`[process_content] ✅ Nhận bản viết lại: ${scoreObj.score} -> ${reScore ? reScore.score : '?'}/100`);
+                result = rewritten;
+                if (reScore) scoreObj = reScore;
+                scoreHistory[0].used = false;
+            } else {
+                console.log(`[process_content] ↩️  Bản viết lại kém hơn (${reScore.score} < ${scoreObj.score}) -> giữ bản gốc`);
+            }
+        }
+    }
     // GHI TRÍ NHỚ NGAY (trước khi cào media, khâu dài nhất và hay bị pm2 restart giết):
     // trước đây chỉ ghi ở CUỐI lượt chạy nên run bị giết = quên sạch → dự án sau xào lại đúng mấy bài đó.
     await saveNewsSeen(seenDb, bundle.articles, projectId);
     await seenDb.close();
-    await saveToDb(projectId, result, scoreObj);
+    await saveToDb(projectId, result, scoreObj, scoreHistory);
     if (seenFile) console.log('[geo-result] ' + JSON.stringify({ new: bundle.articles.length, projectId }));
     process.exit(0);
 } catch (e) {

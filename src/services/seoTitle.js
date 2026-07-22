@@ -3,10 +3,9 @@
 //   kichban = nội dung sub/kịch bản dự án, tieudemau.txt, thuatngu.txt.
 import fs from 'fs';
 import path from 'path';
-import https from 'https';
 import { fileURLToPath } from 'url';
+import { aiChat, assertAiKey } from '../lib/ai.js';
 
-const OPENAI_KEY = process.env.OPENAI_KEY;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');   // src/services -> gốc repo
 const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
@@ -25,21 +24,6 @@ function readSeoLang(base, lang) {
         }
     }
     return '';
-}
-
-function openaiPost(pathname, body, timeoutMs = 120000) {
-    return new Promise((resolve, reject) => {
-        const data = JSON.stringify(body);
-        const req = https.request(
-            { hostname: 'api.openai.com', path: pathname, method: 'POST', family: 4,
-              headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } },
-            (res) => { let raw = ''; res.on('data', c => raw += c); res.on('end', () => resolve({ status: res.statusCode, body: raw })); }
-        );
-        req.setTimeout(timeoutMs, () => req.destroy(new Error(`timeout ${timeoutMs}ms`)));
-        req.on('error', reject);
-        req.write(data);
-        req.end();
-    });
 }
 
 // Dựng prompt cuối: Nhiemvu.<lang>.txt với block liệt kê 3 file -> thay bằng nội dung thật.
@@ -71,7 +55,7 @@ ${thuatNgu}`;
 // Gọi GPT -> trả { target, vi }: target = kết quả SEO theo Output Format (ngôn ngữ đích);
 // vi = bản dịch tiếng Việt của target để đối chiếu (giữ nguyên cấu trúc/nhãn).
 export async function generateSeoTitle(script, lang = 'en') {
-    if (!OPENAI_KEY) throw new Error('Thiếu OPENAI_KEY');
+    assertAiKey();   // kiểm key theo AI_PROVIDER (openai/deepseek)
     const base = buildSeoTitlePrompt(script, lang);
     if (!base) throw new Error(`Chưa có file SEO cho ngôn ngữ "${lang}". Hãy tạo prompts/seo/Nhiemvu.${lang}.txt (và tieudemau.${lang}.txt, thuatngu.${lang}.txt).`);
 
@@ -82,16 +66,12 @@ Trả về JSON đúng schema:
 - "target": TOÀN BỘ kết quả SEO theo đúng "Output Format" ở trên, bằng NGÔN NGỮ ĐÍCH.
 - "vi": bản dịch TIẾNG VIỆT của "target" để người dùng đối chiếu — giữ NGUYÊN cấu trúc, nhãn mục (🎯/📝/🏷️/📊), emoji và thứ tự; chỉ dịch phần chữ.`;
 
-    const schema = { type: 'object', properties: { target: { type: 'string' }, vi: { type: 'string' } }, required: ['target', 'vi'], additionalProperties: false };
-    const res = await openaiPost('/v1/chat/completions', {
-        model: 'gpt-4o',
-        messages: [{ role: 'user', content: prompt }],
-        response_format: { type: 'json_schema', json_schema: { name: 'seo_result', strict: true, schema } },
-        temperature: 0.8,
+    // Ép JSON: dùng json_object cho cả 2 provider (DeepSeek không có json_schema strict) + tả schema trong prompt.
+    const { content } = await aiChat({
+        tier: 'std', temperature: 0.8, json: true,
+        messages: [{ role: 'user', content: `${prompt}\n\nTrả về DUY NHẤT một object json dạng {"target": "<chuỗi>", "vi": "<chuỗi>"} — không thêm trường nào khác, không bọc markdown.` }],
     });
-    if (res.status !== 200) throw new Error(`GPT ${res.status}: ${res.body.slice(0, 200)}`);
-    const content = JSON.parse(res.body).choices?.[0]?.message?.content;
-    if (!content) throw new Error('GPT không trả kết quả');
-    const parsed = JSON.parse(content);
+    if (!content) throw new Error('AI không trả kết quả');
+    const parsed = JSON.parse(String(content).trim().replace(/^```json\s*/i, '').replace(/```$/i, '').trim());
     return { target: parsed.target || '', vi: parsed.vi || '' };
 }

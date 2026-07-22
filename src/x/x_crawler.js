@@ -24,12 +24,45 @@ function readCookies(profileName) {
     return `auth_token=${j.auth_token}; ct0=${j.ct0}`;
 }
 
-function runScrape(cookies, { keywords = '', urls = '', limit = 15, db = path.join(ROOT, 'accounts.db') }) {
-    const args = [path.join(HERE, 'x_scrape.py'), '--cookies', cookies, '--limit', String(limit), '--db', db];
+// Danh sách profile dùng cho pool twscrape. Nhiều profile = nhiều account = throttle nhân lên
+// (X giới hạn ~50 request/15 phút cho MỖI account trên endpoint SearchTimeline).
+//   .env:  X_PROFILES=chrome-profile-4,chrome-profile-6      (ưu tiên)
+//          X_PROFILE=chrome-profile-4                        (cũ, vẫn chạy)
+export function listXProfiles(profileName) {
+    const raw = process.env.X_PROFILES || profileName || process.env.X_PROFILE || 'chrome-profile-4';
+    return [...new Set(String(raw).split(',').map(s => s.trim()).filter(Boolean))];
+}
+
+// Đọc cookie của MỌI profile -> [{name, cookies}]. Profile nào chưa đăng nhập X thì bỏ qua (cảnh báo).
+export function collectAccounts(profileName) {
+    const accs = [];
+    for (const p of listXProfiles(profileName)) {
+        try {
+            accs.push({ name: p, cookies: readCookies(p) });
+        } catch (e) {
+            console.warn(`[x_crawler] bỏ qua profile "${p}": ${String(e.message || e).split('\n')[0].slice(0, 120)}`);
+        }
+    }
+    return accs;
+}
+
+// Chạy scrape. Cookie đưa qua STDIN (không qua argv) -> không lộ trong `ps`.
+// timeoutMs: gặp rate-limit twscrape sẽ CHỜ tới lúc reset (có thể 15 phút+) -> cắt sớm để pipeline không treo.
+function runScrape(accounts, { keywords = '', urls = '', users = '', limit = 15, db = path.join(ROOT, 'accounts.db'), timeoutMs = 90000 }) {
+    if (!accounts.length) throw new Error('không có account X nào khả dụng (kiểm tra X_PROFILES / đăng nhập lại)');
+    const args = [path.join(HERE, 'x_scrape.py'), '--accounts-stdin', '--limit', String(limit), '--db', db];
     if (keywords) args.push('--search', keywords);
     if (urls) args.push('--urls', urls);
-    const r = spawnSync(VENV_PY, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    if (users) args.push('--users', users);
+    const r = spawnSync(VENV_PY, args, {
+        encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+        input: JSON.stringify(accounts), timeout: timeoutMs,
+    });
     if (r.stderr) process.stderr.write(r.stderr);
+    if (r.error && r.error.code === 'ETIMEDOUT') {
+        console.warn(`[x_crawler] scrape quá ${Math.round(timeoutMs / 1000)}s (nhiều khả năng dính rate-limit) → bỏ qua`);
+        return [];
+    }
     if (r.status !== 0) throw new Error('x_scrape.py exit ' + r.status);
     return JSON.parse(r.stdout || '[]');
 }
@@ -50,9 +83,9 @@ function capture(profileName, url, outDir, base) {
 }
 
 // Cào X -> trả về manifest [{id,url,user,date,text, images[], videos[], screenshot, recording}]
-export async function crawlX({ profileName, outDir, keywords = '', urls = '', limit = 15, max = 8, captureMax = 3, maxImages = Infinity, maxVideos = Infinity }) {
-    const cookies = readCookies(profileName);
-    let tweets = runScrape(cookies, { keywords, urls, limit });
+export async function crawlX({ profileName, outDir, keywords = '', urls = '', users = '', limit = 15, max = 8, captureMax = 3, maxImages = Infinity, maxVideos = Infinity, scrapeTimeoutMs = 90000 }) {
+    const accounts = collectAccounts(profileName);
+    let tweets = runScrape(accounts, { keywords, urls, users, limit, timeoutMs: scrapeTimeoutMs });
     // ưu tiên bài có media trước, cắt còn `max`
     tweets.sort((a, b) => (b.media?.length || 0) - (a.media?.length || 0));
     tweets = tweets.slice(0, max);
