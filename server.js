@@ -39,7 +39,7 @@ import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { JWT } from 'google-auth-library';
 import crypto from 'crypto';
 import os from 'os';
-import { listLipsLib, lipsLibVideo, saveLipsLibFile, removeLipsLibFile, resolveLipsVideo, lipsWeekday, normLipsGenre, LIPS_GENRES, LIPS_GENRE_LABELS } from './src/lib/lipsVideoLib.js';
+import { listLipsLib, lipsLibVideo, saveLipsLibFile, removeLipsLibFile, resolveLipsVideo, lipsWeekday, normLipsGenre, LIPS_GENRES, LIPS_GENRE_LABELS, LIPS_WEEKDAY_LABELS } from './src/lib/lipsVideoLib.js';
 
 // IP LAN của máy (cho người cùng mạng truy cập) — ưu tiên 192.168.*, rồi 10.*, tránh docker 172.17/172.18.
 function getLanIp() {
@@ -225,7 +225,7 @@ app.post('/api/add-keyword', async (req, res) => {
 
 // API: Di chuyển asset sang section/paragraph khác
 app.post('/api/move-asset', async (req, res) => {
-    const { assetId, targetParagraphId, targetPostId, targetSection } = req.body;
+    const { assetId, targetParagraphId, targetPostId, targetSection, targetSentenceId } = req.body;
     try {
         const db = await getDb();
         const asset = await db.get('SELECT * FROM Asset WHERE id = ?', [assetId]);
@@ -234,6 +234,11 @@ app.post('/api/move-asset', async (req, res) => {
         if (targetPostId && targetSection) {
             await db.run('UPDATE Asset SET paragraph_id = NULL, sentence_id = NULL, post_id = ?, section = ?, hook_detail_id = NULL, summary_detail_id = NULL, conclusion_detail_id = NULL, paragraph_detail_id = NULL, sentence_detail_id = NULL WHERE id = ?',
                 [targetPostId, targetSection, assetId]);
+        } else if (targetSentenceId) {
+            // Gán asset vào 1 LUẬN CỨ (sentence) cụ thể; giữ paragraph_id của luận điểm cha để vẫn thuộc cảnh.
+            const s = await db.get('SELECT paragraph_id FROM Sentence WHERE id = ?', [targetSentenceId]);
+            await db.run('UPDATE Asset SET sentence_id = ?, paragraph_id = ?, post_id = NULL, section = NULL, hook_detail_id = NULL, summary_detail_id = NULL, conclusion_detail_id = NULL, paragraph_detail_id = NULL, sentence_detail_id = NULL WHERE id = ?',
+                [targetSentenceId, s?.paragraph_id || null, assetId]);
         } else if (targetParagraphId) {
             await db.run('UPDATE Asset SET paragraph_id = ?, sentence_id = NULL, post_id = NULL, section = NULL, hook_detail_id = NULL, summary_detail_id = NULL, conclusion_detail_id = NULL, paragraph_detail_id = NULL, sentence_detail_id = NULL WHERE id = ?',
                 [targetParagraphId, assetId]);
@@ -939,6 +944,15 @@ app.get('/api/project-log/:projectId', (req, res) => {
     res.json({ log });
 });
 
+// API: log MỌI bài X đã "lướt qua" khi crawl (theo cảnh) — kèm link, để xem trong modal "Log X".
+app.get('/api/x-browse-log/:projectId', (req, res) => {
+    const safe = String(req.params.projectId || '').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 80);
+    const file = path.join(__dirname, 'logs', safe, 'x_browse.json');
+    if (!fs.existsSync(file)) return res.json({ updatedAt: '', entries: [] });
+    try { res.json(JSON.parse(fs.readFileSync(file, 'utf8'))); }
+    catch { res.json({ updatedAt: '', entries: [] }); }
+});
+
 // API: Xóa toàn bộ project
 app.post('/api/delete-project', async (req, res) => {
     const { videoId } = req.body;
@@ -946,6 +960,25 @@ app.post('/api/delete-project', async (req, res) => {
         const db = await getDb();
         // Xóa tất cả posts có title là videoId hoặc bắt đầu bằng videoId_
         const posts = await db.all('SELECT id FROM Post WHERE project_id = ? OR project_id LIKE ?', [videoId, `${videoId}\_%`]);
+        // HUỶ + XOÁ job lips của các post này TRƯỚC khi xoá Post → không còn chạy ngầm cho dự án đã xoá,
+        // và không để lại row LipsSyncJob mồ côi (post_id trỏ vào Post không còn tồn tại).
+        const postIds = posts.map(p => p.id);
+        if (postIds.length) {
+            try {
+                const ph = postIds.map(() => '?').join(',');
+                const jrows = await db.all(
+                    `SELECT job_id FROM LipsSyncJob WHERE post_id IN (${ph}) AND job_id IS NOT NULL AND status NOT IN ('done','error','cancelled')`,
+                    postIds);
+                const jobIds = jrows.map(r => r.job_id).filter(Boolean);
+                if (jobIds.length) {
+                    await globalThis.fetch(`${LIPS_SYNC_BASE}/jobs/cancel`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ job_ids: jobIds }),
+                    }).catch(() => {});   // worker có thể chưa chạy → bỏ qua, vẫn xoá DB bên dưới
+                }
+                await db.run(`DELETE FROM LipsSyncJob WHERE post_id IN (${ph})`, postIds);
+            } catch (e) { console.warn('[delete-project] dọn job lips lỗi:', e.message); }
+        }
         for (const post of posts) {
             const paras = await db.all('SELECT id FROM Paragraph WHERE post_id = ?', [post.id]);
             for (const para of paras) {
@@ -956,10 +989,17 @@ app.post('/api/delete-project', async (req, res) => {
             await db.run('DELETE FROM Paragraph WHERE post_id = ?', [post.id]);
             await db.run('DELETE FROM Post WHERE id = ?', [post.id]);
         }
+        // Xoá luôn cache tin đã dùng (NewsSeen) của dự án này → xoá xong thì các dự án sau
+        // ĐƯỢC PHÉP xào lại tin về chủ đề đó. (Dedup "vấn đề" theo Post/Paragraph tự hết khi Post bị xoá.)
+        const seenDel = await db.run('DELETE FROM NewsSeen WHERE project_id = ? OR project_id LIKE ?', [videoId, `${videoId}\_%`]).catch(() => null);
         await db.close();
         const folder = path.join(MEDIA_DIR, videoId);
         if (fs.existsSync(folder)) fs.rmSync(folder, { recursive: true, force: true });
-        res.json({ success: true });
+        // Dọn thư mục log riêng của dự án (logs/<projectId>/ — chứa cả x_browse.json).
+        const safeLog = String(videoId || '').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 80);
+        const logFolder = path.join(__dirname, 'logs', safeLog);
+        if (safeLog && fs.existsSync(logFolder)) fs.rmSync(logFolder, { recursive: true, force: true });
+        res.json({ success: true, newsSeenDeleted: seenDel?.changes || 0 });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1686,8 +1726,13 @@ app.post('/api/trim', async (req, res) => {
         // Lấy totalDur TRƯỚC khi xóa file gốc
         const totalDur = await ffprobeDuration(fullPath);
         const dur = end - start;
-        // Dùng -ss trước -i (nhanh, keyframe snap) và re-encode nếu cần
-        await runFfmpeg(['-ss', String(start), '-t', String(dur), '-i', fullPath, '-c', 'copy', '-avoid_negative_ts', 'make_zero', '-y', trimmedPath]);
+        // RE-ENCODE để cắt CHÍNH XÁC từng frame. Nếu dùng -c copy thì cắt theo KEYFRAME → cắt vài giây đầu
+        // bị "nhảy" về keyframe trước đó (vd cắt 2s nhưng vẫn ra gần đủ 23s). NVENC cho nhanh, fallback libx264.
+        // -ss trước -i = seek nhanh; -t sau -i = độ dài output chính xác. +faststart: moov ở đầu → browser đọc duration ngay.
+        const vcodec = hasNvenc
+            ? ['-c:v', 'h264_nvenc', '-preset', 'p4', '-b:v', '8M']
+            : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20'];
+        await runFfmpeg(['-ss', String(start), '-i', fullPath, '-t', String(dur), ...vcodec, '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', '-y', trimmedPath]);
 
         const db = await getDb();
         // Lấy ĐỦ mọi cột "chủ sở hữu" — bỏ sót cột nào thì mảnh cắt rơi khỏi chỗ đứng cũ, thành asset mồ côi.
@@ -1718,7 +1763,7 @@ app.post('/api/trim', async (req, res) => {
                 const beforePath = `${base}_trim_before_${ts}${ext}`;
                 const beforeRelative = path.relative(MEDIA_DIR, beforePath);
                 try {
-                    await runFfmpeg(['-ss', '0', '-t', String(start), '-i', fullPath, '-c', 'copy', '-y', beforePath]);
+                    await runFfmpeg(['-ss', '0', '-t', String(start), '-i', fullPath, '-c', 'copy', '-movflags', '+faststart', '-y', beforePath]);
                     await insertPiece(leftoverOwner, beforeRelative, 0, 0, Math.round(start * 10) / 10);
                 } catch(e) { console.error('[trim before error]', e.message); }
             }
@@ -1729,7 +1774,7 @@ app.post('/api/trim', async (req, res) => {
                 const afterRelative = path.relative(MEDIA_DIR, afterPath);
                 console.log('[trim] totalDur:', totalDur, 'end:', end, 'after duration:', totalDur - end, 'afterPath:', afterPath);
                 try {
-                    await runFfmpeg(['-ss', String(end), '-i', fullPath, '-c', 'copy', '-y', afterPath]);
+                    await runFfmpeg(['-ss', String(end), '-i', fullPath, '-c', 'copy', '-movflags', '+faststart', '-y', afterPath]);
                     await insertPiece(leftoverOwner, afterRelative, 0, 0, Math.round((totalDur - end) * 10) / 10);
                 } catch(e) { console.error('[trim after error]', e.message); }
             } else {
@@ -2237,10 +2282,10 @@ async function autoGenVoiceForPost(projectId, post, cfg) {
         const ok = await waitBatchDone(result.batch_uuid, post.id, primaryCt);
         if (ok) {
             console.log(`[auto-voice] Voice chính xong post ${post.id}`);
-            // Lips sync: chỉ với target (content) + có cấu hình video khuôn mặt
-            if (primaryCt === 'content' && cfg.lips && cfg.lips.enabled && cfg.lips.video) {
+            // Lips sync: chỉ với target (content) + đã bật auto lips. Video LUÔN lấy theo THỨ (runLipsSyncForPost tự resolve).
+            if (primaryCt === 'content' && cfg.lips && cfg.lips.enabled) {
                 try {
-                    await runLipsSyncForPost({ postId: post.id, videoPath: cfg.lips.video, contentType: 'content', guidanceScale: cfg.lips.guidanceScale });
+                    await runLipsSyncForPost({ postId: post.id, contentType: 'content', guidanceScale: cfg.lips.guidanceScale });
                     console.log(`[auto-voice] Đã gửi job lips sync post ${post.id}`);
                 } catch (e) { console.error('[auto-voice] Lips sync lỗi post ' + post.id + ':', e.message); }
             }
@@ -2282,16 +2327,24 @@ async function orchestrateAutoVoice(projectId) {
 
 // Chạy lips_sync cho TỪNG CÂU của 1 post: tải mp3 mỗi câu, gửi job, output lưu vào <project>/lips_sync/
 // Dùng chung cho endpoint thủ công (/run-post) lẫn auto sau khi tạo audio (/auto-run).
-async function runLipsSyncForPost({ postId, videoPath, contentType: reqCt, force, guidanceScale }) {
-    if (!postId || !videoPath) { const e = new Error('Thiếu postId hoặc videoPath'); e.status = 400; throw e; }
-    if (!fs.existsSync(videoPath)) { const e = new Error('Video không tồn tại: ' + videoPath); e.status = 400; throw e; }
+async function runLipsSyncForPost({ postId, contentType: reqCt, force, guidanceScale }) {
+    if (!postId) { const e = new Error('Thiếu postId'); e.status = 400; throw e; }
     const gs = Number(guidanceScale);
     const guidance = Number.isFinite(gs) ? gs : 2.2;
 
     const db = await getDb();
-    const post = await db.get('SELECT project_id, voice_content_type FROM Post WHERE id = ?', [postId]);
+    const post = await db.get('SELECT project_id, voice_content_type, genre FROM Post WHERE id = ?', [postId]);
     await db.close();
     if (!post) { const e = new Error('Không tìm thấy post'); e.status = 404; throw e; }
+
+    // LUÔN chạy THEO NGÀY: dùng video khuôn mặt của THỨ hôm nay theo thể loại (đã bỏ input video thủ công).
+    const genre = normLipsGenre(post.genre) || (String(post.project_id).startsWith('proj_') ? 'geo' : 'naze');
+    const wd = lipsWeekday();
+    const videoPath = lipsLibVideo(wd, genre);
+    if (!videoPath || !fs.existsSync(videoPath)) {
+        const e = new Error(`Chưa có video khuôn mặt cho ${LIPS_WEEKDAY_LABELS[wd] || ('thứ ' + wd)} (thể loại ${genre}). Thêm ở "🗓️ Video khuôn mặt theo thứ".`);
+        e.status = 400; throw e;
+    }
 
     const contentType = reqCt || post.voice_content_type || 'content';
     const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
@@ -2622,8 +2675,11 @@ app.post('/api/ensure-proxy', express.json(), async (req, res) => {
     const src = path.resolve(MEDIA_DIR, rel);
     if (!rel || !src.startsWith(path.resolve(MEDIA_DIR) + path.sep) || !fs.existsSync(src)) return res.json({ ready: false });
     try {
-        // File nhỏ (<4MB) hoặc proxy đã sẵn → dùng luôn, khỏi encode
-        if (!needsProxy(MEDIA_DIR, rel)) return res.json({ ready: true });
+        // Proxy đã sẵn → dùng luôn.
+        if (proxyReady(MEDIA_DIR, rel)) return res.json({ ready: true });
+        // LUÔN tạo proxy 480p (faststart, moov ở đầu) cho video mở trong Edit — kể cả clip nhỏ đã trim.
+        // Trước đây bỏ qua file <4MB → clip đã trim (nhỏ + moov cuối do -c copy) nạp thẳng, trình duyệt đọc
+        // duration lỗi → không trim lại được. Proxy faststart đảm bảo timeline luôn đọc đúng duration.
         await ensureProxy(MEDIA_DIR, rel);
         res.json({ ready: true });
     } catch { res.json({ ready: false }); }

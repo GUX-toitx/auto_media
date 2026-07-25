@@ -340,7 +340,9 @@ if (process.argv[1]?.endsWith('browser.js')) {
         console.log('[OK] Mở profile để lấy cookie: ' + profileDirName + ' → ' + openUrl);
         await page.goto(openUrl).catch(() => {});
         console.log('[OK] Đăng nhập/thao tác trên trang, xong thì đóng trình duyệt để lưu cookie.');
-        await ctx.waitForEvent('close').catch(() => {});
+        // timeout: 0 = chờ VÔ HẠN tới khi user tự đóng trình duyệt (mặc định Playwright chỉ 30s → tự đóng sớm).
+        // launchPersistentContext tự lưu cookie/session vào profile dir → đóng là lưu.
+        await ctx.waitForEvent('close', { timeout: 0 }).catch(() => {});
         process.exit(0);
     }
 
@@ -378,6 +380,7 @@ if (process.argv[1]?.endsWith('browser.js')) {
         }
     }
 
-    await ctx.waitForEvent('close').catch(() => {});
+    // timeout: 0 = chờ VÔ HẠN tới khi user tự đóng (mặc định 30s sẽ tự đóng trình duyệt giữa chừng đăng nhập).
+    await ctx.waitForEvent('close', { timeout: 0 }).catch(() => {});
     process.exit(0);
 }

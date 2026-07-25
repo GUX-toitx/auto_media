@@ -31,6 +31,25 @@ async function api(endpoint, options = {}) {
 // speed: tốc độ đọc (ttsmin). 1 = bình thường; <1 chậm, >1 nhanh. Kẹp về [0.5, 2] cho an toàn.
 function clampSpeed(v) { const n = Number(v); return Number.isFinite(n) ? Math.min(2, Math.max(0.5, n)) : 1; }
 
+// SRT timecode: HH:MM:SS,mmm. Thời gian chỉ là placeholder để đánh dấu ranh giới cue — TTS tự sinh độ dài thật.
+function srtTimecode(totalSec) {
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor(totalSec / 60) % 60;
+    const s = totalSec % 60;
+    const p = (n) => String(n).padStart(2, '0');
+    return `${p(h)}:${p(m)}:${p(s)},000`;
+}
+
+// Dựng file SRT: MỖI câu = 1 cue → ttsmin giữ đúng 1 audio/câu (upload_type 'sentence' sẽ TỰ GỘP các câu ngắn
+// <min_char(50) thành ~27 chunk, làm thiếu audio & lệch mapping; min_char/max_char/split_sentences bị bỏ qua ở mode đó).
+function buildSrt(sentences) {
+    return sentences.map((text, i) => {
+        // Cue phải 1 dòng: bỏ xuống dòng nội tại + dòng trống (tránh vỡ cấu trúc SRT).
+        const clean = String(text).replace(/\r?\n+/g, ' ').trim();
+        return `${i + 1}\n${srtTimecode(i * 3)} --> ${srtTimecode(i * 3 + 3)}\n${clean}\n`;
+    }).join('\n');
+}
+
 async function createBatch(batchName, sentences, lang, speakerUuid, dictionaryUuids = [], speed = 1) {
     const form = new FormData();
     form.append('batch_name', batchName);
@@ -45,12 +64,13 @@ async function createBatch(batchName, sentences, lang, speakerUuid, dictionaryUu
     form.append('top_p', 1);
     form.append('repetition_penalty', 2);
     form.append('crossfade_ms', 50);
-    form.append('upload_type', 'sentence');
+    // file_srt: 1 cue = 1 câu = 1 audio (giữ 1:1). KHÔNG dùng 'sentence' vì API tự gộp câu ngắn tiếng Nhật.
+    form.append('upload_type', 'file_srt');
     form.append('source', 'API');
-    form.append('split_chars', JSON.stringify(["\n", ".", "?", "!"]));
     form.append('speakers', JSON.stringify([{ no: 1, reference_speaker_uuid: speakerUuid }]));
     dictionaryUuids.forEach(uuid => form.append('dictionary_uuids[]', uuid));
-    sentences.forEach((text, i) => form.append(`sentences[${i}][text]`, text));
+    const srt = buildSrt(sentences);
+    form.append('file', new Blob([srt], { type: 'application/x-subrip' }), `${batchName}.srt`);
     const res = await api('/user/batch', { method: 'POST', body: form });
     return res.json();
 }
@@ -132,16 +152,15 @@ export async function generateAudios(projectDir, postId, lang, speakerUuid, cont
 
     const paragraphs = await db.all('SELECT id, title, title_vi FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);
     for (const para of paragraphs) {
-        const titleText = isVi ? para.title_vi : para.title;
-        if ((titleText || '').trim()) rows.push({ src: 'para_title', id: para.id, text: titleText });
+        // Tiêu đề luận điểm (vd 直近の動き, 歴史的背景と前例) CHỈ là nhãn cấu trúc, KHÔNG đọc giọng
+        // → không đưa vào batch TTS để không cộng vào tổng thời gian. (Phải khớp filter trong checkAndSaveVoice.)
 
         const paraDetails = await db.all('SELECT id, content, content_vi FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"', [para.id]);
         for (const d of paraDetails) if ((d[tf] || '').trim()) rows.push({ src: 'para', id: d.id, text: d[tf] });
 
         const sentences = await db.all('SELECT id, title, title_vi FROM Sentence WHERE paragraph_id = ? ORDER BY "order"', [para.id]);
         for (const s of sentences) {
-            const stitle = isVi ? s.title_vi : s.title;
-            if ((stitle || '').trim()) rows.push({ src: 'sent_title', id: s.id, text: stitle });
+            // Tiêu đề luận cứ cũng là nhãn → bỏ qua giọng đọc.
             const details = await db.all('SELECT id, content, content_vi FROM SentenceDetail WHERE sentence_id = ? ORDER BY "order"', [s.id]);
             for (const d of details) if ((d[tf] || '').trim()) rows.push({ src: 'sent', id: d.id, text: d[tf] });
         }
@@ -238,7 +257,7 @@ export async function checkAndSaveVoice(batchUuid, postId, contentType = 'conten
 
         const paragraphs = await db.all('SELECT id, title, title_vi FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);
         for (const para of paragraphs) {
-            if (para.title_vi || para.title) units.push({ table: 'Paragraph', id: para.id, field: `title${audioField}` });
+            // Tiêu đề luận điểm KHÔNG được đọc giọng (khớp generateAudios) → không map audio vào Paragraph.title.
 
             const paraDetails = await db.all('SELECT id, content, content_vi FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"', [para.id]);
             for (const d of paraDetails) {
@@ -247,7 +266,7 @@ export async function checkAndSaveVoice(batchUuid, postId, contentType = 'conten
 
             const sentences = await db.all('SELECT id, title, title_vi FROM Sentence WHERE paragraph_id = ? ORDER BY "order"', [para.id]);
             for (const s of sentences) {
-                if (s.title_vi || s.title) units.push({ table: 'Sentence', id: s.id, field: `title${audioField}` });
+                // Tiêu đề luận cứ KHÔNG đọc giọng → không map audio vào Sentence.title.
                 const details = await db.all('SELECT id, content, content_vi FROM SentenceDetail WHERE sentence_id = ? ORDER BY "order"', [s.id]);
                 for (const d of details) {
                     if (d.content_vi || d.content) units.push({ table: 'SentenceDetail', id: d.id, field: `content${audioField}` });

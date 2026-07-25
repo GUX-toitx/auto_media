@@ -15,6 +15,7 @@ import { collectFromXAccounts } from '../x/x_source.js';
 import { crawlX } from '../x/x_crawler.js';
 import { readStockSource } from '../lib/stockNaming.js';
 import { setLogProject, logCrawlInfo, logCrawlError } from '../lib/crawlLogger.js';
+import { resetXBrowseLog, appendXBrowse } from '../lib/xBrowseLog.js';
 import { aiChat, aiStructured, aiProviderName, modelFor, logUsage } from '../lib/ai.js';
 
 // Nuốt lỗi vô hại của puppeteer-extra-stealth khi tạo page lúc nhiều browser bung cùng lúc
@@ -44,10 +45,36 @@ const daysArg = parseInt(getArg('--days'), 10);
 const newsDays = Number.isFinite(daysArg) && daysArg > 0 ? daysArg : 1;   // cửa sổ tin "when:Nd" (mặc định 1 ngày = chỉ tin trong 24h)
 const seenFile = getArg('--seenFile');   // (monitor sheet) file JSON lưu tin đã xử lý → dedup xuyên lần chạy
 // Crawl LẠI media cho project đã có (nút trên dashboard): chỉ cào lại ảnh/video, không đụng kịch bản/GPT.
-// Điểm nội dung dưới ngưỡng này -> gọi GPT viết lại kịch bản ĐÚNG 1 LẦN rồi chấm lại (--rewriteBelow 0 để tắt).
+// Điểm nội dung dưới ngưỡng này -> gọi GPT viết lại kịch bản, LẶP LẠI tới khi đạt ngưỡng (--rewriteBelow 0 để tắt).
 const rewriteBelowArg = parseInt(getArg('--rewriteBelow'), 10);
 const REWRITE_SCORE_THRESHOLD = Number.isFinite(rewriteBelowArg) ? rewriteBelowArg : 75;
+// Số lần viết lại TỐI ĐA (chặn lặp vô hạn khi AI mãi không đạt ngưỡng). --rewriteMaxAttempts hoặc env GEO_REWRITE_MAX_ATTEMPTS.
+const rewriteMaxArg = parseInt(getArg('--rewriteMaxAttempts'), 10);
+const REWRITE_MAX_ATTEMPTS = Number.isFinite(rewriteMaxArg) && rewriteMaxArg > 0
+    ? rewriteMaxArg : (Math.max(1, parseInt(process.env.GEO_REWRITE_MAX_ATTEMPTS, 10) || 4));
+// Số luận điểm tối thiểu (chống GPT dồn cả bài vào 1 luận điểm → keyword nổ, media dồn 1 scene). GEO_MIN_LUAN_DIEM để chỉnh.
+const GEO_MIN_LUAN_DIEM = Math.max(1, parseInt(process.env.GEO_MIN_LUAN_DIEM, 10) || 4);
 const mediaOnly = args.includes('--mediaOnly');
+
+// Kiểm tra cấu trúc kịch bản có "thoái hóa" không: quá ít luận điểm, hoặc luận cứ bị băm mỗi câu 1 luận cứ.
+// Cấu trúc xấu → keyword_factual/cinematic của TỪNG luận cứ dồn hết vào 1 paragraph → crawl media/X nổ tung.
+function analyzeStructure(result) {
+    const lds = result.luan_diem || [];
+    const numLd = lds.length;
+    let numLc = 0, lcSent = 0;
+    for (const ld of lds) {
+        const lcs = ld.luan_cu || [];
+        numLc += lcs.length;
+        for (const lc of lcs) lcSent += (lc.content_sentences || []).length;
+    }
+    const avgSentPerLc = numLc ? lcSent / numLc : 0;
+    const issues = [];
+    if (numLd < GEO_MIN_LUAN_DIEM)
+        issues.push(`chi co ${numLd} luan diem (BAT BUOC >= ${GEO_MIN_LUAN_DIEM}, moi luan diem = 1 khia canh phan tich)`);
+    if (numLc >= 15 && avgSentPerLc < 1.5)
+        issues.push(`luan cu bi bam nho: ${numLc} luan cu nhung trung binh chi ${avgSentPerLc.toFixed(1)} cau/luan cu (moi luan cu PHAI gom >= 2-3 cau content_sentences, KHONG tach moi cau thanh 1 luan cu)`);
+    return { numLd, numLc, avgSentPerLc, issues };
+}
 const mediaOnlyPostId = parseInt(getArg('--postId'), 10);
 const forceAll = args.includes('--force');   // mặc định: chỉ bù cảnh đang 0 asset
 
@@ -608,6 +635,11 @@ async function analyzeWithGPT5(topic, newsTitles, sources) {
 '  + KET BAI: Bat buoc dung tu 5 den 8 Object JSON.',
 '- TONG SO OBJECT DUOI 90 LA THAT BAI.',
 '',
+'CAU TRUC LUAN DIEM / LUAN CU (BAT BUOC — CHONG DON HET VAO 1 LUAN DIEM):',
+'- Than bai BAT BUOC chia thanh IT NHAT ' + GEO_MIN_LUAN_DIEM + ' luan diem (luan_diem), moi luan diem la 1 khia canh phan tich rieng theo 6 khia canh o tren.',
+'- Moi luan cu (luan_cu) PHAI gom NHIEU cau content_sentences (3-6 cau) cung mach y — TUYET DOI KHONG tach moi cau thanh 1 luan cu rieng.',
+'- keywords_factual / keywords_cinematic cho moi luan diem/luan cu chi can 2-4 tu khoa moi loai, sat noi dung — KHONG liet ke tran lan.',
+'',
 'QUY TAC NGHIEP NGAC: TUYET DOI KHONG TAO OBJECT CHUA TIEU DE / NHAN PHAN DOAN (CRITICAL FIX):',
 '- TUYET DOI KHONG duoc tao bat ky Object JSON nao chi de chua ten tieu de, ten lop hay ten phan doan.',
 '- CAM TOAN BO CAC CUM TU NHAN TRONG CA TIENG VIET VOI TIENG NHAT:',
@@ -778,30 +810,46 @@ function formatEvaluation(scoreObj) {
 
 // Viết lại kịch bản DUY NHẤT 1 LẦN khi điểm dưới ngưỡng: đưa nguyên kịch bản cũ + toàn bộ đánh giá
 // (ưu/nhược/gợi ý) cho GPT sửa. Trả kịch bản mới (đã vá bản target) hoặc null nếu lỗi.
-async function rewriteContentWithGPT(result, scoreObj) {
+async function rewriteContentWithGPT(result, scoreObj, structIssues = []) {
     try {
         const draft = JSON.stringify(stripInternalKeys(result));
+        const scoreLine = scoreObj
+            ? `Kich ban duoi day bi cham ${scoreObj.score}/100 — DUOI NGUONG DAT (${REWRITE_SCORE_THRESHOLD}). Nhiem vu: VIET LAI TOAN BO cho dat diem cao nhat co the.`
+            : 'Nhiem vu: VIET LAI TOAN BO kich ban duoi day cho dat chat luong cao nhat.';
+        // Khi cau truc thoai hoa (1 luan diem, luan cu bam nho...) → BAT BUOC tai cau truc, KHONG giu nguyen so luan diem.
+        const hasStruct = structIssues.length > 0;
+        const structBlock = hasStruct ? [
+            '===== LOI CAU TRUC BAT BUOC SUA (UU TIEN CAO NHAT) =====',
+            ...structIssues.map(s => '- ' + s),
+            `- BAT BUOC chia Than bai thanh IT NHAT ${GEO_MIN_LUAN_DIEM} luan diem (luan_diem), moi luan diem la 1 khia canh phan tich rieng (dien bien thuc te / boi canh lich su / dong co ngoai giao / tac dong doi song nguoi Nhat / an ninh hang hai Senkaku / kich ban 3-5 nam).`,
+            '- Moi luan cu (luan_cu) PHAI gom NHIEU cau content_sentences (3-6 cau) cung mach y — TUYET DOI KHONG tach moi cau thanh 1 luan cu rieng.',
+            '- Phan bo deu 90-110 Object cau vao cac luan diem/luan cu; KHONG don het vao 1 luan diem.',
+            '- Moi luan diem / luan cu chi giu keywords_factual & keywords_cinematic GON (2-4 tu khoa moi loai), sat noi dung cua chinh no.',
+            '',
+        ] : [];
         const input = [
             'Ban la bien tap vien truong cua kenh documentary dia chinh tri tieng Nhat.',
-            `Kich ban duoi day bi cham ${scoreObj.score}/100 — DUOI NGUONG DAT (${REWRITE_SCORE_THRESHOLD}). Nhiem vu: VIET LAI TOAN BO cho dat diem cao nhat co the.`,
+            scoreLine,
             '',
-            '===== DANH GIA CUA BIEN TAP VIEN (PHAI XU LY HET) =====',
-            formatEvaluation(scoreObj),
-            '',
+            ...(scoreObj ? ['===== DANH GIA CUA BIEN TAP VIEN (PHAI XU LY HET) =====', formatEvaluation(scoreObj), ''] : []),
+            ...structBlock,
             '===== YEU CAU VIET LAI =====',
-            '- GIU NGUYEN cau truc JSON, so luong luan diem va tong so Object JSON (90-110 cau) nhu ban cu.',
+            // Chỉ giữ nguyên số luận điểm khi cấu trúc ĐANG ỔN; nếu lỗi cấu trúc thì phải tái cấu trúc theo khối trên.
+            hasStruct
+                ? '- TAI CAU TRUC theo khoi "LOI CAU TRUC" o tren; giu tong so Object JSON (90-110 cau) nhung PHAN BO lai thanh nhieu luan diem/luan cu hop ly.'
+                : '- GIU NGUYEN cau truc JSON, so luong luan diem va tong so Object JSON (90-110 cau) nhu ban cu.',
             '- GIU NGUYEN chu de, cac su kien co that va so lieu trong ban cu — TUYET DOI KHONG bia them su kien moi.',
             '- Sua triet de tung DIEM YEU va ap dung tung GOI Y o tren; giu lai nhung DIEM MANH da co.',
             '- Van phong NHK Special, the CHOTAI (常体), khach quan, khong an du, khong giat gan, khong nhan tieu de trong cau thoai.',
             '- Moi cau van la object song ngu {vi, en}: [vi] = TIENG VIET, [en] = key ten "en" nhung NOI DUNG BAT BUOC LA TIENG NHAT.',
             '- KHONG de trong [en], KHONG viet tieng Anh, KHONG them tien to "ja: ".',
-            '- Giu nguyen keywords_factual / keywords_cinematic bang tieng Anh cho moi doan (co the tinh chinh cho sat noi dung moi).',
+            '- Giu keywords_factual / keywords_cinematic bang tieng Anh cho moi doan (co the tinh chinh cho sat noi dung moi).',
             '',
             '===== KICH BAN CU (JSON) =====',
             draft,
         ].join('\n');
 
-        console.log(`[process_content] ✍️  Điểm ${scoreObj.score} < ${REWRITE_SCORE_THRESHOLD} → gọi ${modelFor('main')} viết lại kịch bản (1 lần duy nhất)`);
+        console.log(`[process_content] ✍️  Gọi ${modelFor('main')} viết lại kịch bản${hasStruct ? ' (tái cấu trúc)' : ''}...`);
         const { outputText, usage } = await aiStructured({
             schema: SCRIPT_SCHEMA,
             schemaName: 'phan_tich_dia_chinh_tri_v2',
@@ -881,7 +929,8 @@ async function crawlXForGeo(db, postId, projectId, result) {
     } catch (e) { console.error('    [X-geo] lỗi:', e.message); }
 }
 
-// Sinh keyword tìm X (tiếng NHẬT) cho TỪNG CẢNH trong 1 lần gọi GPT (batch) → object { "i": [kw1, kw2] }.
+// [DEPRECATED] Sinh keyword tìm X (tiếng NHẬT) cho TỪNG CẢNH — KHÔNG còn dùng: geo giờ tìm X bằng
+// keyword Factual của cảnh (xem crawlXPerSceneForGeo). Giữ lại phòng khi cần quay lại luồng JA.
 async function getGeoXKeywordsPerScene(sceneTexts) {
     const items = sceneTexts.map((t, i) => `[${i}] ${String(t || '').replace(/\s+/g, ' ').slice(0, 300)}`).join('\n');
     if (!items.trim()) return {};
@@ -907,77 +956,162 @@ async function getGeoXKeywordsPerScene(sceneTexts) {
     } catch (e) { console.error('    [X-scene] keyword/cảnh lỗi:', e.message); return {}; }
 }
 
-// Chèn 1 asset X vào ĐÚNG cảnh: luận điểm → paragraph_id; luận cứ → sentence_id (section NULL để vào pool cảnh, không dồn block 'x').
+// Chèn 1 asset X — GOM VỀ LUẬN ĐIỂM: cả luận điểm (para) LẪN luận cứ (sent) đều gán vào paragraph_id
+// của luận điểm, sentence_id = NULL → media dồn hết vào pool luận điểm, KHÔNG tự nhảy vào luận cứ.
+// Người dùng tự chọn asset vào luận cứ nào (nút 📦 → chọn luận cứ). Mở bài/kết bài vẫn theo section.
 async function insertSceneAsset(db, postId, sc, type, absPath, srcUrl) {
     const rel = path.relative(BASE_DIR, absPath);
-    const ex = await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
+    const base = path.basename(rel);
+    const paraId = sc.kind === 'section' ? null : sc.paraId;
+    // Dedup: cùng file, HOẶC cùng 1 media của cùng tweet (basename x_<id>_<i>) đã có trong CÙNG luận điểm
+    // (luận điểm & luận cứ của nó có thể cùng tìm ra 1 tweet) → tránh trùng trong pool.
+    let ex;
+    if (paraId != null) {
+        const escBase = base.replace(/[\\%_]/g, c => '\\' + c);
+        ex = await db.get(
+            "SELECT id FROM Asset WHERE file_path = ? OR (paragraph_id = ? AND file_path LIKE ? ESCAPE '\\')",
+            [rel, paraId, '%/' + escBase]
+        );
+    } else {
+        ex = await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
+    }
     if (ex) return;
     await db.run(
-        'INSERT INTO Asset (post_id, paragraph_id, sentence_id, type, file_path, source_url) VALUES (?, ?, ?, ?, ?, ?)',
-        [postId, sc.kind === 'para' ? sc.paraId : null, sc.sentId, type, rel, srcUrl || null]
+        'INSERT INTO Asset (post_id, paragraph_id, sentence_id, section, type, file_path, source_url) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [postId, paraId, null, sc.kind === 'section' ? sc.section : null, type, rel, srcUrl || null]
     );
 }
 
-// Crawl X THEO TỪNG CẢNH (luận điểm + luận cứ): sinh keyword JA riêng mỗi cảnh, lấy 3 ảnh + 2 video,
-// gán media đúng vào luận điểm/luận cứ để chọn khớp b-roll sub-scene từng cảnh.
+// Nhãn cảnh dùng cho thư mục out / log: mở bài-kết bài theo section, luận điểm/luận cứ theo id.
+function xSceneLabel(sc) {
+    return sc.kind === 'section' ? sc.section : `${sc.kind}_${sc.sentId || sc.paraId}`;
+}
+
+// Crawl X (mở bài + luận điểm + luận cứ + kết bài): tìm bằng keyword FACTUAL của chính cảnh đó.
+// Media của luận điểm VÀ các luận cứ của nó đều GOM VỀ POOL LUẬN ĐIỂM (paragraph_id) — không tự gán
+// vào luận cứ; người dùng tự chọn asset vào luận cứ nào. Mở bài/kết bài vẫn theo section.
 async function crawlXPerSceneForGeo(db, postId, projectId, result) {
     try {
         await db.run('ALTER TABLE Keyword ADD COLUMN sentence_id INTEGER DEFAULT NULL').catch(() => {});   // self-heal
         const scenes = [];
+        // Mở bài (hook) TRƯỚC — trước đây bị bỏ sót nên "mở bài không có media nào".
+        const hookKw = (result.hook_keywords_factual || []).filter(Boolean).map(String);
+        if (hookKw.length) scenes.push({ kind: 'section', section: 'hook', factual: hookKw });
         for (const cau of (result.luan_diem || [])) {
             if (!cau._paragraphId) continue;
-            const text = [cau.title_target, cau.title_vi, ...(cau.content_sentences || []).map(s => s.en || s.vi)].filter(Boolean).join(' ');
-            scenes.push({ kind: 'para', paraId: cau._paragraphId, sentId: null, text });
+            scenes.push({ kind: 'para', paraId: cau._paragraphId, sentId: null, factual: (cau.keywords_factual || []).filter(Boolean).map(String) });
             for (const doan of (cau.luan_cu || [])) {
                 if (!doan._sentenceId) continue;
-                const st = (doan.content_sentences || []).map(s => s.en || s.vi).filter(Boolean).join(' ');
-                scenes.push({ kind: 'sent', paraId: cau._paragraphId, sentId: doan._sentenceId, text: st });
+                scenes.push({ kind: 'sent', paraId: cau._paragraphId, sentId: doan._sentenceId, factual: (doan.keywords_factual || []).filter(Boolean).map(String) });
             }
         }
-        if (!scenes.length) { console.log('    [X-scene] không có cảnh → bỏ qua'); return; }
-        console.log(`    [X-scene] ${scenes.length} cảnh (luận điểm + luận cứ) → sinh keyword JA...`);
-
-        const kwMap = await getGeoXKeywordsPerScene(scenes.map(s => s.text));
-        const X_PROFILE = process.env.X_PROFILE || 'chrome-profile-4';
-        let totImg = 0, totVid = 0, done = 0;
-        for (let i = 0; i < scenes.length; i++) {
-            const sc = scenes[i];
-            let kws = kwMap[String(i)] ?? kwMap[i] ?? [];
-            if (!Array.isArray(kws)) kws = [];
-            // CHỈ 1 keyword/cảnh: mỗi query = 1 request X, mà throttle chỉ ~50 req/15 phút cho MỖI account.
-            // 2 keyword × ~25 cảnh = ~50 request -> cháy quota ngay trong 1 dự án.
-            kws = kws.filter(Boolean).map(String).slice(0, 1);
-            if (!kws.length) { console.log(`    [X-scene] cảnh ${i} (${sc.kind}) không có keyword → bỏ`); continue; }
-            for (const kw of kws) await db.run(
-                'INSERT INTO Keyword (post_id, paragraph_id, sentence_id, content, type) VALUES (?, ?, ?, ?, ?)',
-                [postId, sc.kind === 'para' ? sc.paraId : null, sc.sentId, kw, 'x_ja']
-            );
-            const outDir = path.join(BASE_DIR, projectId, 'assets', 'x', `${sc.kind}_${sc.sentId || sc.paraId}`);
-            let manifest = [];
-            try {
-                ({ manifest } = await crawlX({
-                    profileName: X_PROFILE, outDir,
-                    // HAI truy vấn cho mỗi cảnh (x_scrape tách theo '|', tự gộp + khử trùng tweet):
-                    //   filter:media        -> gần như chỉ ra ẢNH (đo thực tế: 34 ảnh / 1 video)
-                    //   filter:native_video -> mới ra VIDEO thật sự (đo thực tế: 24 video)
-                    // Chỉ hỏi 1 loại thì 54% số cảnh không có video nào.
-                    keywords: kws.flatMap(k => [`${k} filter:media`, `${k} filter:native_video`]).join('|'),
-                    // max phải đủ lớn để tweet video không bị cắt mất khi sắp xếp theo số media.
-                    // limit là số tweet MỖI truy vấn (<=20 vẫn chỉ tốn 1 request) → nâng để đủ 5 video.
-                    limit: 16, max: 32, captureMax: 0, maxImages: 5, maxVideos: 5,
-                    scrapeTimeoutMs: 90000,   // dính rate-limit thì bỏ cảnh, KHÔNG treo pipeline
-                }));
-            } catch (e) { console.error(`    [X-scene] crawl cảnh ${i} (${sc.kind}) lỗi: ${e.message}`); continue; }
-            let ni = 0, nv = 0;
-            for (const t of manifest) {
-                for (const img of t.images) { await insertSceneAsset(db, postId, sc, 'image', img, t.url); ni++; }
-                for (const vid of t.videos) { await insertSceneAsset(db, postId, sc, 'video', vid, t.url); nv++; }
-            }
-            totImg += ni; totVid += nv; done++;
-            console.log(`    [X-scene] ${sc.kind} #${sc.sentId || sc.paraId}: ${ni} ảnh + ${nv} video (kw: ${kws.join(' | ')})`);
-        }
-        console.log(`    [X-scene] xong ${done}/${scenes.length} cảnh → ${totImg} ảnh + ${totVid} video`);
+        // Kết bài (conclusion) SAU CÙNG.
+        const conclKw = (result.conclusion_keywords_factual || []).filter(Boolean).map(String);
+        if (conclKw.length) scenes.push({ kind: 'section', section: 'conclusion', factual: conclKw });
+        // Tạo mới → chèn keyword x_factual (lưu để nút crawl lại tái dùng đúng cảnh), gán media mọi cảnh.
+        await runXSceneCrawl(db, postId, projectId, scenes, { insertKeyword: true, onlyMissing: false });
     } catch (e) { console.error('    [X-scene] lỗi:', e.message); }
+}
+
+// Cảnh đã có asset chưa? (para/luận cứ gom pool ở paragraph_id; section theo section) — cho chế độ chỉ-bù-thiếu.
+async function sceneHasAsset(db, postId, sc) {
+    if (sc.kind === 'section') {
+        const r = await db.get('SELECT 1 FROM Asset WHERE post_id = ? AND section = ? LIMIT 1', [postId, sc.section]);
+        return !!r;
+    }
+    const r = await db.get('SELECT 1 FROM Asset WHERE paragraph_id = ? LIMIT 1', [sc.paraId]);
+    return !!r;
+}
+
+// Dựng lại danh sách cảnh từ DB (dùng cho nút crawl lại): lấy keyword x_factual ĐÃ LƯU của lần tạo, đúng từng cảnh.
+async function buildScenesFromDb(db, postId) {
+    const scenes = [];
+    const kwOf = async (where, params) =>
+        (await db.all(`SELECT content FROM Keyword WHERE ${where} AND type = 'x_factual' ORDER BY id`, params))
+            .map(r => r.content).filter(Boolean);
+    const hook = await kwOf("post_id = ? AND section = 'hook'", [postId]);
+    if (hook.length) scenes.push({ kind: 'section', section: 'hook', factual: hook });
+    const paras = await db.all('SELECT id FROM Paragraph WHERE post_id = ? ORDER BY id', [postId]);
+    for (const pa of paras) {
+        const pk = await kwOf('paragraph_id = ? AND sentence_id IS NULL', [pa.id]);
+        if (pk.length) scenes.push({ kind: 'para', paraId: pa.id, sentId: null, factual: pk });
+        const sents = await db.all('SELECT id FROM Sentence WHERE paragraph_id = ? ORDER BY "order"', [pa.id]);
+        for (const s of sents) {
+            const sk = await kwOf('sentence_id = ?', [s.id]);
+            if (sk.length) scenes.push({ kind: 'sent', paraId: pa.id, sentId: s.id, factual: sk });
+        }
+    }
+    const concl = await kwOf("post_id = ? AND section = 'conclusion'", [postId]);
+    if (concl.length) scenes.push({ kind: 'section', section: 'conclusion', factual: concl });
+    return scenes;
+}
+
+// Crawl lại NGUỒN X theo từng cảnh, dựng cảnh từ DB (keyword x_factual đã lưu). onlyMissing → chỉ cảnh 0 asset.
+async function crawlXPerSceneFromDb(db, postId, projectId, { onlyMissing = true } = {}) {
+    try {
+        const scenes = await buildScenesFromDb(db, postId);
+        if (!scenes.length) { console.log('    [X-scene] DB không có keyword x_factual (dự án tạo trước khi có crawl X per-scene) → không crawl lại được nguồn X'); return; }
+        // Crawl lại → KHÔNG chèn keyword mới (đã có sẵn), chỉ cào X và bù media.
+        await runXSceneCrawl(db, postId, projectId, scenes, { insertKeyword: false, onlyMissing });
+    } catch (e) { console.error('    [X-scene] crawl lại lỗi:', e.message); }
+}
+
+// Vòng cào X dùng CHUNG cho tạo mới (scenes từ result) và crawl lại (scenes từ DB).
+async function runXSceneCrawl(db, postId, projectId, scenes, { insertKeyword = false, onlyMissing = false } = {}) {
+    if (!scenes.length) { console.log('    [X-scene] không có cảnh → bỏ qua'); return; }
+    console.log(`    [X-scene] ${scenes.length} cảnh (mở bài + luận điểm + luận cứ + kết bài) → tìm X bằng keyword Factual${onlyMissing ? ' (chỉ cảnh còn thiếu)' : ''}...`);
+    resetXBrowseLog(projectId);   // log MỌI bài X lướt qua từng cảnh (xem ở modal "Log X")
+
+    const X_PROFILE = process.env.X_PROFILE || 'chrome-profile-4';
+    let totImg = 0, totVid = 0, done = 0, skipped = 0;
+    for (let i = 0; i < scenes.length; i++) {
+        const sc = scenes[i];
+        const label = xSceneLabel(sc);
+        // Chỉ-bù-thiếu: cảnh đã có media → bỏ qua (không tốn request X).
+        if (onlyMissing && await sceneHasAsset(db, postId, sc)) { skipped++; continue; }
+        // Tìm X bằng keyword FACTUAL của cảnh (tiếng Anh, bám nội dung thực tế) — theo yêu cầu.
+        // CHỈ 1 keyword/cảnh: mỗi query = 1 request X, throttle ~50 req/15 phút cho MỖI account.
+        const kws = (sc.factual || []).slice(0, 1);
+        if (!kws.length) { console.log(`    [X-scene] cảnh ${label} (${sc.kind}) không có keyword Factual → bỏ`); continue; }
+        if (insertKeyword) for (const kw of kws) await db.run(
+            'INSERT INTO Keyword (post_id, paragraph_id, sentence_id, section, content, type) VALUES (?, ?, ?, ?, ?, ?)',
+            [postId,
+             sc.kind === 'para' ? sc.paraId : null,
+             sc.kind === 'sent' ? sc.sentId : null,
+             sc.kind === 'section' ? sc.section : null,
+             kw, 'x_factual']
+        );
+        const outDir = path.join(BASE_DIR, projectId, 'assets', 'x', label);
+        let manifest = [], scraped = [];
+        try {
+            ({ manifest, scraped } = await crawlX({
+                profileName: X_PROFILE, outDir,
+                // GIỐNG NHẤT với "tự gõ từ khóa rồi search trên web X": query THUẦN keyword (KHÔNG thêm
+                // filter:media / filter:native_video — người dùng đâu có gõ mấy toán tử đó), tab mặc định
+                // Top (x_scrape --product Top), lấy media theo ĐÚNG thứ tự X trả (crawlX đã giữ nguyên).
+                // 1 query/cảnh = 1 request (giảm nửa so với kiểu 2-filter trước) → nhẹ rate-limit hơn.
+                keywords: kws.join('|'),
+                // limit<=20 vẫn chỉ 1 request; max cao để không cắt mất bài liên quan ở cuối trang Top.
+                limit: 20, max: 40, captureMax: 0, maxImages: 5, maxVideos: 5,
+                scrapeTimeoutMs: 90000,   // dính rate-limit thì bỏ cảnh, KHÔNG treo pipeline
+            }));
+        } catch (e) {
+            console.error(`    [X-scene] crawl cảnh ${label} (${sc.kind}) lỗi: ${e.message}`);
+            appendXBrowse(projectId, { scene: label, kind: sc.kind, keywords: kws, scraped, usedUrls: null });
+            continue;
+        }
+        let ni = 0, nv = 0;
+        const usedUrls = new Set();
+        for (const t of manifest) {
+            for (const img of t.images) { await insertSceneAsset(db, postId, sc, 'image', img, t.url); ni++; usedUrls.add(t.url); }
+            for (const vid of t.videos) { await insertSceneAsset(db, postId, sc, 'video', vid, t.url); nv++; usedUrls.add(t.url); }
+        }
+        // Ghi log MỌI bài đã lướt (kể cả bài không lấy media) kèm cờ used.
+        appendXBrowse(projectId, { scene: label, kind: sc.kind, keywords: kws, scraped, usedUrls });
+        totImg += ni; totVid += nv; done++;
+        console.log(`    [X-scene] ${label}: ${ni} ảnh + ${nv} video (kw: ${kws.join(' | ')})`);
+    }
+    console.log(`    [X-scene] xong ${done}/${scenes.length} cảnh${skipped ? ` (bỏ qua ${skipped} cảnh đã có media)` : ''} → ${totImg} ảnh + ${totVid} video`);
 }
 
 async function saveToDb(projectId, result, scoreObj = null, scoreHistory = null) {
@@ -1226,6 +1360,9 @@ async function crawlMediaForPost({ db, postId, projectId, articles = [], searchK
             topic,
             keywords: searchKeywords,
             sources: sourceDomains,
+            // Nguồn CUSTOM (không phải mặc định) — lưu riêng để nút crawl lại dựng nguồn = DEFAULT_SOURCES HIỆN TẠI + custom,
+            // KHÔNG cào lại các nguồn mặc định đã bị gỡ/comment sau này. (sources ở trên chỉ để tham khảo/lịch sử.)
+            sourcesExtra: (sourceDomains || []).filter(s => !DEFAULT_SOURCES.includes(s)),
             country: { gl: countryGl || '', hl: countryHl || '' },   // để nút crawl lại dựng lại đúng truy vấn
             days: newsDays,
             mode: onlyMissing ? 'recrawl-missing' : 'full',
@@ -1462,13 +1599,18 @@ async function runMediaOnly(postIdArg, force) {
     setLogProject(pid);                                      // crawl lại cũng ghi log vào logs/<projectId>/
 
     // Lần chạy gốc đã ghi keyword + nguồn + quốc gia vào rss/<projectId>_<stamp>.json → tái dùng cho đúng
-    let kws = [], srcs = [], topicRe = '', hl = countryHl, gl = countryGl, days = newsDays;
+    // QUAN TRỌNG: nguồn crawl lại KHÔNG lấy nguyên snapshot cũ (j.sources) — snapshot đó có thể chứa nguồn
+    // mặc định đã bị gỡ/comment sau này. Thay vào đó dựng lại ĐÚNG NHƯ LÚC TẠO: DEFAULT_SOURCES HIỆN TẠI + custom đã lưu.
+    let kws = [], savedExtra = [], topicRe = '', hl = countryHl, gl = countryGl, days = newsDays;
     try {
         const rssDir = path.join(process.cwd(), 'rss');
         const logs = fs.readdirSync(rssDir).filter(f => f.startsWith(pid + '_')).sort();
         if (logs.length) {
             const j = JSON.parse(fs.readFileSync(path.join(rssDir, logs[logs.length - 1]), 'utf8'));
-            kws = j.keywords || []; srcs = j.sources || []; topicRe = j.topic || '';
+            kws = j.keywords || []; topicRe = j.topic || '';
+            // Log MỚI có sourcesExtra (nguồn custom). Log CŨ chỉ có j.sources gộp → không tách được custom nên bỏ
+            // (ưu tiên tôn trọng việc gỡ nguồn: chỉ crawl các nguồn còn trong DEFAULT_SOURCES hiện tại).
+            savedExtra = Array.isArray(j.sourcesExtra) ? j.sourcesExtra : [];
             hl = hl || j.country?.hl || ''; gl = gl || j.country?.gl || '';
             days = j.days || days;
             console.log(`[process_content] Dùng lại từ khóa/nguồn của lần chạy gốc (${logs[logs.length - 1]})`);
@@ -1479,7 +1621,9 @@ async function runMediaOnly(postIdArg, force) {
         kws = rows.map(r => r.content).filter(Boolean).slice(0, 12);
         console.log(`[process_content] Không có log RSS gốc → dùng ${kws.length} keyword trong DB`);
     }
-    if (!srcs.length) srcs = [...DEFAULT_SOURCES];
+    // Nguồn = DEFAULT_SOURCES HIỆN TẠI (đã bỏ nguồn comment) + custom đã lưu → giống hệt logic lúc tạo dự án.
+    const srcs = [...new Set([...DEFAULT_SOURCES, ...savedExtra])];
+    console.log(`[process_content] Nguồn crawl lại: ${DEFAULT_SOURCES.length} mặc định${savedExtra.length ? ' + ' + savedExtra.length + ' custom' : ''} = ${srcs.length} (theo config hiện tại, KHÔNG dùng nguồn cũ đã gỡ)`);
     if (!kws.length) { console.error('[process_content] Không có từ khóa nào để crawl'); await db.close(); process.exit(1); }
 
     // Không force: đếm trước xem còn cảnh nào 0 asset không — không thiếu gì thì khỏi tốn 1-2 phút cào tin
@@ -1503,27 +1647,58 @@ async function runMediaOnly(postIdArg, force) {
         .end(JSON.stringify({ postTitle: post.project_id, status: 'crawling' }));
 
     console.log(`[process_content] CRAWL LẠI post ${post.id} (${pid}) — ${force ? 'TẤT CẢ cảnh' : 'chỉ cảnh còn thiếu'}`);
-    const seen = await loadNewsSeen(db, post.project_id);   // bài của CHÍNH dự án này vẫn được dùng lại
-    const bundle = await collectNews({
-        keywords: kws, sources: srcs,
-        hl: hl || 'vi', gl: gl || 'VN',
-        days, maxArticles: 30, perKeyword: 15,
-        seenIds: seen.ids, seenTitles: seen.titles, seenUrls: seen.urls,
-    });
-    await saveNewsSeen(db, bundle.articles, post.project_id);
-    await crawlMediaForPost({
-        db, postId: post.id, projectId: pid,
-        articles: bundle.articles,
-        searchKeywords: kws, sourceDomains: srcs, topic: topicRe || topic,
-        onlyMissing: !force,
-        notifyKey: post.project_id,      // SSE của dashboard khoá theo project_id trong DB (có thể có hậu tố _vi)
-    });
+
+    // NGUỒN X là nguồn media chính của geo (giống lúc tạo dự án). Crawl lại X theo từng cảnh từ keyword đã lưu.
+    await crawlXPerSceneFromDb(db, post.id, pid, { onlyMissing: !force });
+
+    // Tin RSS/Google News + stock: MẶC ĐỊNH TẮT cho geo (chỉ dùng X). Chỉ chạy khi bật GEO_CRAWL_MEDIA=on
+    // (không thì phí thời gian cào tin rồi bỏ — crawlMediaForPost cũng tự bỏ qua khi tắt).
+    if (process.env.GEO_CRAWL_MEDIA === 'on') {
+        const seen = await loadNewsSeen(db, post.project_id);   // bài của CHÍNH dự án này vẫn được dùng lại
+        const bundle = await collectNews({
+            keywords: kws, sources: srcs,
+            hl: hl || 'vi', gl: gl || 'VN',
+            days, maxArticles: 30, perKeyword: 15,
+            seenIds: seen.ids, seenTitles: seen.titles, seenUrls: seen.urls,
+        });
+        await saveNewsSeen(db, bundle.articles, post.project_id);
+        await crawlMediaForPost({
+            db, postId: post.id, projectId: pid,
+            articles: bundle.articles,
+            searchKeywords: kws, sourceDomains: srcs, topic: topicRe || topic,
+            onlyMissing: !force,
+            notifyKey: post.project_id,      // SSE của dashboard khoá theo project_id trong DB (có thể có hậu tố _vi)
+        });
+    }
 
     await db.run('UPDATE Post SET status = NULL WHERE id = ?', [post.id]);
     http.request({ hostname: 'localhost', port: PORT, path: '/api/crawl-status/notify', method: 'POST', headers: { 'Content-Type': 'application/json' } }, () => { })
         .end(JSON.stringify({ postTitle: post.project_id, status: null }));
     await db.close();
     console.log(`[process_content] ✅ Crawl lại xong post ${post.id}`);
+}
+
+// Tạo/ cập nhật trạng thái Post SỚM để dashboard hiện dự án ngay trong lúc còn viết/viết-lại kịch bản
+// (khâu LLM dài, trước đây dashboard trắng trơn khiến người dùng tưởng treo). status:
+//   'scripting'  -> đang viết kịch bản    | 'rewriting' -> chưa đủ điểm, đang viết lại
+//   'crawling'   -> đang cào media (saveToDb lo) | null -> xong
+async function setGeoPostStatus(projectId, status, { score = null } = {}) {
+    if (!projectId) return;
+    try {
+        const db = await getDb();
+        await db.run('INSERT OR IGNORE INTO Post (project_id, genre) VALUES (?, ?)', [projectId, 'geo']);
+        if (score != null && Number.isFinite(score)) {
+            await db.run('UPDATE Post SET status = ?, content_score = ? WHERE project_id = ?', [status, score, projectId]);
+        } else {
+            await db.run('UPDATE Post SET status = ? WHERE project_id = ?', [status, projectId]);
+        }
+        await db.close();
+    } catch (e) { console.warn('[process_content] set status lỗi:', e.message); }
+    // Báo dashboard (SSE) — status lạ ('scripting'/'rewriting') KHÔNG bắn Slack (chỉ null/'done' mới bắn).
+    try {
+        http.request({ hostname: 'localhost', port: PORT, path: '/api/crawl-status/notify', method: 'POST', headers: { 'Content-Type': 'application/json' } }, () => {})
+            .end(JSON.stringify({ postTitle: projectId, status }));
+    } catch (_) {}
 }
 
 try {
@@ -1596,41 +1771,63 @@ try {
     } catch (e) { console.warn('[dedup] bỏ qua lọc trùng:', e.message); }
 
     // 2) Đưa title cho AI xào kịch bản
+    // Hiện dự án lên dashboard NGAY (kèm note "đang viết kịch bản") — khâu LLM dưới đây rất dài.
+    await setGeoPostStatus(projectId, 'scripting');
     let result = await analyzeWithGPT5(topic, bundle.titles, sources);
     console.log(`[process_content] GPT-5 trả về ${result.luan_diem?.length || 0} luận điểm`);
     result._articles = bundle.articles;   // media đã cào để gán vào paragraph/section
     // Chấm điểm chất lượng nội dung (1 lần gọi GPT nữa) — không chặn nếu lỗi
     let scoreObj = await scoreContentWithGPT(result);
-    // Lịch sử đánh giá: bản đầu + (nếu có) bản viết lại, để so sánh trên dashboard.
+    // Kiểm tra cấu trúc (chống dồn 1 luận điểm / luận cứ băm nhỏ → keyword nổ).
+    let struct = analyzeStructure(result);
+    if (struct.issues.length) console.log(`[process_content] ⚠ Cấu trúc chưa đạt (${struct.numLd} luận điểm, ${struct.numLc} luận cứ): ${struct.issues.join('; ')}`);
+    // Lịch sử đánh giá: bản đầu + các bản viết lại, để so sánh trên dashboard.
     const scoreHistory = [];
-    if (scoreObj) scoreHistory.push({ stage: 'initial', score: scoreObj.score, reason: scoreObj.reason, detail: scoreObj.detail, at: new Date().toISOString(), used: true });
+    if (scoreObj) scoreHistory.push({ stage: 'initial', score: scoreObj.score, reason: scoreObj.reason, detail: scoreObj.detail, structIssues: struct.issues, at: new Date().toISOString(), used: true });
 
-    // Điểm thấp -> viết lại ĐÚNG 1 LẦN dựa trên đánh giá, chấm lại, giữ bản điểm cao hơn.
-    if (scoreObj && REWRITE_SCORE_THRESHOLD > 0 && scoreObj.score < REWRITE_SCORE_THRESHOLD) {
-        const rewritten = await rewriteContentWithGPT(result, scoreObj);
-        if (rewritten) {
-            rewritten._news = result._news;
-            rewritten._articles = bundle.articles;
-            const reScore = await scoreContentWithGPT(rewritten);
-            // Không chấm lại được -> vẫn nhận bản mới (đã sửa theo góp ý) nhưng ghi rõ là chưa chấm.
-            const better = !reScore || reScore.score >= scoreObj.score;
-            scoreHistory.push({
-                stage: 'rewrite',
-                score: reScore ? reScore.score : null,
-                reason: reScore ? reScore.reason : 'không chấm lại được',
-                detail: reScore ? reScore.detail : null,
-                at: new Date().toISOString(),
-                used: better,
-            });
-            if (better) {
-                console.log(`[process_content] ✅ Nhận bản viết lại: ${scoreObj.score} -> ${reScore ? reScore.score : '?'}/100`);
-                result = rewritten;
-                if (reScore) scoreObj = reScore;
-                scoreHistory[0].used = false;
-            } else {
-                console.log(`[process_content] ↩️  Bản viết lại kém hơn (${reScore.score} < ${scoreObj.score}) -> giữ bản gốc`);
-            }
+    // Viết lại khi: điểm dưới ngưỡng HOẶC cấu trúc thoái hóa. LẶP tới khi đạt (hoặc hết số lần).
+    // Luôn giữ bản TỐT NHẤT (ưu tiên cấu trúc đạt, rồi tới điểm cao).
+    const scoreLow = () => REWRITE_SCORE_THRESHOLD > 0 && scoreObj && scoreObj.score < REWRITE_SCORE_THRESHOLD;
+    let attempt = 0;
+    while ((scoreLow() || struct.issues.length > 0) && attempt < REWRITE_MAX_ATTEMPTS) {
+        attempt++;
+        const why = struct.issues.length ? `cấu trúc lỗi: ${struct.issues.join('; ')}` : `điểm ${scoreObj.score} < ${REWRITE_SCORE_THRESHOLD}`;
+        await setGeoPostStatus(projectId, 'rewriting', { score: scoreObj ? scoreObj.score : null });
+        console.log(`[process_content] ✍️  Viết lại lần ${attempt}/${REWRITE_MAX_ATTEMPTS} — ${why}...`);
+        const rewritten = await rewriteContentWithGPT(result, scoreObj, struct.issues);
+        if (!rewritten) { console.warn('[process_content] viết lại thất bại → dừng vòng, giữ bản tốt nhất'); break; }
+        rewritten._news = result._news;
+        rewritten._articles = bundle.articles;
+        const reScore = await scoreContentWithGPT(rewritten);
+        const reStruct = analyzeStructure(rewritten);
+        // Nhận bản mới nếu: sửa được nhiều lỗi cấu trúc hơn, HOẶC (không tệ hơn về cấu trúc VÀ điểm không giảm).
+        const structBetter = reStruct.issues.length < struct.issues.length;
+        const scoreOk = !reScore || !scoreObj || reScore.score >= scoreObj.score;
+        const better = structBetter || (reStruct.issues.length <= struct.issues.length && scoreOk);
+        scoreHistory.push({
+            stage: 'rewrite', attempt,
+            score: reScore ? reScore.score : null,
+            reason: reScore ? reScore.reason : 'không chấm lại được',
+            detail: reScore ? reScore.detail : null,
+            structIssues: reStruct.issues,
+            at: new Date().toISOString(),
+            used: better,
+        });
+        if (better) {
+            console.log(`[process_content] ✅ Nhận bản viết lại lần ${attempt}: điểm ${scoreObj ? scoreObj.score : '?'} -> ${reScore ? reScore.score : '?'}/100, cấu trúc ${struct.issues.length} -> ${reStruct.issues.length} lỗi (${reStruct.numLd} luận điểm)`);
+            for (const h of scoreHistory) h.used = false;   // bản này thắng → các bản trước không dùng
+            scoreHistory[scoreHistory.length - 1].used = true;
+            result = rewritten;
+            struct = reStruct;
+            if (reScore) scoreObj = reScore;
+            // Không chấm lại được VÀ cấu trúc đã đạt → dừng (tránh lặp mù). Nếu cấu trúc còn lỗi thì tiếp tục thử.
+            if (!reScore && !struct.issues.length) break;
+        } else {
+            console.log(`[process_content] ↩️  Bản viết lại lần ${attempt} không tốt hơn (điểm ${reScore ? reScore.score : '?'}, cấu trúc ${reStruct.issues.length} lỗi) -> giữ bản tốt nhất, thử lại`);
         }
+    }
+    if (attempt >= REWRITE_MAX_ATTEMPTS && (scoreLow() || struct.issues.length)) {
+        console.log(`[process_content] ⚠️  Hết ${REWRITE_MAX_ATTEMPTS} lần viết lại mà vẫn chưa đạt (điểm ${scoreObj ? scoreObj.score : '?'}, cấu trúc ${struct.issues.length} lỗi) → dùng bản tốt nhất.`);
     }
     // GHI TRÍ NHỚ NGAY (trước khi cào media, khâu dài nhất và hay bị pm2 restart giết):
     // trước đây chỉ ghi ở CUỐI lượt chạy nên run bị giết = quên sạch → dự án sau xào lại đúng mấy bài đó.
@@ -1641,5 +1838,23 @@ try {
     process.exit(0);
 } catch (e) {
     console.error('[process_content] LỖI:', e.message);
+    // Dọn "ghost project": nếu đã tạo Post sớm (status scripting/rewriting) nhưng CHƯA có nội dung
+    // (crash trước saveToDb) → xoá để dashboard không kẹt 1 dự án rỗng đang quay.
+    if (projectId && !mediaOnly) {
+        try {
+            const db = await getDb();
+            const post = await db.get('SELECT id FROM Post WHERE project_id = ?', [projectId]);
+            if (post) {
+                const np = await db.get('SELECT COUNT(*) AS n FROM Paragraph WHERE post_id = ?', [post.id]);
+                if (!np || !np.n) {
+                    await db.run('DELETE FROM Post WHERE id = ?', [post.id]);
+                    http.request({ hostname: 'localhost', port: PORT, path: '/api/crawl-status/notify', method: 'POST', headers: { 'Content-Type': 'application/json' } }, () => {})
+                        .end(JSON.stringify({ postTitle: projectId, status: null }));
+                    console.log('[process_content] Đã xoá ghost project rỗng:', projectId);
+                }
+            }
+            await db.close();
+        } catch (_) {}
+    }
     process.exit(1);
 }

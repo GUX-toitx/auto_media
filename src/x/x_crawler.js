@@ -85,9 +85,19 @@ function capture(profileName, url, outDir, base) {
 // Cào X -> trả về manifest [{id,url,user,date,text, images[], videos[], screenshot, recording}]
 export async function crawlX({ profileName, outDir, keywords = '', urls = '', users = '', limit = 15, max = 8, captureMax = 3, maxImages = Infinity, maxVideos = Infinity, scrapeTimeoutMs = 90000 }) {
     const accounts = collectAccounts(profileName);
-    let tweets = runScrape(accounts, { keywords, urls, users, limit, timeoutMs: scrapeTimeoutMs });
-    // ưu tiên bài có media trước, cắt còn `max`
-    tweets.sort((a, b) => (b.media?.length || 0) - (a.media?.length || 0));
+    const scrapedRaw = runScrape(accounts, { keywords, urls, users, limit, timeoutMs: scrapeTimeoutMs });
+    // Bản ghi nhẹ MỌI tweet "lướt qua" (trước khi cắt còn `max`) — để log ra cho người xem biết
+    // đã duyệt những bài nào, dù có dùng hay không. Đếm ảnh/video thay vì giữ nguyên object nặng.
+    const scraped = (scrapedRaw || []).map(t => ({
+        id: t.id, url: t.url, user: t.user, date: t.date, text: t.text || '',
+        images: (t.media || []).filter(m => m.type === 'photo').length,
+        videos: (t.media || []).filter(m => m.type === 'video').length,
+    }));
+    // GIỮ NGUYÊN THỨ TỰ XẾP HẠNG của X (tab Top = liên quan nhất) — chỉ ĐẨY tweet có media lên trước
+    // tweet không media (ổn định, không xáo trộn nội bộ). Trước đây sort theo SỐ media giảm dần khiến
+    // bài "nhiều media" (thread/tổng hợp/spam) luôn được tải trước → video tải về KHÁC hẳn kết quả tự search.
+    const hasMedia = (t) => (t.media?.length || 0) > 0;
+    let tweets = [...scrapedRaw.filter(hasMedia), ...scrapedRaw.filter(t => !hasMedia(t))];
     tweets = tweets.slice(0, max);
 
     const dirs = {
@@ -131,7 +141,7 @@ export async function crawlX({ profileName, outDir, keywords = '', urls = '', us
     }
     const manifestPath = path.join(outDir, 'x_manifest.json');
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-    return { manifest, manifestPath, count: manifest.length };
+    return { manifest, manifestPath, count: manifest.length, scraped };
 }
 
 // CLI

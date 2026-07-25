@@ -57,6 +57,9 @@ async def main():
     ap.add_argument("--urls", default="", help="url1,url2,...")
     ap.add_argument("--users", default="", help="username1,username2,... (bỏ @) — lấy tweet mới nhất của từng account")
     ap.add_argument("--limit", type=int, default=20, help="số tweet mỗi query/account")
+    # Tab tìm kiếm X: 'Top' (mặc định của web UI — LIÊN QUAN NHẤT) | 'Latest' (mới nhất, hay ra tin vặt/spam)
+    # | 'Media'/'Photos'/'Videos'. Trước đây twscrape ngầm dùng 'Latest' nên kết quả KHÁC hẳn lúc tự search trên web.
+    ap.add_argument("--product", default="Top", help="Top|Latest|Media|Photos|Videos (mặc định Top, khớp web UI)")
     ap.add_argument("--db", default="accounts.db")
     a = ap.parse_args()
 
@@ -107,9 +110,10 @@ async def main():
 
     # Search theo keyword
     if a.search.strip():
+        kv = {"product": a.product} if a.product else None
         for q in [q.strip() for q in a.search.split("|") if q.strip()]:
             try:
-                async for t in api.search(q, limit=a.limit):
+                async for t in api.search(q, limit=a.limit, kv=kv):
                     push(t)
             except Exception as e:
                 print(f"[x_scrape] search '{q}': {e}", file=sys.stderr)

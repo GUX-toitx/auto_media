@@ -44,8 +44,9 @@
                         activePostId === post.id ? '!bg-yellow-500 !text-black border-l-2 !border-yellow-400' : 'text-gray-500 hover:text-white']">
                     <div class="flex items-center justify-between">
                         <span class="truncate">📁 {{ post.project_id }}</span>
-                        <span v-if="post.status === 'crawling'" class="shrink-0 ml-1 animate-spin">⏳</span>
+                        <span v-if="statusInfo(post.status)" class="shrink-0 ml-1 animate-spin" :title="statusInfo(post.status).text">{{ statusInfo(post.status).icon }}</span>
                     </div>
+                    <div v-if="statusInfo(post.status)" class="text-[9px] font-bold mt-0.5 truncate" :class="statusInfo(post.status).cls">{{ statusInfo(post.status).text }}</div>
                 </button>
                 
                 <button @click="deleteProject(post)"
@@ -112,6 +113,7 @@
                         <button @click.stop="showMediaMenu = !showMediaMenu; showVoiceMenu = false; showCapcutMenu = false" class="bg-teal-600 hover:bg-teal-500 px-5 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎨 Media ▾<span v-if="activePost.intro_path || activePost.outro_path" class="ml-1 inline-block w-2 h-2 rounded-full bg-green-400 align-middle"></span></button>
                         <div v-show="showMediaMenu" class="absolute top-full right-0 mt-1 flex flex-col gap-1 z-50 min-w-[240px] bg-gray-900 border border-gray-700 rounded-xl p-1.5 shadow-xl">
                             <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-700 hover:bg-orange-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}</button>
+                            <button @click="openXBrowseLog" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Xem MỌI bài X đã lướt qua khi crawl (kèm link)">🐦 Log X đã lướt</button>
                             <button @click="createThumbnail" :disabled="thumbLoading" class="bg-teal-700 hover:bg-teal-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="thumbLoading" class="animate-spin inline-block mr-1">⏳</span>🖼️ Tạo Thumbnail</button>
                             <button @click="generateTitleSeo" :disabled="titleModal.loading" class="bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="titleModal.loading" class="animate-spin inline-block mr-1">⏳</span>📝 Title SEO</button>
                             <button @click="openIntroOutroModal" class="bg-teal-800 hover:bg-teal-700 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🎞️ Intro/Outro<span v-if="activePost.intro_path || activePost.outro_path" class="ml-1 inline-block w-2 h-2 rounded-full bg-green-400 align-middle"></span></button>
@@ -136,9 +138,9 @@
                         </div>
                     </div>
 
-                    <div v-if="posts.find(p => p.id === activePostId)?.status === 'crawling'" class="flex items-center gap-2 text-blue-400 ml-2 pb-2">
-                        <span class="animate-spin text-2xl">⏳</span>
-                        <span class="text-[13px] font-black uppercase tracking-widest">Crawling...</span>
+                    <div v-if="statusInfo(posts.find(p => p.id === activePostId)?.status)" class="flex items-center gap-2 ml-2 pb-2" :class="statusInfo(posts.find(p => p.id === activePostId)?.status).cls">
+                        <span class="animate-spin text-2xl">{{ statusInfo(posts.find(p => p.id === activePostId)?.status).icon }}</span>
+                        <span class="text-[13px] font-black uppercase tracking-widest">{{ statusInfo(posts.find(p => p.id === activePostId)?.status).text }}</span>
                     </div>
                 </div>
             </header>
@@ -1288,23 +1290,13 @@
                 <h3 class="text-xl font-black text-white">👄 Lips Sync</h3>
                 <button @click="lipsSyncModal.open=false" class="text-gray-500 hover:text-white text-2xl leading-none">&times;</button>
             </div>
-            <p class="text-[11px] text-gray-400 leading-relaxed">Chọn <b>1 video</b> làm khuôn mặt. Hệ thống sẽ tự lặp qua <b>từng câu</b> (mp3) của post, tạo job lips_sync và lưu kết quả vào thư mục <b>lips_sync/</b> trong dự án (kèm khi tải Voice &amp; Media).</p>
+            <p class="text-[11px] text-gray-400 leading-relaxed">Hệ thống tự lặp qua <b>từng câu</b> (mp3) của post, tạo job lips_sync và lưu vào thư mục <b>lips_sync/</b> trong dự án (kèm khi tải Voice &amp; Media).</p>
 
-            <!-- Video input -->
-            <div class="space-y-2">
-                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Video (.mp4)</label>
-                <div class="flex gap-2">
-                    <input v-model="lipsSyncModal.videoPath" type="text" placeholder="/home/gux/.../input.mp4" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 focus:outline-none focus:border-pink-500">
-                    <button @click="openFileBrowser('video')" :disabled="lipsSyncModal.uploadingVideo" class="shrink-0 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 px-3 py-2 rounded-lg font-bold text-[11px] text-gray-200">📁 Chọn</button>
-                    <label class="shrink-0 bg-indigo-700 hover:bg-indigo-600 px-3 py-2 rounded-lg font-bold text-[11px] text-white cursor-pointer" :class="{'opacity-40 pointer-events-none': lipsSyncModal.uploadingVideo}">
-                        <span v-if="lipsSyncModal.uploadingVideo" class="animate-spin inline-block mr-1">⏳</span>{{ lipsSyncModal.uploadingVideo ? (lipsSyncModal.uploadProgress || 0) + '%' : '⬆️ Upload' }}
-                        <input type="file" accept="video/mp4" class="hidden" @change="uploadLipsSyncFile('video', $event)">
-                    </label>
-                </div>
-                <div class="flex items-center gap-2 pt-1">
-                    <button @click="openLipsLib" class="text-[11px] text-pink-400 hover:text-pink-300 font-bold">🗓️ Thư viện video theo thứ →</button>
-                    <span class="text-[10px] text-gray-500">· để trống ô trên thì dự án mới tự lấy video của thứ hôm nay</span>
-                </div>
+            <!-- Video khuôn mặt: LUÔN lấy theo THỨ hôm nay (đã bỏ input .mp4 thủ công) -->
+            <div class="flex items-center gap-2 bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2">
+                <span class="text-lg">🗓️</span>
+                <span class="text-[11px] text-gray-300">Video khuôn mặt tự lấy <b>theo thứ hôm nay</b> theo thể loại dự án.</span>
+                <button @click="openLipsLib" class="ml-auto shrink-0 text-[11px] text-pink-400 hover:text-pink-300 font-bold">Quản lý theo thứ →</button>
             </div>
 
             <!-- Content type + guidance scale -->
@@ -1323,8 +1315,8 @@
             </div>
 
             <div class="flex items-center gap-2 flex-wrap">
-                <button @click="runLipsSync(false)" :disabled="lipsSyncModal.running || !lipsSyncModal.videoPath" class="bg-pink-700 hover:bg-pink-600 disabled:opacity-40 px-4 py-2.5 rounded-lg font-black text-[11px] uppercase tracking-widest text-white"><span v-if="lipsSyncModal.running" class="animate-spin inline-block mr-1">⏳</span>🚀 Chạy (câu còn thiếu)</button>
-                <button @click="runLipsSync(true)" :disabled="lipsSyncModal.running || !lipsSyncModal.videoPath" class="bg-orange-700 hover:bg-orange-600 disabled:opacity-40 px-4 py-2.5 rounded-lg font-black text-[11px] uppercase tracking-widest text-white" title="Ghi đè toàn bộ mp4">🔁 Chạy lại từ đầu</button>
+                <button @click="runLipsSync(false)" :disabled="lipsSyncModal.running" class="bg-pink-700 hover:bg-pink-600 disabled:opacity-40 px-4 py-2.5 rounded-lg font-black text-[11px] uppercase tracking-widest text-white"><span v-if="lipsSyncModal.running" class="animate-spin inline-block mr-1">⏳</span>🚀 Chạy (câu còn thiếu)</button>
+                <button @click="runLipsSync(true)" :disabled="lipsSyncModal.running" class="bg-orange-700 hover:bg-orange-600 disabled:opacity-40 px-4 py-2.5 rounded-lg font-black text-[11px] uppercase tracking-widest text-white" title="Ghi đè toàn bộ mp4">🔁 Chạy lại từ đầu</button>
                 <button @click="checkLipsSyncStatus" :disabled="!lipsSyncModal.jobs.length || lipsSyncModal.checking" class="bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-4 py-2.5 rounded-lg font-black text-[11px] uppercase tracking-widest text-white"><span v-if="lipsSyncModal.checking" class="animate-spin inline-block mr-1">⏳</span>🔄 Check status</button>
                 <button v-if="lipsSyncModal.polling || lipsSyncModal.running" @click="stopLipsSync" :disabled="lipsSyncModal.stopping" class="bg-red-700 hover:bg-red-600 disabled:opacity-40 px-4 py-2.5 rounded-lg font-black text-[11px] uppercase tracking-widest text-white" title="Dừng: huỷ các câu đang chờ (câu đang chạy sẽ xong nốt)"><span v-if="lipsSyncModal.stopping" class="animate-spin inline-block mr-1">⏳</span>⏹ Dừng</button>
                 <span v-if="lipsSyncModal.jobs.length" class="text-[12px] text-gray-400 ml-auto">✅ {{ lipsSyncDone }}/{{ lipsSyncModal.jobs.length }} xong<span v-if="lipsSyncModal.polling" class="animate-pulse ml-1 text-yellow-400">•</span></span>
@@ -1730,11 +1722,11 @@
                     </div>
                 </div>
                 <!-- Luận cứ (sentences) -->
-                <div v-for="s in sentenceModal.sentences" :key="s.id"
+                <div v-for="(s, si) in sentenceModal.sentences" :key="s.id"
                     @click="selectForSentence(s.id)"
                     class="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg p-3 cursor-pointer transition-colors">
                     <div class="flex items-start gap-2">
-                        <span class="bg-green-600 text-[9px] font-black px-1.5 py-0.5 rounded shrink-0">#{{ s.order }}</span>
+                        <span class="bg-green-600 text-[9px] font-black px-1.5 py-0.5 rounded shrink-0">#{{ sentenceModal.paraNo }}.{{ si + 1 }}</span>
                         <div class="space-y-1 flex-1">
                             <div class="text-[11px] text-gray-400">{{ s.content_vi || s.content }}</div>
                             <div class="text-[11px] text-gray-200">{{ s.content }}</div>
@@ -1944,29 +1936,38 @@
                 <button @click="scoreModal.open = false" class="text-gray-500 hover:text-white text-xl leading-none">×</button>
             </div>
 
-            <!-- Lịch sử đánh giá: bản đầu -> bản viết lại (chỉ hiện khi đã có viết lại) -->
+            <!-- Lịch sử đánh giá: bản đầu -> các bản viết lại. Bấm 1 mốc để đọc đánh giá của bản đó. -->
             <div v-if="scoreModal.history?.length > 1" class="space-y-2">
-                <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Lịch sử đánh giá</p>
+                <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Lịch sử đánh giá — bấm để xem chi tiết từng bản</p>
                 <div class="flex items-center gap-2 flex-wrap">
                     <template v-for="(h, hi) in scoreModal.history" :key="hi">
                         <span v-if="hi" class="text-gray-600 text-sm">→</span>
-                        <span class="px-2.5 py-1 rounded-lg border text-[12px] flex items-center gap-1.5"
-                            :class="h.used ? scoreClass(h.score) : 'border-gray-800 bg-gray-800/40 text-gray-500 line-through'">
-                            <span class="font-bold">{{ h.stage === 'initial' ? 'Bản đầu' : 'Viết lại' }}</span>
+                        <button type="button" @click="scoreModal.viewIndex = hi"
+                            class="px-2.5 py-1 rounded-lg border text-[12px] flex items-center gap-1.5 transition-all hover:brightness-125"
+                            :class="[h.used ? scoreClass(h.score) : 'border-gray-800 bg-gray-800/40 text-gray-500', !h.used && hi !== scoreModal.viewIndex ? 'line-through' : '', hi === scoreModal.viewIndex ? 'ring-2 ring-yellow-400' : '']">
+                            <span class="font-bold">{{ evalLabel(h) }}</span>
                             <span class="font-mono font-black">{{ h.score == null ? '—' : h.score }}</span>
                             <span v-if="h.used" class="text-[9px] uppercase opacity-70 no-underline">đang dùng</span>
-                        </span>
+                        </button>
                     </template>
                 </div>
                 <p class="text-[11px] text-gray-500 italic">
-                    Điểm dưới ngưỡng nên hệ thống đã gọi AI viết lại 1 lần; bản điểm cao hơn được giữ lại.
+                    Điểm dưới ngưỡng nên hệ thống gọi AI viết lại (tới khi đạt hoặc hết số lần); bản điểm cao nhất được giữ lại.
                 </p>
             </div>
 
+            <!-- Đầu mục cho bản đang xem (khi có >1 bản để so sánh) -->
+            <div v-if="scoreModal.history?.length > 1" class="flex items-center gap-2 flex-wrap border-t border-gray-800 pt-4">
+                <span class="px-2.5 py-1 rounded-lg font-black text-[13px] border" :class="scoreClass(shownEval.score)">{{ evalLabel(shownEval) }} · {{ shownEval.score == null ? '—' : shownEval.score }}<span class="text-[10px] opacity-60">/100</span></span>
+                <span v-if="shownEval.used" class="text-[10px] uppercase font-bold text-green-400">✓ bản đang dùng</span>
+                <span v-if="shownEval.at" class="text-[10px] text-gray-600 ml-auto">{{ (shownEval.at || '').slice(0,16).replace('T',' ') }}</span>
+                <p v-if="shownEval.reason" class="w-full text-[12px] text-gray-400 italic mt-1">{{ shownEval.reason }}</p>
+            </div>
+
             <!-- Tiêu chí -->
-            <div v-if="scoreModal.detail?.criteria?.length" class="space-y-2">
+            <div v-if="shownEval.detail?.criteria?.length" class="space-y-2">
                 <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Theo tiêu chí (mỗi tiêu chí /20)</p>
-                <div v-for="(c, ci) in scoreModal.detail.criteria" :key="ci" class="bg-gray-800/50 border border-gray-800 rounded-lg p-3 space-y-1">
+                <div v-for="(c, ci) in shownEval.detail.criteria" :key="ci" class="bg-gray-800/50 border border-gray-800 rounded-lg p-3 space-y-1">
                     <div class="flex items-center justify-between gap-2">
                         <span class="text-[12px] font-bold text-gray-200">{{ c.name }}</span>
                         <span class="text-[12px] font-mono font-black shrink-0" :class="c.score >= 16 ? 'text-green-400' : c.score >= 12 ? 'text-yellow-300' : 'text-red-400'">{{ c.score }}/20</span>
@@ -1979,21 +1980,21 @@
             </div>
 
             <div class="grid grid-cols-1 gap-3">
-                <div v-if="scoreModal.detail?.strengths?.length">
+                <div v-if="shownEval.detail?.strengths?.length">
                     <p class="text-[10px] font-black text-green-400 uppercase tracking-widest mb-1">✅ Điểm mạnh</p>
-                    <ul class="list-disc list-inside space-y-0.5 text-[12px] text-gray-300"><li v-for="(s,i) in scoreModal.detail.strengths" :key="i">{{ s }}</li></ul>
+                    <ul class="list-disc list-inside space-y-0.5 text-[12px] text-gray-300"><li v-for="(s,i) in shownEval.detail.strengths" :key="i">{{ s }}</li></ul>
                 </div>
-                <div v-if="scoreModal.detail?.weaknesses?.length">
+                <div v-if="shownEval.detail?.weaknesses?.length">
                     <p class="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">⚠️ Điểm yếu</p>
-                    <ul class="list-disc list-inside space-y-0.5 text-[12px] text-gray-300"><li v-for="(s,i) in scoreModal.detail.weaknesses" :key="i">{{ s }}</li></ul>
+                    <ul class="list-disc list-inside space-y-0.5 text-[12px] text-gray-300"><li v-for="(s,i) in shownEval.detail.weaknesses" :key="i">{{ s }}</li></ul>
                 </div>
-                <div v-if="scoreModal.detail?.suggestions?.length">
+                <div v-if="shownEval.detail?.suggestions?.length">
                     <p class="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">💡 Gợi ý cải thiện</p>
-                    <ul class="list-disc list-inside space-y-0.5 text-[12px] text-gray-300"><li v-for="(s,i) in scoreModal.detail.suggestions" :key="i">{{ s }}</li></ul>
+                    <ul class="list-disc list-inside space-y-0.5 text-[12px] text-gray-300"><li v-for="(s,i) in shownEval.detail.suggestions" :key="i">{{ s }}</li></ul>
                 </div>
             </div>
 
-            <p v-if="!scoreModal.detail || (!scoreModal.detail.criteria?.length && !scoreModal.detail.strengths?.length)" class="text-[12px] text-gray-500 italic text-center py-4">
+            <p v-if="!shownEval.detail || (!shownEval.detail.criteria?.length && !shownEval.detail.strengths?.length)" class="text-[12px] text-gray-500 italic text-center py-4">
                 Dự án này chỉ có điểm tổng, chưa có đánh giá chi tiết (tạo trước khi bật tính năng). Tạo dự án mới để có đánh giá đầy đủ.
             </p>
         </div>
@@ -2174,17 +2175,8 @@
                             <input type="checkbox" v-model="nazeModal.lipsAuto" class="accent-fuchsia-500 w-4 h-4">
                             <span class="text-[12px] font-black text-fuchsia-300">👄 Lips Sync sau khi tạo voice</span>
                         </label>
-                        <p class="text-[9px] text-gray-600 leading-relaxed">Sau khi voice target xong sẽ tự chạy lips sync từng câu với video khuôn mặt, lưu vào <span class="font-mono">lips_sync/</span>.</p>
+                        <p class="text-[9px] text-gray-600 leading-relaxed">Sau khi voice target xong sẽ tự chạy lips sync từng câu. Video khuôn mặt <b>tự lấy theo thứ hôm nay</b> (theo thể loại), lưu vào <span class="font-mono">lips_sync/</span>.</p>
                         <div v-if="nazeModal.lipsAuto" class="space-y-2 pt-1">
-                            <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Video khuôn mặt (.mp4)</label>
-                            <div class="flex gap-2">
-                                <input v-model="nazeModal.lipsVideo" type="text" placeholder="/home/gux/.../face.mp4" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-fuchsia-500">
-                                <button @click="openFileBrowser('nazeVideo')" class="shrink-0 bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded-lg font-bold text-[11px] text-gray-200">📁 Chọn</button>
-                                <label class="shrink-0 bg-indigo-700 hover:bg-indigo-600 px-3 py-2 rounded-lg font-bold text-[11px] text-white cursor-pointer" :class="{'opacity-40 pointer-events-none': nazeModal.lipsUploading}">
-                                    <span v-if="nazeModal.lipsUploading" class="animate-spin inline-block mr-1">⏳</span>{{ nazeModal.lipsUploading ? (nazeModal.lipsProgress || 0) + '%' : '⬆️ Upload' }}
-                                    <input type="file" accept="video/mp4" class="hidden" @change="uploadNazeLipsVideo($event)">
-                                </label>
-                            </div>
                             <div class="flex items-center gap-2">
                                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Guidance scale</label>
                                 <input v-model.number="nazeModal.lipsGuidance" type="number" step="0.1" min="0" placeholder="2.2" class="w-24 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-[12px] text-gray-200 outline-none focus:border-fuchsia-500">
@@ -2318,17 +2310,8 @@
                             <input type="checkbox" v-model="newProjectModal.lipsAuto" class="accent-fuchsia-500 w-4 h-4">
                             <span class="text-[12px] font-black text-fuchsia-300">👄 Lips Sync sau khi tạo voice</span>
                         </label>
-                        <p class="text-[9px] text-gray-600 leading-relaxed">Sau khi voice target của mỗi bài xong sẽ tự chạy lips sync từng câu với video khuôn mặt, lưu vào <span class="font-mono">lips_sync/</span>.</p>
+                        <p class="text-[9px] text-gray-600 leading-relaxed">Sau khi voice target của mỗi bài xong sẽ tự chạy lips sync từng câu. Video khuôn mặt <b>tự lấy theo thứ hôm nay</b> (theo thể loại), lưu vào <span class="font-mono">lips_sync/</span>.</p>
                         <div v-if="newProjectModal.lipsAuto" class="space-y-2 pt-1">
-                            <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Video khuôn mặt (.mp4)</label>
-                            <div class="flex gap-2">
-                                <input v-model="newProjectModal.lipsVideo" type="text" placeholder="/home/gux/.../face.mp4" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-fuchsia-500">
-                                <button @click="openFileBrowser('geoVideo')" class="shrink-0 bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded-lg font-bold text-[11px] text-gray-200">📁 Chọn</button>
-                                <label class="shrink-0 bg-indigo-700 hover:bg-indigo-600 px-3 py-2 rounded-lg font-bold text-[11px] text-white cursor-pointer" :class="{'opacity-40 pointer-events-none': newProjectModal.lipsUploading}">
-                                    <span v-if="newProjectModal.lipsUploading" class="animate-spin inline-block mr-1">⏳</span>{{ newProjectModal.lipsUploading ? (newProjectModal.lipsProgress || 0) + '%' : '⬆️ Upload' }}
-                                    <input type="file" accept="video/mp4" class="hidden" @change="uploadGeoLipsVideo($event)">
-                                </label>
-                            </div>
                             <div class="flex items-center gap-2">
                                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Guidance scale</label>
                                 <input v-model.number="newProjectModal.lipsGuidance" type="number" step="0.1" min="0" placeholder="2.2" class="w-24 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-[12px] text-gray-200 outline-none focus:border-fuchsia-500">
@@ -2366,14 +2349,84 @@
                     </button>
                 </div>
                 <div class="border-t border-gray-700 my-1"></div>
-                <!-- Paragraphs -->
-                <div v-for="(para, i) in (activePost?.paragraphs || [])" :key="para.id">
+                <!-- Luận điểm (pool) + luận cứ của nó -->
+                <div v-for="(para, i) in (activePost?.paragraphs || [])" :key="para.id" class="space-y-0.5">
                     <button @click="doMoveAsset(para.id, null)" class="w-full text-left px-3 py-2 rounded-lg bg-gray-800 hover:bg-blue-700 text-[11px] text-gray-300 transition-colors">
-                        🎬 Cảnh {{ i + 1 }}<span v-if="para.title_vi" class="text-gray-500 ml-1">— {{ para.title_vi.slice(0,40) }}</span>
+                        🎬 Luận điểm {{ i + 1 }} <span class="text-gray-500">(pool)</span><span v-if="para.title_vi" class="text-gray-500 ml-1">— {{ para.title_vi.slice(0,40) }}</span>
+                    </button>
+                    <button v-for="(s, si) in (para.sentences || [])" :key="s.id" @click="doMoveAsset(null, null, s.id)"
+                        class="w-full text-left pl-7 pr-3 py-1.5 rounded-lg bg-gray-800/50 hover:bg-blue-700 text-[10px] text-gray-400 transition-colors">
+                        ↳ Luận cứ {{ i + 1 }}.{{ si + 1 }}<span v-if="s.title_vi || s.content_vi" class="text-gray-600 ml-1">— {{ (s.title_vi || s.content_vi).slice(0,38) }}</span>
                     </button>
                 </div>
             </div>
             <button @click="moveModal.open = false" class="w-full py-2 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
+        </div>
+    </div>
+
+    <!-- 🐦 LOG X ĐÃ LƯỚT -->
+    <div v-if="xBrowseModal.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50" @click.self="xBrowseModal.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl w-[820px] max-w-[95vw] max-h-[88vh] flex flex-col">
+            <div class="flex justify-between items-center p-4 border-b border-gray-800">
+                <div>
+                    <h3 class="text-sm font-black text-white">🐦 Log X đã lướt — {{ activePost?.project_id }}</h3>
+                    <p class="text-[10px] text-gray-500 mt-0.5">
+                        Mọi bài twscrape trả về khi crawl X theo từng cảnh.
+                        <span class="text-green-400">Xanh = đã lấy media vào dự án</span>. Bấm link để mở tweet.
+                    </p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button @click="loadXBrowseLog" :disabled="xBrowseModal.loading" class="bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg text-white"><span v-if="xBrowseModal.loading" class="animate-spin inline-block mr-1">⏳</span>🔄 Tải lại</button>
+                    <button @click="xBrowseModal.open = false" class="text-gray-500 hover:text-white text-2xl leading-none">×</button>
+                </div>
+            </div>
+
+            <div class="px-4 py-2 border-b border-gray-800 flex items-center gap-4 text-[11px] text-gray-400">
+                <span>📋 {{ xBrowseModal.entries.length }} cảnh</span>
+                <span>🐦 {{ xBrowseTotal.tweets }} bài đã lướt</span>
+                <span class="text-green-400">✅ {{ xBrowseTotal.used }} bài dùng được</span>
+                <label class="ml-auto flex items-center gap-1.5 cursor-pointer select-none">
+                    <input type="checkbox" v-model="xBrowseModal.onlyUnused" class="accent-slate-500">
+                    <span>Chỉ hiện bài KHÔNG dùng</span>
+                </label>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-4 space-y-4">
+                <div v-if="!xBrowseModal.entries.length" class="text-center text-gray-500 text-sm py-12">
+                    Chưa có log. Log được ghi khi crawl X theo cảnh (dự án geo). Thử bấm 🔄 Tải lại sau khi crawl.
+                </div>
+                <div v-for="(en, ei) in xBrowseModal.entries" :key="ei" class="border border-gray-800 rounded-xl overflow-hidden">
+                    <div class="bg-gray-800/60 px-3 py-2 flex flex-wrap items-center gap-2">
+                        <span class="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded"
+                              :class="en.kind === 'para' ? 'bg-indigo-700 text-white' : 'bg-purple-800 text-white'">
+                            {{ en.kind === 'para' ? 'Luận điểm' : (en.kind === 'sent' ? 'Luận cứ' : en.kind || 'Cảnh') }}
+                        </span>
+                        <span class="text-[11px] text-gray-400 font-mono">{{ en.scene }}</span>
+                        <span v-for="kw in en.keywords" :key="kw" class="text-[10px] bg-gray-700 text-yellow-300 px-2 py-0.5 rounded">🔍 {{ kw }}</span>
+                        <span class="ml-auto text-[10px] text-gray-500">{{ visibleTweets(en).length }}/{{ en.tweets.length }} bài</span>
+                    </div>
+                    <div v-if="!visibleTweets(en).length" class="px-3 py-3 text-[11px] text-gray-600 italic">
+                        {{ en.tweets.length ? 'Không có bài nào khớp bộ lọc.' : 'Không lướt được bài nào (dính rate-limit hoặc keyword không ra kết quả).' }}
+                    </div>
+                    <ul v-else class="divide-y divide-gray-800">
+                        <li v-for="(t, ti) in visibleTweets(en)" :key="ti" class="px-3 py-2 flex items-start gap-2"
+                            :class="t.used ? 'bg-green-900/20' : ''">
+                            <span class="mt-0.5 text-[13px]" :title="t.used ? 'Đã lấy media vào dự án' : 'Không lấy media'">{{ t.used ? '✅' : '➖' }}</span>
+                            <div class="min-w-0 flex-1">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <a :href="t.url" target="_blank" rel="noopener" class="text-[12px] font-bold text-sky-400 hover:text-sky-300 truncate">@{{ t.user || '?' }}</a>
+                                    <span v-if="t.images" class="text-[10px] text-gray-400">🖼️ {{ t.images }}</span>
+                                    <span v-if="t.videos" class="text-[10px] text-gray-400">🎬 {{ t.videos }}</span>
+                                    <span v-if="!t.images && !t.videos" class="text-[10px] text-gray-600">— không media</span>
+                                    <span class="text-[10px] text-gray-600 ml-auto">{{ (t.date || '').slice(0, 16).replace('T', ' ') }}</span>
+                                </div>
+                                <p v-if="t.text" class="text-[11px] text-gray-400 mt-0.5 line-clamp-2">{{ t.text }}</p>
+                                <a :href="t.url" target="_blank" rel="noopener" class="text-[10px] text-gray-600 hover:text-gray-400 break-all">{{ t.url }}</a>
+                            </div>
+                        </li>
+                    </ul>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -2666,7 +2719,7 @@ createApp({
         const editModal = ref({ open: false, type: '', asset: null, start: 0, end: 0, duration: 0, cropX: 0, cropY: 0, cropW: 200, cropH: 200, cropReady: false, saving: false });
         const uploadModal = ref({ open: false, type: '', para: null, files: [], dragging: false, uploading: false, url: '', downloading: false });
         const aiModal = ref({ open: false, type: '', para: null, gid: '', count: 2, content: '', keywords: [], prompt: '', ratio: '16:9', videoMode: 'Frames', veo: 'Fast' });
-        const sentenceModal = ref({ open: false, asset: null, para: null, type: '', sentences: [] });
+        const sentenceModal = ref({ open: false, asset: null, para: null, type: '', sentences: [], paraNo: 0 });
         const previewModal = ref({ open: false, type: '', asset: null, para: null });
         const confirmModal = ref({ open: false, message: '', type: null, id: null, busy: false });
         const page = ref('posts');
@@ -2789,15 +2842,29 @@ createApp({
         }
 
         const pageChooser = ref({ open: false });
-        const scoreModal = ref({ open: false, score: 0, reason: '', detail: null, history: [] });
+        const scoreModal = ref({ open: false, score: 0, reason: '', detail: null, history: [], viewIndex: 0 });
         function openScoreDetail() {
             const p = activePost.value;
             if (!p || p.content_score == null) return;
             let detail = null, history = [];
             try { detail = p.content_score_detail ? JSON.parse(p.content_score_detail) : null; } catch (_) { detail = null; }
             try { history = p.content_score_history ? JSON.parse(p.content_score_history) : []; } catch (_) { history = []; }
-            scoreModal.value = { open: true, score: p.content_score, reason: p.content_score_reason || '', detail, history };
+            // Mặc định xem bản ĐANG DÙNG (used); không có thì xem bản cuối.
+            let viewIndex = history.findIndex(h => h.used);
+            if (viewIndex < 0) viewIndex = Math.max(0, history.length - 1);
+            scoreModal.value = { open: true, score: p.content_score, reason: p.content_score_reason || '', detail, history, viewIndex };
         }
+        // Đánh giá ĐANG XEM (theo mốc lịch sử đã chọn); rơi về điểm tổng nếu dự án cũ không có history.
+        const shownEval = computed(() => {
+            const h = scoreModal.value.history || [];
+            if (h.length) {
+                const e = h[scoreModal.value.viewIndex] || h[h.length - 1] || {};
+                return { score: e.score, reason: e.reason, detail: e.detail, stage: e.stage, attempt: e.attempt, at: e.at, used: e.used };
+            }
+            return { score: scoreModal.value.score, reason: scoreModal.value.reason, detail: scoreModal.value.detail };
+        });
+        // Nhãn 1 mốc lịch sử: "Bản đầu" | "Viết lại #n".
+        const evalLabel = (h) => h?.stage === 'initial' ? 'Bản đầu' : ('Viết lại' + (h?.attempt ? ' #' + h.attempt : ''));
 
         function openGenre(genre) {
             genreChooser.value.open = false;
@@ -3111,6 +3178,14 @@ createApp({
             setTimeout(() => toast.value = '', ms);
         }
 
+        // Nhãn trạng thái dự án đang xử lý (hiện ngay để người dùng biết vì sao "lâu", không tưởng treo).
+        function statusInfo(s) {
+            if (s === 'scripting') return { icon: '📝', text: 'Đang viết kịch bản...', cls: 'text-amber-400' };
+            if (s === 'rewriting') return { icon: '✍️', text: 'Chưa đủ điểm, đang viết lại...', cls: 'text-orange-400' };
+            if (s === 'crawling')  return { icon: '⏳', text: 'Đang cào media...', cls: 'text-blue-400' };
+            return null;
+        }
+
         async function loadPosts() {
             const res = await fetch('/api/posts');
             posts.value = await res.json();
@@ -3400,6 +3475,35 @@ createApp({
             moveModal.value = { open: true, asset, type };
         }
 
+        // ===== 🐦 Log X đã lướt (mọi tweet crawl duyệt qua từng cảnh) =====
+        const xBrowseModal = ref({ open: false, loading: false, entries: [], onlyUnused: false });
+        const xBrowseTotal = computed(() => {
+            let tweets = 0, used = 0;
+            for (const en of xBrowseModal.value.entries) for (const t of (en.tweets || [])) { tweets++; if (t.used) used++; }
+            return { tweets, used };
+        });
+        function visibleTweets(en) {
+            const list = en.tweets || [];
+            return xBrowseModal.value.onlyUnused ? list.filter(t => !t.used) : list;
+        }
+        async function loadXBrowseLog() {
+            const pid = activePost.value?.project_id;
+            if (!pid) return;
+            xBrowseModal.value.loading = true;
+            try {
+                const res = await fetch('/api/x-browse-log/' + encodeURIComponent(pid));
+                const r = await res.json();
+                xBrowseModal.value.entries = Array.isArray(r.entries) ? r.entries : [];
+            } catch (e) { showToast('❌ ' + e.message); }
+            xBrowseModal.value.loading = false;
+        }
+        async function openXBrowseLog() {
+            if (!activePost.value) return showToast('⚠️ Chọn 1 dự án trước');
+            showMediaMenu.value = false;
+            xBrowseModal.value.open = true;
+            await loadXBrowseLog();
+        }
+
         // ===== Title SEO — lưu DB + hiển thị 2 cột collapsible =====
         const titleModal = ref({ open: false, loading: false, result: '' });
         const seoTitleOpen = ref(false);
@@ -3444,13 +3548,15 @@ createApp({
             } catch (err) { showToast('❌ ' + err.message); }
         }
 
-        async function doMoveAsset(targetParagraphId, targetSection) {
-            const { asset, type } = moveModal.value;
+        async function doMoveAsset(targetParagraphId, targetSection, targetSentenceId = null) {
+            const { asset } = moveModal.value;
             moveModal.value.open = false;
             const body = { assetId: asset.id };
             if (targetSection) {
                 body.targetPostId = activePostId.value;
                 body.targetSection = targetSection;
+            } else if (targetSentenceId) {
+                body.targetSentenceId = targetSentenceId;
             } else {
                 body.targetParagraphId = targetParagraphId;
             }
@@ -3764,7 +3870,9 @@ createApp({
 
             const sentences = para.sentences || [];
             if (sentences.length > 0) {
-                sentenceModal.value = { open: true, asset, para, type, sentences };
+                // Số luận điểm (1-based) để hiển thị đúng "x.y" trong modal, thay vì order toàn cục (vd #10).
+                const paraNo = (activePost.value?.paragraphs || []).findIndex(p => p.id === para.id) + 1;
+                sentenceModal.value = { open: true, asset, para, type, sentences, paraNo };
             } else {
                 await doSelect(asset, para, null);
             }
@@ -4051,7 +4159,23 @@ createApp({
             editModal.value.duration_val = Math.round(e.target.duration * 10) / 10;
         }
 
-        function onVideoTimeUpdate(e) { editModal.value.currentTime = e.target.currentTime; }
+        function onVideoTimeUpdate(e) {
+            const v = e.target;
+            editModal.value.currentTime = v.currentTime;
+            // Xem trước đoạn đã trim: chạy tới điểm cuối thì quay lại điểm đầu (lặp trong [start, end]).
+            const m = editModal.value;
+            if (m.type === 'video' && m.end > m.start && m.end < m.duration - 0.02 && v.currentTime >= m.end) {
+                v.currentTime = m.start;
+            }
+        }
+
+        // Xem trước: nhảy về điểm đầu và chạy (dùng sau khi chọn xong điểm đầu/điểm cuối).
+        function playTrimFromStart() {
+            const v = editVideoRef.value;
+            if (!v) return;
+            v.currentTime = editModal.value.start;
+            v.play().catch(() => {});
+        }
 
         function getTimeFromEvent(ev) {
             const el = timelineRef.value;
@@ -4075,12 +4199,14 @@ createApp({
                     if (editVideoRef.value) editVideoRef.value.currentTime = editModal.value.start;
                 } else {
                     editModal.value.end = Math.max(t, editModal.value.start + 0.1);
+                    if (editVideoRef.value) editVideoRef.value.currentTime = editModal.value.end;   // kéo điểm cuối: xem frame chỗ cắt
                 }
                 editModal.value.duration_val = Math.round((editModal.value.end - editModal.value.start) * 10) / 10;
             };
             const up = () => {
                 document.removeEventListener('pointermove', move);
                 document.removeEventListener('pointerup', up);
+                playTrimFromStart();   // chọn xong điểm đầu/điểm cuối → chạy lại từ điểm đầu
             };
             document.addEventListener('pointermove', move);
             document.addEventListener('pointerup', up);
@@ -4099,6 +4225,7 @@ createApp({
                 if (editVideoRef.value) editVideoRef.value.currentTime = editModal.value.start;
             } else {
                 editModal.value.end = Math.min(editModal.value.duration, Math.max(t, editModal.value.start + 0.1));
+                if (editVideoRef.value) editVideoRef.value.currentTime = editModal.value.end;   // kéo điểm cuối: xem frame chỗ cắt
             }
             editModal.value.duration_val = Math.round((editModal.value.end - editModal.value.start) * 10) / 10;
             // Start dragging
@@ -4109,12 +4236,14 @@ createApp({
                     if (editVideoRef.value) editVideoRef.value.currentTime = editModal.value.start;
                 } else {
                     editModal.value.end = Math.min(editModal.value.duration, Math.max(mt, editModal.value.start + 0.1));
+                    if (editVideoRef.value) editVideoRef.value.currentTime = editModal.value.end;   // kéo điểm cuối: xem frame chỗ cắt
                 }
                 editModal.value.duration_val = Math.round((editModal.value.end - editModal.value.start) * 10) / 10;
             };
             const up = () => {
                 document.removeEventListener('pointermove', move);
                 document.removeEventListener('pointerup', up);
+                playTrimFromStart();   // chọn xong điểm đầu/điểm cuối → chạy lại từ điểm đầu
             };
             document.addEventListener('pointermove', move);
             document.addEventListener('pointerup', up);
@@ -4964,8 +5093,8 @@ createApp({
             if (post) {
                 post.status = status;
                 if (!status && activePostId.value === post.id) hasNewAssets.value = true; // crawl xong: bấm Refresh để thấy
-            } else if (status === 'crawling') {
-                // Chỉ reload khi dự án MỚI bắt đầu crawl mà chưa có trong danh sách (vừa tạo).
+            } else if (status) {
+                // Dự án MỚI vừa xuất hiện (bắt đầu viết kịch bản / viết lại / cào) mà chưa có trong danh sách → nạp lại.
                 loadPosts();
             }
         };
@@ -5072,15 +5201,16 @@ createApp({
         }
         async function runLipsSync(force = false) {
             const m = lipsSyncModal.value;
-            if (!m.videoPath || !activePostId.value) return;
+            if (!activePostId.value) return;
             if (force && !confirm('Chạy lại lips sync từ đầu cho TẤT CẢ câu (ghi đè mp4 cũ)?')) return;
             stopLipsSyncPoll();
             m.running = true; m.jobs = []; m.previewPath = '';
             try {
+                // Video khuôn mặt lấy theo THỨ ở server (không gửi videoPath thủ công nữa).
                 const res = await fetch('/api/lips-sync/run-post', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ postId: activePostId.value, videoPath: m.videoPath.trim(), contentType: m.contentType, guidanceScale: m.guidanceScale, force }),
+                    body: JSON.stringify({ postId: activePostId.value, contentType: m.contentType, guidanceScale: m.guidanceScale, force }),
                 });
                 const r = await res.json();
                 if (!res.ok || r.error) { showToast('❌ ' + (r.error || 'Lỗi chạy lips sync')); return; }
@@ -5172,19 +5302,20 @@ createApp({
         }
         // Nạp map lips_sync (audioUrl -> video) để hiển thị trong từng câu (nút 👄 trên audio-bar)
         async function loadLipsSyncIndex(postId) {
-            lipsSyncIndex.value = {};
-            if (!postId) return;
+            if (!postId) { lipsSyncIndex.value = {}; return; }
             try {
                 const res = await fetch('/api/lips-sync/saved/' + postId);
                 const r = await res.json();
-                if (!res.ok || !r.jobs) return;
+                if (!res.ok || !r.jobs) { lipsSyncIndex.value = {}; return; }
                 const map = {};
                 for (const j of r.jobs) {
                     if (!j.audio) continue;
                     map[j.audio] = { status: j.status, idx: j.index, url: j.outputPath ? '/api/lips-sync/preview?path=' + encodeURIComponent(j.outputPath) : '' };
                 }
+                // Gán 1 LẦN (atomic). KHÔNG reset về {} trước fetch: nếu không, mỗi lần poll (4s) lips=null giây lát
+                // → nút 👄 biến mất → thanh waveform giãn/đo lại → canvas xóa trắng = "nháy". Giờ swap thẳng old→new.
                 lipsSyncIndex.value = map;
-            } catch (_) { }
+            } catch (_) { /* lỗi mạng: giữ nguyên index cũ, tránh nháy audio-bar */ }
         }
 
         // ===== FILE BROWSER (chọn file trên server) =====
@@ -5281,6 +5412,12 @@ createApp({
             doMoveAsset,
             xCrawlLoading,
             addXKeyword,
+            xBrowseModal,
+            xBrowseTotal,
+            visibleTweets,
+            openXBrowseLog,
+            loadXBrowseLog,
+            statusInfo,
             titleModal,
             generateTitleSeo,
             copyTitleResult,
@@ -5380,7 +5517,7 @@ createApp({
             genreChooser,
             pageChooser,
             geoSheet, openGeoSheet, loadGeoSheet, runGeoRow,
-            scoreModal, openScoreDetail,
+            scoreModal, openScoreDetail, shownEval, evalLabel,
             openGenre,
             submitNaze,
             uploadNazeLipsVideo,

@@ -37,11 +37,16 @@ export function assertAiKey() {
     if (!apiKey()) throw new Error(`Thiếu API key cho AI_PROVIDER=${aiProviderName()} — đặt ${isDeepSeek() ? 'DEEPSEEK_KEY' : 'OPENAI_KEY'} trong .env`);
 }
 
+// Lone surrogate (nửa cặp UTF-16) do nội dung cào web/tweet có emoji, hoặc do .slice() cắt trúng
+// giữa cặp emoji. JSON.stringify vẫn xuất ra dạng \uD83D đơn lẻ → parser strict của OpenAI từ chối
+// với lỗi 400 "failed to parse JSON value" → mất cả kịch bản. Loại bỏ, GIỮ NGUYÊN cặp emoji hợp lệ.
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
 // POST JSON thuần (giữ nguyên hành vi httpsPost cũ: trả { status, body })
 export function httpsPostJson(url, headers, body) {
     return new Promise((resolve, reject) => {
         const urlObj = new URL(url);
-        const data = JSON.stringify(body);
+        const data = JSON.stringify(body, (_k, v) => typeof v === 'string' ? v.replace(LONE_SURROGATE, '') : v);
         const req = https.request({
             hostname: urlObj.hostname,
             path: urlObj.pathname + (urlObj.search || ''),

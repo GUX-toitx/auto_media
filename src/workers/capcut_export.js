@@ -36,22 +36,100 @@ function getMediaDuration(filePath) {
     } catch { return 5_000_000; }
 }
 
+// Độ dài STREAM VIDEO thật (miệng), KHÔNG phải container (mp4 lips còn muxed audio thừa → container dài hơn).
+function getVideoStreamDuration(filePath) {
+    try {
+        const out = execSync(`ffprobe -v error -select_streams v:0 -show_entries stream=duration -of csv=p=0 "${filePath}"`, { encoding: 'utf8' });
+        const d = parseFloat(out.trim());
+        return d > 0 ? Math.round(d * 1_000_000) : 0;
+    } catch { return 0; }
+}
+
+// Chuẩn hoá clip lips về ĐÚNG độ dài slot của voice:
+//   - miệng chạy 1x (model sinh frame @25fps ↔ mốc thời gian audio → khớp tuyệt đối, KHÔNG kéo giãn)
+//   - phần đuôi (audio còn lại, thường là im lặng model không sinh frame) → GIỮ KHUNG CUỐI (freeze)
+//   - BỎ audio thừa trong mp4 (đằng nào CapCut cũng mute) → container.duration = video.duration = slot
+// Nhờ vậy source_timerange == target_timerange == slot, speed thật 1.0 → hết drift, mặt luôn hiện.
+// Trả về true nếu chuẩn hoá thành công; false → đã copy nguyên bản (giữ hành vi cũ).
+function normalizeLipsClip(srcPath, destPath, slotUs) {
+    const vdurUs = getVideoStreamDuration(srcPath) || slotUs;
+    // Freeze khung cuối cho phần đuôi + đệm 0.12s để clip LUÔN ≥ slot (CapCut cắt về đúng slot ở source_timerange
+    // = target_timerange = slot → speed thật 1.0, hết kéo giãn). Không dùng -t để tránh clip ngắn hơn slot 1 frame.
+    const pad = Math.max(0, (slotUs - vdurUs) / 1_000_000) + 0.12;
+    const vf = `-vf "tpad=stop_mode=clone:stop_duration=${pad.toFixed(3)}"`;
+    try {
+        execSync(
+            `ffmpeg -y -v error -i "${srcPath}" -an ${vf} -r 25 -c:v libx264 -preset veryfast -pix_fmt yuv420p "${destPath}"`,
+            { timeout: 60000 }
+        );
+        if (fs.existsSync(destPath) && fs.statSync(destPath).size > 20000) return true;
+    } catch (e) { console.warn(`[CapCut] normalize lips lỗi (${path.basename(srcPath)}): ${e.message}`); }
+    try { fs.copyFileSync(srcPath, destPath); } catch (_) {}
+    return false;
+}
+
+// Freeze-pad 1 video b-roll (IN-PLACE) thành clip dài ≥ targetUs:
+//   - phát ĐÚNG contentUs giây nội dung thật (= độ dài đã trim, KHÔNG phát trọn file → tránh "video thừa giây")
+//   - rồi GIỮ KHUNG CUỐI lấp phần còn lại tới targetUs (tránh CapCut kéo giãn / đen / thiếu hình)
+// contentUs đã được caller kẹp = min(trim, độ dài file) nên `-t` chỉ đọc đúng phần cần. Giữ audio (đuôi im lặng).
+function freezePadClip(destPath, contentUs, targetUs) {
+    if (targetUs <= contentUs + 1000) return false;                    // không cần freeze
+    const contentSec = (contentUs / 1_000_000).toFixed(3);
+    const pad = ((targetUs - contentUs) / 1_000_000 + 0.12).toFixed(3); // đệm để LUÔN ≥ target
+    let hasAudio = false;
+    try { hasAudio = execSync(`ffprobe -v error -select_streams a -show_entries stream=codec_type -of csv=p=0 "${destPath}"`, { encoding: 'utf8' }).trim().length > 0; } catch (_) {}
+    const tmp = destPath.replace(/(\.[^.]+)$/, '_fz$1');
+    const cmd = hasAudio
+        ? `ffmpeg -y -v error -t ${contentSec} -i "${destPath}" -vf "tpad=stop_mode=clone:stop_duration=${pad}" -af "apad=pad_dur=${pad}" -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac "${tmp}"`
+        : `ffmpeg -y -v error -t ${contentSec} -i "${destPath}" -an -vf "tpad=stop_mode=clone:stop_duration=${pad}" -c:v libx264 -preset veryfast -pix_fmt yuv420p "${tmp}"`;
+    try {
+        execSync(cmd, { timeout: 120000 });
+        if (fs.existsSync(tmp) && fs.statSync(tmp).size > 10000) { fs.renameSync(tmp, destPath); return true; }
+    } catch (e) { console.warn(`[CapCut] freeze-pad b-roll lỗi (${path.basename(destPath)}): ${e.message}`); }
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_) {}
+    return false;
+}
+
 function getMediaInfo(filePath) {
     try {
         const out = execSync(`ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "${filePath}"`, { encoding: 'utf8' });
-        const [w, h] = out.trim().split(',').map(Number);
-        return { width: w || 1920, height: h || 1080 };
+        let [w, h] = out.trim().split(',').map(Number);
+        w = w || 1920; h = h || 1080;
+        // Video quay ngang + cờ XOAY 90/270 (điện thoại quay dọc) → kích thước HIỂN THỊ đảo w/h.
+        // Không xử lý thì tỉ lệ tính sai → CapCut ánh xạ khung sai → MÉO. (Video thường: rotation rỗng → bỏ qua.)
+        try {
+            const r = execSync(`ffprobe -v error -select_streams v:0 -show_entries stream_side_data=rotation:stream_tags=rotate -of default=nw=1:nk=1 "${filePath}"`, { encoding: 'utf8' }).trim();
+            const rot = r.split(/\s+/).map(x => parseInt(x, 10)).find(x => !isNaN(x));
+            if (rot !== undefined && (Math.abs(rot) % 180) === 90) { const t = w; w = h; h = t; }
+        } catch (_) {}
+        return { width: w, height: h };
     } catch { return { width: 1920, height: 1080 }; }
 }
 
 const WIN_DRAFT_ROOT = 'C:/Users/trinh/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft';
 
 // ===== Vị trí clip Lips Sync trên khung hình (khớp panel "Biến đổi" của CapCut) =====
-// Tỷ lệ = %, Vị trí X/Y = pixel so với tâm canvas 1920x1080 (X dương = sang phải, Y dương = lên trên).
-// draft_content lưu transform theo NỬA canvas → x = X/960, y = Y/540.
-const LIPS_SCALE = Number(process.env.LIPS_CLIP_SCALE ?? 0.65);   // 65%
-const LIPS_POS_X = Number(process.env.LIPS_CLIP_X ?? 1050);       // px
-const LIPS_POS_Y = Number(process.env.LIPS_CLIP_Y ?? -378);       // px
+// Tỷ lệ = %, tọa độ CapCut theo NỬA canvas: X dương = sang phải, Y dương = lên trên → x = X/960, y = Y/540.
+// LUÔN NEO GÓC DƯỚI-PHẢI: tính tâm clip theo kích thước hiển thị THỰC của từng clip (phụ thuộc tỉ lệ),
+// nên mọi video lips đều nằm đúng góc dưới-phải như nhau (không còn lệch mỗi video mỗi khác).
+const LIPS_SCALE = Number(process.env.LIPS_CLIP_SCALE ?? 0.65);       // 65%
+const LIPS_MARGIN_X = Number(process.env.LIPS_CLIP_MARGIN_X ?? 0);    // px cách MÉP PHẢI (0 = sát mép)
+const LIPS_MARGIN_Y = Number(process.env.LIPS_CLIP_MARGIN_Y ?? 0);    // px cách MÉP DƯỚI (0 = sát mép)
+
+// Tính transform (tâm clip, chuẩn CapCut nửa-canvas) để neo góc DƯỚI-PHẢI cho clip lips.
+// CapCut scale=1.0 = fit CONTAIN vào canvas → kích thước hiển thị phụ thuộc tỉ lệ clip.
+function lipsBottomRightTransform(w, h, scale) {
+    const CANVAS_W = 1920, CANVAS_H = 1080;
+    const arCanvas = CANVAS_W / CANVAS_H;
+    const arMat = (w > 0 && h > 0) ? w / h : arCanvas;
+    let dispW, dispH;
+    if (arMat >= arCanvas) { dispW = CANVAS_W; dispH = CANVAS_W / arMat; }   // clip rộng → chạm bề ngang
+    else { dispH = CANVAS_H; dispW = CANVAS_H * arMat; }                     // clip cao → chạm bề dọc
+    dispW *= scale; dispH *= scale;
+    const centerX = (CANVAS_W / 2 - LIPS_MARGIN_X) - dispW / 2;   // cạnh phải sát mép phải
+    const centerY = (-CANVAS_H / 2 + LIPS_MARGIN_Y) + dispH / 2;  // cạnh dưới sát mép dưới (Y dương = lên)
+    return { x: centerX / (CANVAS_W / 2), y: centerY / (CANVAS_H / 2) };
+}
 
 // Build video material dựa trên template thật
 function buildVideoMaterial(matId, assetLocalPath, duration, name, isVideo, draftId) {
@@ -151,10 +229,15 @@ function buildVideoSegment(matId, startTime, slotDur, srcDur, presetIndex, matWi
     const arMat = w / h;
     const fillScale = Math.max(arCanvas / arMat, arMat / arCanvas);
 
+    // Video DỌC (9:16, 3:4... chiều cao > chiều rộng) → CONTAIN (scale 1.0): GIỮ NGUYÊN khung, hiện trọn khung,
+    // không cover-crop thành dải ngang, không méo → user tự reframe trong CapCut. Video NGANG/ảnh → COVER (fillScale).
+    const isPortraitVideo = isVideo && h > w;
+    const baseScale = isPortraitVideo ? 1.0 : fillScale;
+
     // Video: đứng yên (chỉ cover, không Ken Burns). Ảnh tĩnh: áp Ken Burns (zoom/pan nhẹ).
     const p = KB_PRESETS[presetIndex % KB_PRESETS.length];
-    const s0 = isVideo ? fillScale : fillScale * p.s0;
-    const s1 = isVideo ? fillScale : fillScale * p.s1;
+    const s0 = isVideo ? baseScale : baseScale * p.s0;
+    const s1 = isVideo ? baseScale : baseScale * p.s1;
     const tx0 = isVideo ? 0.0 : p.x0;
 
     const kbPresets = isVideo ? [] : buildKenBurnsKeyframes(slotDur, presetIndex, s0, s1);
@@ -375,7 +458,10 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
             try { if (fs.existsSync(use) && fs.statSync(use).size > 20000) lipsByIdx[r.idx] = use; } catch (_) {}
         }
     } catch (_) {}
-    const silenceUs = Math.max(0, Math.round((Number(post.silence_duration) || 0) * 1_000_000));
+    // KHÔNG chèn khoảng nghỉ giữa câu trong timeline CapCut: mỗi mp3 voice đã có sẵn đuôi im lặng riêng,
+    // và độ dài "narration" hiển thị trên giao diện = TỔNG audio thuần (không cộng silence). Cộng thêm silence
+    // ở đây làm timeline CapCut dài hơn số trên UI → video user trim theo UI bị THIẾU. Đặt 0 để CapCut == UI.
+    const silenceUs = 0;
     const lipsSegments = [];
 
     const af = primaryUseVi ? 'content_vi_audio' : 'content_audio';
@@ -383,15 +469,16 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     const tf = primaryUseVi ? 'title_vi_audio' : 'title_audio';
     const tfAlt = primaryUseVi ? 'title_audio' : 'title_vi_audio';
 
-    // Tải 1 audio unit về assets, trả { matId, durUs }
-    const fetchUnitAudio = (url) => {
+    // Tải 1 audio unit về assets, trả { matId, durUs }. nameBase → tên file (khớp tên với clip lips cùng câu).
+    const fetchUnitAudio = (url, nameBase) => {
         if (!url) return null;
         try {
             const base = process.env.BUNNYCDN_BASE_URL || '', key = process.env.BUNNYCDN_ACCESS_KEY || '';
             const full = url.startsWith('http') ? url : `${base}/${url}`;
-            const fn = `audio_${fileIndex++}.mp3`;
+            const fn = `${nameBase || ('audio_' + (fileIndex++))}.mp3`;
             const dest = path.join(assetsDir, fn);
-            execSync(`curl -sL -H "AccessKey: ${key}" "${full}" -o "${dest}"`, { timeout: 15000 });
+            // Retry: mạng chập chờn tới CDN mà tải hụt 1 câu → slot rơi về mặc định → timeline bị nén → lips LỆCH DẦN.
+            execSync(`curl -sL --retry 4 --retry-delay 1 --retry-all-errors --max-time 45 -H "AccessKey: ${key}" "${full}" -o "${dest}"`, { timeout: 60000 });
             if (!(fs.existsSync(dest) && fs.statSync(dest).size > 1000)) return null;
             const durUs = getMediaDuration(dest);
             const matId = uuid();
@@ -400,11 +487,13 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
         } catch (e) { console.error('[CapCut] audio unit lỗi:', e.message); return null; }
     };
     // Đặt clip lips tại start, slot = slotDur (khớp audio; lips ngắn hơn → đứng hình, dài hơn → cắt). Mute.
-    const placeLips = (lipsPath, start, slotDur) => {
+    const placeLips = (lipsPath, start, slotDur, nameBase) => {
         if (!lipsPath || !fs.existsSync(lipsPath)) return;
-        const fn = `lips_${fileIndex++}.mp4`;
+        const fn = `${nameBase || ('lips_' + (fileIndex++))}.mp4`;
         const dest = path.join(assetsDir, fn);
-        try { fs.copyFileSync(lipsPath, dest); } catch (_) { return; }
+        // Chuẩn hoá về đúng slot voice (1x + freeze đuôi + bỏ audio thừa) → hết lệch dần.
+        if (!fs.existsSync(dest)) { try { normalizeLipsClip(lipsPath, dest, slotDur); } catch (_) { return; } }
+        if (!fs.existsSync(dest)) return;
         const info = getMediaInfo(dest); const lipsDur = getMediaDuration(dest);
         const matId = uuid();
         const lipsMat = buildVideoMaterial(matId, dest, lipsDur, fn, true, draftId);
@@ -414,9 +503,9 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
         const srcDur = Math.min(lipsDur, slotDur);
         const { segment, extraMaterials } = buildVideoSegment(matId, start, slotDur, srcDur, videoIndex++, info.width, info.height, true);
         segment.volume = 0.0;
-        // Thu nhỏ + đẩy về góc theo cấu hình (không cover full khung như b-roll).
+        // Thu nhỏ + LUÔN neo góc DƯỚI-PHẢI (tính theo kích thước hiển thị của chính clip → mọi video như nhau).
         segment.clip.scale = { x: LIPS_SCALE, y: LIPS_SCALE };
-        segment.clip.transform = { x: LIPS_POS_X / 960, y: LIPS_POS_Y / 540 };
+        segment.clip.transform = lipsBottomRightTransform(info.width, info.height, LIPS_SCALE);
         segment.uniform_scale = { on: true, value: LIPS_SCALE };
         lipsSegments.push(segment);
         content.materials.speeds.push({ ...JSON.parse(JSON.stringify(templateContent.materials.speeds[0])), id: extraMaterials.speedId });
@@ -430,6 +519,7 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     // asset CUỐI kéo dài lấp hết khoảng còn lại → tổng luôn khớp lời của sub-scene. Trả về segment cuối
     // (để sub-scene không có media kéo dài clip trước phủ vào, tránh nền đen).
     let lastBrollSeg = null;
+    const brollVideoClips = [];   // {segment, material, destPath} — video b-roll, để hậu xử lý freeze-pad nếu bị kéo giãn
     const layBroll = (assets, sceneStart, sceneDur) => {
         if (sceneDur <= 0) return;
         if (!assets.length) {                               // sub-scene không có media → nối dài clip trước
@@ -456,10 +546,12 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
             const realDur = isVideo ? (asset.duration ? Math.round(asset.duration * 1_000_000) : slotDur) : slotDur;
             const srcDur = isVideo ? Math.min(realDur, slotDur) : slotDur;
             const matId = uuid();
-            content.materials.videos.push(buildVideoMaterial(matId, destPath, isVideo ? realDur : slotDur, assetFileName, isVideo, draftId));
+            const brollMat = buildVideoMaterial(matId, destPath, isVideo ? realDur : slotDur, assetFileName, isVideo, draftId);
+            content.materials.videos.push(brollMat);
             const { segment, extraMaterials } = buildVideoSegment(matId, cur, slotDur, srcDur, videoIndex++, mediaInfo.width, mediaInfo.height, isVideo);
             videoSegments.push(segment);
             lastBrollSeg = segment;
+            if (isVideo) brollVideoClips.push({ segment, material: brollMat, destPath });
             content.materials.speeds.push({ ...JSON.parse(JSON.stringify(templateContent.materials.speeds[0])), id: extraMaterials.speedId });
             content.materials.canvases.push({ ...JSON.parse(JSON.stringify(templateContent.materials.canvases[0])), id: extraMaterials.canvasId });
             content.materials.material_colors.push({ ...JSON.parse(JSON.stringify(templateContent.materials.material_colors[0])), id: extraMaterials.colorId });
@@ -507,20 +599,33 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     // Duyệt scene: mỗi câu → audio segment + lips (cùng mốc), giữa các câu chèn silence.
     // B-ROLL: kết thúc ĐÚNG lúc audio câu cuối (bỏ 1s nghỉ dư cuối cảnh, không giữ hình thừa);
     // khoảng nghỉ giữa 2 cảnh do ẢNH/VIDEO cảnh sau bắt đầu SỚM (từ mốc audio-end cảnh trước) lấp vào.
-    let lipsIdx = 0, placedLips = 0, prevBrollEnd = null;
+    let lipsIdx = 0, placedLips = 0, prevBrollEnd = null, audioFail = 0;
     for (const scene of scenes) {
         const sceneStart = totalDuration;
         for (const unit of scene.units) {
             const primaryUrl = unit.au || (!bothLangs ? unit.al : null);
             if (unit.au) lipsIdx++;                          // idx khớp getAllAudioUrls (đếm theo audio ngôn ngữ chính)
-            const a = fetchUnitAudio(primaryUrl);
-            const slot = a ? a.durUs : 2_000_000;            // không có audio → slot mặc định 2s
+            // Tên file theo SỐ CÂU (cauN_*) để track audio & track lips song song hiển thị CÙNG tên/câu trong CapCut.
+            // Câu chỉ có audio phụ (không phải ngôn ngữ chính, không có lips) → tên riêng để không đè lên câu chính.
+            const nb = unit.au ? `cau${lipsIdx}` : `phu${fileIndex++}`;
+            const a = fetchUnitAudio(primaryUrl, `${nb}_voice`);
+            // Tải audio lỗi: KHÔNG dùng slot cứng 2s (làm timeline nén → lips lệch dần). Ưu tiên lấy độ dài
+            // clip LIPS của câu (≈ audio thật) làm slot để mốc thời gian giữ đúng; không có lips thì mới 2s.
+            let slot;
+            if (a) slot = a.durUs;
+            else {
+                audioFail++;
+                const lp = (unit.au && lipsByIdx[lipsIdx]) ? lipsByIdx[lipsIdx] : null;
+                const ld = lp ? getMediaDuration(lp) : 0;
+                slot = ld > 0 ? ld : 2_000_000;
+                console.warn(`[CapCut] ⚠ tải audio hụt (câu ${lipsIdx}) → slot theo lips ${(slot/1e6).toFixed(2)}s (tránh lệch dần)`);
+            }
             if (a) pushAudioSegment(a.matId, totalDuration, a.durUs, audioSegments, false);
-            if (bothLangs && unit.al) { const a2 = fetchUnitAudio(unit.al); if (a2) pushAudioSegment(a2.matId, totalDuration, a2.durUs, audioSegments2, false); }
-            if (unit.au && lipsByIdx[lipsIdx]) { placeLips(lipsByIdx[lipsIdx], totalDuration, slot); placedLips++; }
-            totalDuration += slot + silenceUs;               // khoảng nghỉ giữa các câu (audio/lips giữ nhịp)
+            if (bothLangs && unit.al) { const a2 = fetchUnitAudio(unit.al, `${nb}_voice2`); if (a2) pushAudioSegment(a2.matId, totalDuration, a2.durUs, audioSegments2, false); }
+            if (unit.au && lipsByIdx[lipsIdx]) { placeLips(lipsByIdx[lipsIdx], totalDuration, slot, `${nb}_lips`); placedLips++; }
+            totalDuration += slot + silenceUs;               // silenceUs=0: câu nối tiếp sát nhau (khớp narration UI)
         }
-        const sceneAudioEnd = totalDuration - silenceUs;     // hết audio câu cuối (không tính 1s nghỉ dư)
+        const sceneAudioEnd = totalDuration - silenceUs;     // hết audio câu cuối (silenceUs=0 → = totalDuration)
         const brollStart = (prevBrollEnd != null) ? prevBrollEnd : sceneStart;   // phủ cả khoảng nghỉ trước cảnh
         layBroll(scene.assets, brollStart, Math.max(0, sceneAudioEnd - brollStart));
         prevBrollEnd = sceneAudioEnd;
@@ -529,11 +634,31 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     if (lastBrollSeg != null && prevBrollEnd != null && totalDuration > prevBrollEnd)
         lastBrollSeg.target_timerange.duration += Math.round(totalDuration - prevBrollEnd);
 
+    // ===== HẬU XỬ LÝ b-roll: đảm bảo clip phát ĐÚNG nội dung thật rồi ĐỨNG HÌNH lấp phần dư của slot =====
+    // Nội dung thật = min(trim đã đặt, độ dài FILE). Nếu slot dài hơn nội dung thật → freeze-pad (chạy 1x + đứng hình):
+    //   • video trim NGẮN hơn slot        → không kéo giãn/tua chậm nữa
+    //   • FILE ngắn hơn trim (DB.duration) → không còn đen/thiếu hình ở đuôi
+    // Đồng thời cắt ĐÚNG độ dài trim (không phát trọn file → hết "video thừa giây"). Chạy SAU mọi mở rộng target.
+    let brollFrozen = 0;
+    for (const bc of brollVideoClips) {
+        const src = bc.segment.source_timerange, tgt = bc.segment.target_timerange;
+        const fileUs = getVideoStreamDuration(bc.destPath) || src.duration;
+        const contentUs = Math.min(src.duration, fileUs);   // nội dung thật sẽ phát (tôn trọng trim + giới hạn file)
+        if (tgt.duration > contentUs + 2000) {              // slot dài hơn nội dung thật → cần đứng hình lấp
+            if (freezePadClip(bc.destPath, contentUs, tgt.duration)) {
+                bc.material.duration = getMediaDuration(bc.destPath);   // ≥ target (đã cắt tới content + pad khung cuối)
+                src.duration = tgt.duration;                            // source==target → speed thật 1.0
+                brollFrozen++;
+            }
+        }
+    }
+    if (brollFrozen) console.log(`[CapCut] b-roll freeze-pad ${brollFrozen} clip (video ngắn hơn slot → chạy 1x + đứng hình)`);
+
     await db.close();
 
     // OUTRO: chèn ở cuối (sau toàn bộ câu).
     if (post.outro_path) totalDuration += addBoundaryVideo(path.join(MEDIA_DIR, post.outro_path), totalDuration, 'outro');
-    console.log(`[CapCut] Timeline theo câu: ${lipsIdx} câu, lips đặt ${placedLips} clip, silence ${(silenceUs/1e6).toFixed(2)}s/câu, tổng ${(totalDuration/1e6).toFixed(1)}s`);
+    console.log(`[CapCut] Timeline theo câu: ${lipsIdx} câu, lips đặt ${placedLips} clip, silence ${(silenceUs/1e6).toFixed(2)}s/câu, tổng ${(totalDuration/1e6).toFixed(1)}s${audioFail ? `, ⚠ ${audioFail} câu TẢI AUDIO HỤT (đã bù slot theo lips)` : ''}`);
 
     content.duration = totalDuration;
 
