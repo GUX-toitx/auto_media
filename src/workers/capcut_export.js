@@ -230,7 +230,7 @@ function buildVideoSegment(matId, startTime, slotDur, srcDur, presetIndex, matWi
     const fillScale = Math.max(arCanvas / arMat, arMat / arCanvas);
 
     // Video DỌC (9:16, 3:4... chiều cao > chiều rộng) → CONTAIN (scale 1.0): GIỮ NGUYÊN khung, hiện trọn khung,
-    // không cover-crop thành dải ngang, không méo → user tự reframe trong CapCut. Video NGANG/ảnh → COVER (fillScale).
+    // không cover-crop/méo. Video NGANG/ảnh → COVER (fillScale) phủ đầy như cũ.
     const isPortraitVideo = isVideo && h > w;
     const baseScale = isPortraitVideo ? 1.0 : fillScale;
 
@@ -520,7 +520,8 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     // (để sub-scene không có media kéo dài clip trước phủ vào, tránh nền đen).
     let lastBrollSeg = null;
     const brollVideoClips = [];   // {segment, material, destPath} — video b-roll, để hậu xử lý freeze-pad nếu bị kéo giãn
-    const layBroll = (assets, sceneStart, sceneDur) => {
+    const SNAP_US = 400_000;   // ngưỡng snap b-roll vào mốc kết thúc câu (0.4s): sửa lệch nhỏ, không gộp cả câu
+    const layBroll = (assets, sceneStart, sceneDur, unitEnds = []) => {
         if (sceneDur <= 0) return;
         if (!assets.length) {                               // sub-scene không có media → nối dài clip trước
             if (lastBrollSeg) lastBrollSeg.target_timerange.duration += Math.round(sceneDur);
@@ -534,7 +535,15 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
             const isLast = ai === assets.length - 1;
             const want = asset.duration > 0 ? Math.round(asset.duration * 1_000_000) : 3_000_000;
             // asset cuối (hoặc asset tràn qua end) → lấp trọn phần còn lại; còn lại chạy đúng duration đặt
-            const slotDur = (isLast || cur + want > end) ? (end - cur) : want;
+            let slotDur = (isLast || cur + want > end) ? (end - cur) : want;
+            // SNAP điểm kết thúc clip vào MỐC KẾT THÚC CÂU gần nhất (audio/lips) trong ngưỡng → video khớp từng câu,
+            // lấp nốt phần hụt nhỏ (freeze-pad đứng hình) thay vì để lệch dần / câu sau bắt đầu sớm.
+            if (!isLast && unitEnds.length) {
+                const clipEnd = cur + slotDur;
+                let best = null, bestD = SNAP_US;
+                for (const b of unitEnds) { const d = Math.abs(b - clipEnd); if (d <= bestD && b > cur + 1_000_000 && b <= end + 1) { best = b; bestD = d; } }
+                if (best != null) slotDur = best - cur;
+            }
             const srcPath = path.join(MEDIA_DIR, asset.file_path);
             if (!fs.existsSync(srcPath)) { cur += slotDur; continue; }
             const ext = path.extname(asset.file_path).toLowerCase();
@@ -602,6 +611,7 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     let lipsIdx = 0, placedLips = 0, prevBrollEnd = null, audioFail = 0;
     for (const scene of scenes) {
         const sceneStart = totalDuration;
+        const unitEnds = [];   // mốc kết thúc (tuyệt đối) của TỪNG câu audio/lips → để snap b-roll cho khớp
         for (const unit of scene.units) {
             const primaryUrl = unit.au || (!bothLangs ? unit.al : null);
             if (unit.au) lipsIdx++;                          // idx khớp getAllAudioUrls (đếm theo audio ngôn ngữ chính)
@@ -624,10 +634,11 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
             if (bothLangs && unit.al) { const a2 = fetchUnitAudio(unit.al, `${nb}_voice2`); if (a2) pushAudioSegment(a2.matId, totalDuration, a2.durUs, audioSegments2, false); }
             if (unit.au && lipsByIdx[lipsIdx]) { placeLips(lipsByIdx[lipsIdx], totalDuration, slot, `${nb}_lips`); placedLips++; }
             totalDuration += slot + silenceUs;               // silenceUs=0: câu nối tiếp sát nhau (khớp narration UI)
+            unitEnds.push(totalDuration);                    // mốc kết thúc câu này (audio/lips kết thúc tại đây)
         }
         const sceneAudioEnd = totalDuration - silenceUs;     // hết audio câu cuối (silenceUs=0 → = totalDuration)
         const brollStart = (prevBrollEnd != null) ? prevBrollEnd : sceneStart;   // phủ cả khoảng nghỉ trước cảnh
-        layBroll(scene.assets, brollStart, Math.max(0, sceneAudioEnd - brollStart));
+        layBroll(scene.assets, brollStart, Math.max(0, sceneAudioEnd - brollStart), unitEnds);
         prevBrollEnd = sceneAudioEnd;
     }
     // Lấp nốt khoảng nghỉ sau câu cuối cùng (trước outro/kết) bằng clip cuối, tránh nền đen.
