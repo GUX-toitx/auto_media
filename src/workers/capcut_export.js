@@ -499,6 +499,10 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
         const lipsMat = buildVideoMaterial(matId, dest, lipsDur, fn, true, draftId);
         // Xoá nền: dùng bản N_green.mp4 (người trên nền xanh) + Chroma key trong CapCut. KHÔNG dùng matting flag
         // (智能抠像 qua draft không đáng tin cậy giữa các bản CapCut).
+        // KHOÁ tỉ lệ crop về đúng tỉ lệ gốc của clip (thay vì "free") → khi user KÉO TAY thu nhỏ trong CapCut,
+        // clip GIỮ NGUYÊN tỉ lệ, không nhảy 3:4/16:9 (clip lips là overlay nên "free" bị snap theo preset).
+        { const g = (a, b) => (b ? g(b, a % b) : a) , k = g(info.width, info.height) || 1;
+          lipsMat.crop_ratio = `${Math.round(info.width / k)}:${Math.round(info.height / k)}`; lipsMat.crop_scale = 1; }
         content.materials.videos.push(lipsMat);
         const srcDur = Math.min(lipsDur, slotDur);
         const { segment, extraMaterials } = buildVideoSegment(matId, start, slotDur, srcDur, videoIndex++, info.width, info.height, true);

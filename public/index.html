@@ -4108,7 +4108,7 @@ createApp({
         function openEdit(asset, type, para, section = null) {
             editModal.value = {
                 open: true, type, asset, _para: para, _section: section,
-                start: 0, end: 0, duration: 0, currentTime: 0,
+                start: 0, end: 0, duration: 0, currentTime: 0, _metaInit: false,
                 order: asset.order || 0,
                 duration_val: asset.duration || 0,
                 cropX: 0, cropY: 0, cropW: 0, cropH: 0,
@@ -4154,9 +4154,23 @@ createApp({
         const timelineRef = ref(null);
 
         function onVideoLoaded(e) {
-            editModal.value.duration = e.target.duration;
-            editModal.value.end = e.target.duration;
-            editModal.value.duration_val = Math.round(e.target.duration * 10) / 10;
+            const d = e.target.duration;
+            if (!d || !isFinite(d)) return;   // bỏ metadata rác (duration NaN/Infinity khi đang nạp)
+            const m = editModal.value;
+            // loadedmetadata/durationchange có thể BẮN LẠI khi bấm play/seek (trình duyệt đọc lại moov
+            // atom). Trước đây lần bắn lại này gán end=duration → XOÁ vùng trim user vừa chọn. Giờ chỉ
+            // khởi tạo vùng trim LẦN ĐẦU; các lần sau giữ nguyên start/end, chỉ đồng bộ lại duration.
+            if (m._metaInit) {
+                if (Math.abs(d - m.duration) > 0.05) {
+                    m.duration = d;
+                    if (m.end > d) m.end = d;   // kẹp cho hợp lệ nếu duration mới ngắn hơn
+                }
+                return;
+            }
+            m._metaInit = true;
+            m.duration = d;
+            m.end = d;
+            m.duration_val = Math.round(d * 10) / 10;
         }
 
         function onVideoTimeUpdate(e) {
@@ -4878,7 +4892,16 @@ createApp({
             const lang = activePost.value?.project_id?.match(/_([a-z]{2})$/)?.[1] || 'en';
             const res = await fetch(`/api/get-prompt?type=${type}&lang=${lang}`);
             const { prompt } = await res.json();
-            aiModal.value = { open: true, type, para, gid, count: type === 'video' ? 1 : 2, content: para.content || '', keywords: kws, lang, prompt: prompt + ' ' + (para.content || ''), ratio: '16:9', videoMode: 'Frames', veo: 'Lite' };
+            // Prompt sinh ảnh/video = [style template] + [từ khóa CHÍNH cả bài = title] + [tất cả keyword của block].
+            // (Trước đây ghép nội dung đoạn văn → Flow dễ hiểu thành chủ đề rồi chat; giờ dùng keyword ngắn gọn.)
+            const mainKw = (activePost.value?.title || '').trim();
+            const kwLine = [mainKw, ...kws].filter(Boolean).join(', ');
+            // Địa chính trị (geo): ÉP góc nhìn Nhật Bản, cấm tuyệt đối nghiêng/ủng hộ Trung Quốc;
+            // đảo/lãnh thổ tranh chấp phải dùng tên & lập trường Nhật (vd Senkaku, không dùng tên TQ).
+            const pov = activePost.value?.genre === 'geo'
+                ? "Strictly from Japan's national perspective. Absolutely never frame, favor, glorify or side with China. For any disputed territory or island, always use the Japanese name and Japanese standpoint (e.g. the Senkaku Islands, never the Chinese naming). "
+                : '';
+            aiModal.value = { open: true, type, para, gid, count: type === 'video' ? 1 : 2, content: para.content || '', keywords: kws, lang, prompt: (prompt ? prompt + ' ' : '') + pov + kwLine, ratio: '16:9', videoMode: 'Frames', veo: 'Lite' };
         }
 
         async function submitAiGenerate() {

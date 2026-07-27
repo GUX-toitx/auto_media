@@ -63,7 +63,20 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
         const raw = fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf8') : fs.existsSync(fallbackFile) ? fs.readFileSync(fallbackFile, 'utf8') : '';
         promptTemplate = raw.trim().replace(/\n/g, ' ');
     }
-    const fullPrompt = promptTemplate ? `${promptTemplate} ${content}` : content || keyword;
+    // Guard BẮT BUỘC ra media: nếu không nêu rõ, Flow (Gemini) hiểu content dài thành chủ đề rồi
+    // CHAT / viết truyện thay vì tạo ảnh/video (xem create-thumbnail đã phải làm tương tự). Prepend
+    // chỉ thị cứng vào TRƯỚC mọi prompt để luôn buộc Flow xuất media, không hỏi lại, không viết chữ.
+    const mediaWord = type === 'video' ? 'video clip' : 'image';
+    const mediaPlural = type === 'video' ? 'video clips' : 'images';
+    // UI agent mới của Flow BỎ QUA setting số lượng cũ → mặc định tự tạo 4. Phải RA LỆNH số lượng trong prompt.
+    const nMedia = count > 1 ? `EXACTLY ${count} distinct ${mediaPlural}` : `EXACTLY one ${mediaWord}`;
+    const MEDIA_ONLY_GUARD =
+        `Immediately generate ${nMedia} now — do not produce more or fewer than ${count}. This is a direct generation command, NOT a conversation. ` +
+        `Output ONLY the ${mediaPlural} — do NOT chat, do NOT narrate, do NOT ask questions, do NOT reply with any story, script, outline, plan or explanation. ` +
+        `If there are several possible interpretations or options, ALWAYS choose the first / most reasonable one and proceed right away. ` +
+        `NEVER wait for my confirmation and NEVER ask me to choose — just start generating immediately. `;
+    const promptBody = promptTemplate ? `${promptTemplate} ${content}` : content || keyword;
+    const fullPrompt = `${MEDIA_ONLY_GUARD}${promptBody}`;
     if (!fs.existsSync(saveDirPath)) fs.mkdirSync(saveDirPath, { recursive: true });
 
     // Lấy profile có updated_at cũ nhất từ DB
@@ -217,6 +230,8 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
         // Chờ tất cả ảnh/video gen xong (theo % progress)
         console.log(`[Flow] Generating: "${fullPrompt.slice(0, 50)}..." (${type} x${count})`);
         let imgSrcs = [];
+        let nudges = 0;           // số lần đã "thúc" agent khi nó đứng im
+        let lastActionIter = 0;   // vòng lặp của lần submit/nudge gần nhất
         for (let i = 0; i < 180; i++) { // poll mỗi 2s, tối đa 6 phút
             await page.waitForTimeout(2000);
 
@@ -232,11 +247,38 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
                     const src = el.src || el.querySelector?.('source')?.src || '';
                     if ((tag === 'img' ? el.naturalWidth > 200 : true) && src.startsWith('http') && src.includes('media')) srcs.push(src);
                 }
-                return { percents, srcs: [...new Set(srcs)] };
+                // UI agent mới của Flow: khi đang tạo có chữ "Generating…/Đang tạo…" hoặc nút Dừng/Stop.
+                // Khi agent hỏi lại/đưa option rồi CHỜ thì không có dấu hiệu nào trong số này.
+                const bodyTxt = document.body.innerText || '';
+                const busy = /generating|đang tạo|creating|rendering|processing/i.test(bodyTxt)
+                    || !!document.querySelector('button[aria-label*="Dừng" i], button[aria-label*="Stop" i]');
+                return { percents, srcs: [...new Set(srcs)], busy };
             }, mediaTag);
 
             if (info.percents.length) {
                 console.log(`[Flow] ${info.percents.join(' | ')} | done: ${info.srcs.length}/${count}`);
+            }
+
+            // NUDGE: agent đứng im (không "busy", chưa có media mới) sau ~30s → nhiều khả năng nó đang
+            // hỏi lại / đưa option và CHỜ người dùng. Gửi lệnh ép "chọn phương án 1, tạo ngay" để khỏi kẹt.
+            // Tối đa 2 lần, cách nhau ≥15 vòng (30s). Đây là hiện thực của yêu cầu "có option thì chọn cái đầu".
+            if (info.srcs.length <= existingMediaCount && !info.busy && info.percents.length === 0
+                && nudges < 2 && (i - lastActionIter) >= 15) {
+                nudges++;
+                lastActionIter = i;
+                const mw = type === 'video' ? 'video' : 'ảnh';
+                const nudgeMsg = `Chọn phương án đầu tiên và tạo ${mw} ngay bây giờ. Chỉ xuất ${mw}, không hỏi thêm, không viết chữ.`;
+                console.log(`[Flow] ⏳ Agent đứng im, chưa có media → nudge lần ${nudges}: ép chọn phương án 1 + tạo ngay`);
+                try {
+                    const box = page.locator('div[contenteditable=true][role=textbox]').last();
+                    await box.click({ force: true });
+                    await page.keyboard.type(nudgeMsg, { delay: 15 });
+                    await page.waitForTimeout(300);
+                    const sendBtn = page.locator('button:has(i.google-symbols)').filter({ hasText: /arrow_forward/ }).first();
+                    if (await sendBtn.count()) await sendBtn.click({ force: true });
+                    else await page.keyboard.press('Enter');
+                } catch (e) { console.warn('[Flow] nudge lỗi:', e.message); }
+                continue;
             }
 
             // Tất cả xong khi không còn progress và có media mới
@@ -251,8 +293,8 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
                     }
                     return [...new Set(srcs)];
                 }, mediaTag);
-                // Chỉ lấy media mới (bỏ qua cái cũ)
-                imgSrcs = final.slice(existingMediaCount);
+                // Chỉ lấy media mới (bỏ qua cái cũ) — CHẶN CỨNG tối đa `count` cái, phòng khi Flow vẫn tạo dư (vd 4).
+                imgSrcs = final.slice(existingMediaCount, existingMediaCount + count);
                 console.log(`[Flow] All done! ${imgSrcs.length} new files`);
                 break;
             }

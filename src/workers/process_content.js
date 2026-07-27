@@ -1082,6 +1082,14 @@ async function runXSceneCrawl(db, postId, projectId, scenes, { insertKeyword = f
              kw, 'x_factual']
         );
         const outDir = path.join(BASE_DIR, projectId, 'assets', 'x', label);
+        // Số media mỗi cảnh: MỞ BÀI (hook) / LUẬN ĐIỂM (para) / KẾT BÀI (conclusion) → 10 video + 5 ảnh;
+        // LUẬN CỨ (sent) giữ 5 + 5. Lấy đủ 10 video cần NHIỀU tweet hơn → tăng limit (limit>20 = thêm
+        // phân trang ~20 tweet/request; đánh đổi: cảnh chính tốn ~2-3 request thay vì 1, nặng rate-limit hơn).
+        const isMainScene = sc.kind === 'section' || sc.kind === 'para';   // hook, conclusion, luận điểm
+        const wantImg = 5;
+        const wantVid = isMainScene ? 10 : 5;
+        const xLimit  = isMainScene ? 50 : 20;
+        const xMax    = isMainScene ? 80 : 40;
         let manifest = [], scraped = [];
         try {
             ({ manifest, scraped } = await crawlX({
@@ -1089,10 +1097,9 @@ async function runXSceneCrawl(db, postId, projectId, scenes, { insertKeyword = f
                 // GIỐNG NHẤT với "tự gõ từ khóa rồi search trên web X": query THUẦN keyword (KHÔNG thêm
                 // filter:media / filter:native_video — người dùng đâu có gõ mấy toán tử đó), tab mặc định
                 // Top (x_scrape --product Top), lấy media theo ĐÚNG thứ tự X trả (crawlX đã giữ nguyên).
-                // 1 query/cảnh = 1 request (giảm nửa so với kiểu 2-filter trước) → nhẹ rate-limit hơn.
                 keywords: kws.join('|'),
-                // limit<=20 vẫn chỉ 1 request; max cao để không cắt mất bài liên quan ở cuối trang Top.
-                limit: 20, max: 40, captureMax: 0, maxImages: 5, maxVideos: 5,
+                // Cảnh chính limit 50 (~2-3 request) để đủ tweet cho 10 video; luận cứ limit 20 (1 request).
+                limit: xLimit, max: xMax, captureMax: 0, maxImages: wantImg, maxVideos: wantVid,
                 scrapeTimeoutMs: 90000,   // dính rate-limit thì bỏ cảnh, KHÔNG treo pipeline
             }));
         } catch (e) {
