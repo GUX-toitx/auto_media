@@ -3279,6 +3279,28 @@ createApp({
             });
         }
 
+        // Đọc độ dài VIDEO từ metadata (giống loadAudioDuration nhưng cho thẻ <video>).
+        function loadVideoDuration(url) {
+            return new Promise((resolve) => {
+                const v = document.createElement('video');
+                v.preload = 'metadata';
+                v.addEventListener('loadedmetadata', () => resolve(Number(v.duration) || 0), { once: true });
+                v.addEventListener('error', () => resolve(0), { once: true });
+                v.src = url;
+            });
+        }
+
+        // Video crawl/AI thường THIẾU duration trong DB (crawl không đo) → thanh gợi ý (coverage) của luận cứ
+        // và luận điểm cộng 0 giây, không nhúc nhích khi chọn video. Nạp duration thật từ metadata cho video
+        // ĐÃ CHỌN còn thiếu rồi gán vào .duration để sentenceMediaSec/selectedTotalSec tính đúng.
+        async function backfillVideoDurations(para) {
+            const vids = (para.videos || []).filter(v => v.selected && !(Number(v.duration) > 0));
+            await Promise.all(vids.map(async v => {
+                const dur = await loadVideoDuration(mediaUrl(v));
+                if (dur > 0) v.duration = dur;
+            }));
+        }
+
         // Tổng độ dài giọng đọc của 1 cảnh theo từng ngôn ngữ (ghép audio như capcut_export)
         // -> para._narrationViSec (tiếng Việt) và para._narrationTargetSec (ngôn ngữ đích)
         async function computeNarration(para) {
@@ -3306,6 +3328,8 @@ createApp({
                 s._narrationViSec = s._durTitleVi + (s.details || []).reduce((a, d) => a + (d._durVi || 0), 0);
                 s._narrationTargetSec = s._durTitleTg + (s.details || []).reduce((a, d) => a + (d._durTg || 0), 0);
             }
+            // Nạp duration cho video đã chọn còn thiếu → thanh gợi ý coverage tính đúng ngay sau khi load/refresh.
+            await backfillVideoDurations(para);
         }
 
         // COVERAGE: media đã chọn (theo thứ tự) phủ được tới giây nào -> tô cam text tới đó, khít audio thì xanh lá.
@@ -3885,6 +3909,8 @@ createApp({
             if (updated) {
                 para.videos = updated.videos || [];
                 para.images = updated.images || [];
+                // Nạp lại từ DB làm mất duration video đã nạp client → backfill lại để thanh gợi ý cập nhật khi chọn video.
+                await backfillVideoDurations(para);
             }
         }
 
@@ -5083,6 +5109,10 @@ createApp({
             refreshing.value = true;
             try {
                 await fetchLatestMedia();
+                // fetchLatestMedia thay mới sentences/videos → mất _narrationViSec/_narrationTargetSec đã tính.
+                // Phải recompute (giống reloadCurrentPost) nếu không thanh gợi ý ở các luận cứ (#x.y) sẽ BIẾN MẤT.
+                activePost.value.paragraphs.forEach(p => computeNarration(p));
+                ['hook', 'summary', 'conclusion'].forEach(k => computeSectionNarration(k));
                 hasNewAssets.value = false;
             } finally { refreshing.value = false; }
         }

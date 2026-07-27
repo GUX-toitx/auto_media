@@ -20,7 +20,13 @@ const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 
 async function getNextProfile() {
     const db = await getDb();
-    const profile = await db.get('SELECT id, profile_dir, proxy FROM ChromeProfile ORDER BY updated_at ASC LIMIT 1');
+    // CHỈ chọn profile có profile_dir hợp lệ + chưa bị đăng xuất. Trước đây thiếu điều kiện này nên
+    // trúng row profile_dir=NULL (profile mới thêm email nhưng chưa gán thư mục) → path.join(SETTING_DIR, null)
+    // ném lỗi 'The "path" argument must be of type string. Received null' → hỏng cả AI Generate.
+    const profile = await db.get(
+        `SELECT id, profile_dir, proxy FROM ChromeProfile
+         WHERE profile_dir IS NOT NULL AND profile_dir != '' AND (logged_out IS NULL OR logged_out = 0)
+         ORDER BY updated_at ASC LIMIT 1`);
     await db.close();
     if (!profile) return null;
     return { ...profile, profile_dir: path.join(SETTING_DIR, profile.profile_dir) };
