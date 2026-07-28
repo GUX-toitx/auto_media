@@ -116,6 +116,36 @@ const LIPS_SCALE = Number(process.env.LIPS_CLIP_SCALE ?? 0.65);       // 65%
 const LIPS_MARGIN_X = Number(process.env.LIPS_CLIP_MARGIN_X ?? 0);    // px cách MÉP PHẢI (0 = sát mép)
 const LIPS_MARGIN_Y = Number(process.env.LIPS_CLIP_MARGIN_Y ?? 0);    // px cách MÉP DƯỚI (0 = sát mép)
 
+// ===== XOÁ NỀN clip lips — BẬT MẶC ĐỊNH =====
+//   'matting' (mặc định) : bật sẵn 智能抠像 (Xoá nền tự động) của CapCut ngay trong draft → mở lên là hết nền,
+//                          KHÔNG phải thao tác tay từng clip, không tốn GPU ở server.
+//   'green'              : dùng bản RVM đã matte sẵn (N_green.mp4, người trên nền xanh) → vẫn phải bấm
+//                          Chroma key trong CapCut (chạy POST /api/lips-sync/matte trước để có file).
+//   'off'                : giữ nguyên nền gốc (hành vi cũ trước khi bật mặc định).
+const LIPS_BG_REMOVAL = String(process.env.LIPS_BG_REMOVAL || 'matting').toLowerCase();
+
+// Cấu hình matting đúng như CapCut 9.1.0 ghi ra khi bấm "Xoá nền" trên 1 clip (tham chiếu: draft người dùng
+// tự sửa tay, 11/96 clip lips có flag=3). `path` để RỖNG: đó chỉ là CACHE mask CapCut tự sinh và tự đặt tên
+// theo hash của chính nó — draft mình xuất ra chưa có cache, CapCut sẽ tự tính lại khi mở/preview.
+export function buildLipsMatting() {
+    return {
+        flag: 3,                       // 0 = tắt, 3 = đã bật xoá nền tự động
+        custom_matting_id: uuid(),
+        path: '',
+        mask_video_path: '',
+        interactiveTime: [],
+        strokes: [],
+        has_use_quick_brush: false,
+        has_use_quick_eraser: false,
+        enable_matting_stroke: false,
+        expansion: 0,
+        feather: 0,
+        reverse: false,
+        is_clould: false,
+        cloud_product_fps: 0.0,
+    };
+}
+
 // Tính transform (tâm clip, chuẩn CapCut nửa-canvas) để neo góc DƯỚI-PHẢI cho clip lips.
 // CapCut scale=1.0 = fit CONTAIN vào canvas → kích thước hiển thị phụ thuộc tỉ lệ clip.
 function lipsBottomRightTransform(w, h, scale) {
@@ -309,7 +339,7 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     // Khi xuất cả 2: track chính (có tiếng, định độ dài timeline) = ngôn ngữ đích; track phụ (mute) = tiếng Việt.
     const primaryUseVi = bothLangs ? false : isVi;
 
-    console.log(`[CapCut] Export post ${postId} (${post.project_id}) contentType=${resolvedType}`);
+    console.log(`[CapCut] Export post ${postId} (${post.project_id}) contentType=${resolvedType} bgRemoval=${LIPS_BG_REMOVAL}`);
 
     const paragraphs = await db.all(`SELECT * FROM Paragraph WHERE post_id = ? ORDER BY "order"`, [postId]);
 
@@ -452,9 +482,13 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
         for (const r of lipsRows) {
             if ((r.content_type || 'content') !== lipsType) continue;
             if (!r.output_path) continue;
-            // Ưu tiên bản ĐÃ XOÁ NỀN (N_green.mp4 — người trên nền xanh, CapCut chroma key là mất nền).
+            // Chỉ chế độ 'green' mới dùng bản RVM (N_green.mp4 — người trên nền xanh, cần Chroma key trong CapCut).
+            // Chế độ 'matting' dùng clip GỐC vì CapCut tự tách nền — matte lên nền xanh rồi tách nữa là thừa.
             const greenPath = r.output_path.replace(/\.mp4$/i, '_green.mp4');
-            const use = (fs.existsSync(greenPath) && (() => { try { return fs.statSync(greenPath).size > 20000; } catch (_) { return false; } })()) ? greenPath : r.output_path;
+            const useGreen = LIPS_BG_REMOVAL === 'green'
+                && fs.existsSync(greenPath)
+                && (() => { try { return fs.statSync(greenPath).size > 20000; } catch (_) { return false; } })();
+            const use = useGreen ? greenPath : r.output_path;
             try { if (fs.existsSync(use) && fs.statSync(use).size > 20000) lipsByIdx[r.idx] = use; } catch (_) {}
         }
     } catch (_) {}
@@ -497,8 +531,11 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
         const info = getMediaInfo(dest); const lipsDur = getMediaDuration(dest);
         const matId = uuid();
         const lipsMat = buildVideoMaterial(matId, dest, lipsDur, fn, true, draftId);
-        // Xoá nền: dùng bản N_green.mp4 (người trên nền xanh) + Chroma key trong CapCut. KHÔNG dùng matting flag
-        // (智能抠像 qua draft không đáng tin cậy giữa các bản CapCut).
+        // Xoá nền BẬT MẶC ĐỊNH (LIPS_BG_REMOVAL, xem đầu file):
+        //   'matting' → ghi sẵn flag xoá nền tự động của CapCut vào material (không phải bấm tay từng clip)
+        //   'green'   → clip đã là bản nền xanh, user bấm Chroma key 1 lần
+        //   'off'     → giữ nền gốc
+        if (LIPS_BG_REMOVAL === 'matting') lipsMat.matting = buildLipsMatting();
         // KHOÁ tỉ lệ crop về đúng tỉ lệ gốc của clip (thay vì "free") → khi user KÉO TAY thu nhỏ trong CapCut,
         // clip GIỮ NGUYÊN tỉ lệ, không nhảy 3:4/16:9 (clip lips là overlay nên "free" bị snap theo preset).
         { const g = (a, b) => (b ? g(b, a % b) : a) , k = g(info.width, info.height) || 1;
