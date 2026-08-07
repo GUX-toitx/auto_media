@@ -16,8 +16,8 @@ const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
 export const LIPS_LIB_DIRNAME = '_lips_videos';
 export const LIPS_LIB_DIR = path.join(MEDIA_DIR, LIPS_LIB_DIRNAME);
 
-export const LIPS_GENRES = ['geo', 'naze', 'drama'];
-export const LIPS_GENRE_LABELS = { geo: 'Địa chính trị', naze: 'Tại sao (naze)', drama: 'Drama' };
+export const LIPS_GENRES = ['geo', 'naze', 'drama', 'sport'];
+export const LIPS_GENRE_LABELS = { geo: 'Địa chính trị', naze: 'Tại sao (naze)', drama: 'Drama', sport: 'Sport' };
 export const LIPS_WEEKDAY_LABELS = { 1: 'Thứ 2', 2: 'Thứ 3', 3: 'Thứ 4', 4: 'Thứ 5', 5: 'Thứ 6', 6: 'Thứ 7', 7: 'Chủ nhật' };
 
 export const normLipsGenre = (g) => (LIPS_GENRES.includes(String(g)) ? String(g) : null);

@@ -35,6 +35,17 @@ async function ffprobeDuration(file) {
         return parseFloat(String(stdout).trim()) || 0;
     } catch { return 0; }
 }
+// Tên codec của luồng hình đầu tiên ('mjpeg', 'png', 'h264'...). '' nếu đọc không được.
+async function ffprobeVideoCodec(file) {
+    try {
+        const { stdout } = await execFileP('ffprobe',
+            ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', file]);
+        return String(stdout).trim();
+    } catch { return ''; }
+}
+// Codec của ẢNH TĨNH. Dùng để chặn việc ghi đè 1 file ảnh bằng luồng video.
+const STILL_IMAGE_CODECS = new Set(['mjpeg', 'png', 'webp', 'bmp', 'gif', 'tiff']);
+const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif']);
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { JWT } from 'google-auth-library';
 import crypto from 'crypto';
@@ -63,7 +74,14 @@ const DB_DIR = process.env.DB_DIR || '/usr/gux/media-team/db';
 app.use(express.json()); // BẮT BUỘC PHẢI CÓ DÒNG NÀY Ở ĐÂY
 
 const DB_PATH = path.join(DB_DIR, 'media_system.sqlite');
-const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
+// DB dùng CHUNG với các worker crawl (tiến trình riêng, ghi Asset/Keyword liên tục).
+// Mặc định sqlite3 chỉ chờ 1s rồi ném SQLITE_BUSY → lệnh sửa/xóa bấm từ dashboard fail ngay
+// khi pipeline đang ghi, trông như "nút không hoạt động". Chờ 15s cho khoá nhả ra.
+const getDb = async () => {
+    const db = await open({ filename: DB_PATH, driver: sqlite3.Database });
+    await db.run('PRAGMA busy_timeout = 15000').catch(() => {});
+    return db;
+};
 
 // Mã dự án theo NGÀY GIỜ (giờ địa phương): <prefix>YYYY-MM-DD_HH-MM-SS — vd proj_2026-07-16_13-43-40.
 // Ngăn cách cho dễ đọc. Có cả GIÂY để 2 dự án tạo trong cùng 1 phút không trùng mã
@@ -276,7 +294,7 @@ app.post('/api/save-content', async (req, res) => {
 });
 
 // Cập nhật API lấy Media
-app.post('/api/generate-media', (req, res) => {
+app.post('/api/generate-media', async (req, res) => {
     const { videoId, groupId, postId, section, keywords } = req.body;
     
     if (!keywords || keywords.length === 0) {
@@ -335,6 +353,25 @@ app.post('/api/generate-media', (req, res) => {
     const kwTexts = (Array.isArray(keywords) ? keywords : [keywords]).map(k => typeof k === 'object' ? k.content : k).filter(Boolean);
     console.log(`\n[HỆ THỐNG] Bắt đầu lấy Media cho: Dự án ${videoId} | Nhóm ${groupId}`);
     console.log(`[HỆ THỐNG] Từ khóa: ${kwTexts.join(', ')}`);
+
+    // Cảnh của dự án SPORT → chỉ lấy lại ẢNH (Bing/Google xoay vòng như pipeline sport).
+    // craw_sub.js bên dưới lấy cả video lẫn ảnh từ stock — sai hẳn với keyword bóng đá tiếng Nhật.
+    try {
+        const db = await getDb();
+        const para = await db.get(
+            'SELECT p.id, p."order" AS ord, po.genre, po.project_id FROM Paragraph p JOIN Post po ON po.id = p.post_id WHERE p.id = ?',
+            [groupId]
+        );
+        if (para?.genre === 'sport') {
+            res.json({ success: true, message: 'Đang lấy lại ảnh (sport)...' });
+            crawlSportImages(db, para.project_id, para.id, para.ord, kwTexts)
+                .then(n => { console.log(`[generate-media/sport] cảnh ${para.ord}: +${n} ảnh`); pushCrawlScene(para.project_id); })
+                .catch(e => console.error('[generate-media/sport]', e.message))
+                .finally(() => db.close().catch(() => {}));
+            return;
+        }
+        await db.close();
+    } catch (e) { console.error('[generate-media] kiểm tra genre lỗi:', e.message); }
 
     const pythonProcess = spawn('node', [
         'src/workers/craw_sub.js',
@@ -728,6 +765,35 @@ app.post('/api/create-voice', async (req, res) => {
 });
 
 // API: Kích hoạt crawl toàn bộ media cho 1 post
+// SPORT chỉ dùng ẢNH: pipeline sports_srt.js cào Bing/Google theo keyword tiếng Nhật, không hề có video.
+// Mọi nút "lấy lại nguồn" của dự án sport đều đi qua đây → cào lại ĐÚNG kiểu đó, không đụng tới _raw_videos
+// và không gọi stock (Storyblocks/Pexels/Pixabay) — stock trả về footage vu vơ với keyword bóng đá.
+// Sync ảnh vào DB ngay sau MỖI keyword để dashboard hiện dần. Trả về số ảnh mới thêm.
+const SPORT_IMAGES_PER_KEYWORD = 8;   // khớp IMAGES_PER_KEYWORD của sports_srt.js
+async function crawlSportImages(db, projectId, paragraphId, order, keywords) {
+    const { crawlKeywordImageRotate } = await import('./src/crawlers/imageCrawlRotate.js');
+    const dir = path.join(MEDIA_DIR, projectId, 'assets', '_raw_images', String(order));
+    fs.mkdirSync(dir, { recursive: true });
+    const imageExts = new Set(['.jpg', '.jpeg', '.png', '.webp']);
+    const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(0), ms))]);
+    let added = 0;
+    for (const [i, kw] of keywords.entries()) {
+        await withTimeout(
+            crawlKeywordImageRotate(kw, dir, i, SPORT_IMAGES_PER_KEYWORD)
+                .then(got => console.log(`[sport-media] "${kw}" -> ${got} ảnh`))
+                .catch(e => console.error(`[sport-media] lỗi "${kw}": ${e.message}`)),
+            60000
+        );
+        for (const file of fs.readdirSync(dir)) {
+            if (!imageExts.has(path.extname(file).toLowerCase())) continue;
+            const rel = path.join(projectId, 'assets', '_raw_images', String(order), file);
+            const ex = await db.get('SELECT id FROM Asset WHERE file_path = ?', [rel]);
+            if (!ex) { await db.run('INSERT INTO Asset (paragraph_id, sentence_id, type, file_path) VALUES (?, NULL, ?, ?)', [paragraphId, 'image', rel]); added++; }
+        }
+    }
+    return added;
+}
+
 app.post('/api/crawl-all', async (req, res) => {
     const { postId, force } = req.body;   // force=true → crawl lại HẾT; mặc định chỉ crawl cảnh còn THIẾU (0 asset)
     res.json({ success: true, message: 'Đang crawl...' });
@@ -757,6 +823,29 @@ app.post('/api/crawl-all', async (req, res) => {
                 }
                 orchestrateAutoVoice(p0.project_id.replace(/_[a-z]{2}$/, '')).catch(e => console.error('[crawl-all/geo] auto voice lỗi:', e.message));
             });
+            return;
+        }
+
+        // Project SPORT → chỉ cào lại ẢNH bằng đúng crawler của pipeline sport.
+        // project_id KHÔNG cắt đuôi ngôn ngữ như nhánh dưới: sports_srt.js ghi media vào MEDIA_DIR/<project_id> nguyên vẹn.
+        if (p0.genre === 'sport') {
+            const db = await getDb();
+            await db.run('UPDATE Post SET status = ? WHERE id = ?', ['crawling', postId]);
+            pushCrawlStatus(p0.project_id, 'crawling');
+            const paragraphs = await db.all('SELECT id, "order" FROM Paragraph WHERE post_id = ? ORDER BY "order"', [postId]);
+            for (const para of paragraphs) {
+                const kws = await db.all('SELECT content FROM Keyword WHERE paragraph_id = ?', [para.id]);
+                if (!kws.length) continue;
+                if (!force) { const c = await db.get('SELECT COUNT(*) c FROM Asset WHERE paragraph_id = ?', [para.id]); if (c.c > 0) continue; }   // mặc định chỉ bù cảnh trống
+                const n = await crawlSportImages(db, p0.project_id, para.id, para.order, kws.map(k => k.content));
+                console.log(`[crawl-all/sport] cảnh ${para.order}: +${n} ảnh`);
+                pushCrawlScene(p0.project_id);   // xong 1 cảnh → hiện ngay
+            }
+            await db.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]);
+            await db.close();
+            console.log(`[crawl-all/sport] ✅ Xong post ${postId}`);
+            pushCrawlStatus(p0.project_id, null);
+            announceSlack(p0.project_id);
             return;
         }
 
@@ -1074,10 +1163,16 @@ app.post('/api/delete-asset', async (req, res) => {
 // API: Xóa nội dung (luận điểm / câu / dòng detail / cả khối section) + cascade con + media file
 app.post('/api/delete-content', async (req, res) => {
     const { type, id } = req.body;
+    // Log MỌI lệnh xóa: khi người dùng báo "bấm xóa không ăn", đây là chỗ duy nhất phân biệt được
+    // request có tới server hay không, và xóa mất bao lâu (server 1 luồng, đang crawl thì rất chậm).
+    const t0 = Date.now();
+    console.log(`[delete-content] nhận: type=${type} id=${id}`);
     const allowed = ['paragraph', 'paragraph_detail', 'sentence', 'sentence_detail',
         'hook_detail', 'summary_detail', 'conclusion_detail', 'hook', 'summary', 'conclusion'];
-    if (!allowed.includes(type) || !id)
+    if (!allowed.includes(type) || !id) {
+        console.warn(`[delete-content] ✗ type/id không hợp lệ: type=${type} id=${id}`);
         return res.status(400).json({ error: 'type/id không hợp lệ' });
+    }
     let db;
     try {
         db = await getDb();
@@ -1165,9 +1260,11 @@ app.post('/api/delete-content', async (req, res) => {
                 if (fs.existsSync(full)) fs.unlinkSync(full);
             } catch (_) { /* bỏ qua file lỗi */ }
         }
+        console.log(`[delete-content] ✅ xong ${type} #${id} (${filePaths.length} file media, ${Date.now() - t0}ms)`);
         res.json({ ok: true });
     } catch (e) {
         try { if (db) await db.close(); } catch (_) {}
+        console.error(`[delete-content] ❌ LỖI ${type} #${id} sau ${Date.now() - t0}ms:`, e.message);
         res.status(500).json({ error: e.message });
     }
 });
@@ -1433,6 +1530,256 @@ app.post('/api/create-naze', express.json(), async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ===== SPORT (port từ nhánh main_sports, luồng chạy độc lập với naze/drama/geo) =====
+// Pipeline riêng: src/workers/sports_srt.js — 2 chế độ (upload SRT | nhập prompt cho GPT-5 tự viết bài),
+// tự sinh keyword tiếng Nhật rồi cào ảnh Bing/Google. Post được đánh genre='sport'.
+const runningSportsJobs = new Map(); // projectId -> child process
+
+function spawnSportsJob(args, logPrefix, projectId, res) {
+    if (runningSportsJobs.has(projectId)) {
+        return res.status(409).json({ error: `Project "${projectId}" đang chạy, vui lòng chờ` });
+    }
+    const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+    runningSportsJobs.set(projectId, child);
+    child.stdout.on('data', d => process.stdout.write(`[${logPrefix}] ${d}`));
+    child.stderr.on('data', d => process.stderr.write(`[${logPrefix}] ${d}`));
+    child.on('close', () => runningSportsJobs.delete(projectId));
+    child.unref();
+    res.json({ success: true, projectId });
+}
+
+// Tạo dự án Sport từ prompt: GPT-5 (web_search) tự viết bài phân tích.
+// minutes: độ dài video mong muốn. <12' -> 1 lượt gọi như cũ; >=12' -> worker chuyển sang
+// luồng BÀI DÀI (lên dàn ý rồi viết nối tiếp từng phần) vì 1 lượt không đủ context.
+app.post('/api/create-sports-prompt', express.json(), async (req, res) => {
+    const { projectId, prompt, targetLang, minutes } = req.body;
+    if (!prompt?.trim() || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu prompt hoặc projectId' });
+    try {
+        const targetDir = path.join(MEDIA_DIR, projectId);
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        const args = ['src/workers/sports_srt.js', '--prompt', projectId, prompt.trim()];
+        if (targetLang) args.push(targetLang);
+        // Cờ luôn nằm CUỐI: worker đọc targetLang theo vị trí args[3], và nhánh dọn lỗi tra projectId ở argv[3].
+        const mins = parseInt(minutes, 10);
+        if (Number.isFinite(mins) && mins > 0) args.push('--minutes', String(Math.min(60, mins)));
+        spawnSportsJob(args, 'sports_prompt', projectId, res);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Tạo dự án Sport từ file SRT (gốc bắt buộc, bản dịch tuỳ chọn)
+app.post('/api/create-sports', upload.fields([{ name: 'srt', maxCount: 1 }, { name: 'srtTranslated', maxCount: 1 }]), async (req, res) => {
+    const { projectId, targetLang, translate } = req.body;
+    const srtFile = req.files?.srt?.[0];
+    const srtTranslatedFile = req.files?.srtTranslated?.[0];
+    if (!srtFile || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu file SRT hoặc projectId' });
+    try {
+        const targetDir = path.join(MEDIA_DIR, projectId);
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        const srtPath = path.join(targetDir, 'input.srt');
+        fs.renameSync(srtFile.path, srtPath);
+        let srtTranslatedPath = '';
+        if (srtTranslatedFile) {
+            srtTranslatedPath = path.join(targetDir, 'input_translated.srt');
+            fs.renameSync(srtTranslatedFile.path, srtTranslatedPath);
+        }
+        // sports_srt.js đọc tham số THEO VỊ TRÍ: [srt, projectId, srtĐãDịch, targetLang].
+        // Không có bản dịch vẫn phải giữ chỗ args[2] bằng '' (worker coi '' là null),
+        // nếu bỏ trống thì targetLang tụt xuống ô srtĐãDịch → parseSrt('vi') → ENOENT.
+        const args = ['src/workers/sports_srt.js', srtPath, projectId, srtTranslatedPath, targetLang || 'vi'];
+        // Cờ ở CUỐI (worker tách cờ trước khi đọc tham số vị trí). Có file dịch sẵn thì bỏ qua cờ:
+        // worker vẫn tôn trọng file người dùng đưa, nhưng đừng gửi cờ thừa cho khỏi hiểu nhầm khi đọc log.
+        const wantTranslate = translate === true || translate === 'true' || translate === '1' || translate === 'on';
+        if (wantTranslate && !srtTranslatedPath) args.push('--translate');
+        spawnSportsJob(args, 'sports_srt', projectId, res);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Cào bù: các câu chưa có keyword nào (GPT lỗi/timeout lúc chạy pipeline)
+app.post('/api/sports-retry', express.json(), async (req, res) => {
+    const { postId } = req.body;
+    try {
+        const db = await getDb();
+        const post = await db.get('SELECT project_id FROM Post WHERE id = ?', [postId]);
+        await db.close();
+        if (!post) return res.status(404).json({ error: 'Post not found' });
+        const child = spawn('node', ['src/workers/sports_retry.js', String(postId), post.project_id], { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+        child.stdout.on('data', d => process.stdout.write('[sports_retry] ' + d));
+        child.stderr.on('data', d => process.stderr.write('[sports_retry] ' + d));
+        child.unref();
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== PODCAST: dự án CHỈ CÓ TIẾNG, đầu vào là file .srt =====
+// Pipeline riêng src/workers/podcast_srt.js: mỗi cue SRT = 1 cảnh (1 câu đọc), KHÔNG cào ảnh/video.
+// Tuỳ chọn tự tạo voice sau khi import (dùng chung voice_auto.json + orchestrateAutoVoice như naze/geo).
+// Mốc thời gian gốc lưu ở <project>/srt_timing.json -> xuất lại .srt qua /api/srt-timing/:postId.
+app.post('/api/create-podcast', upload.fields([{ name: 'srt', maxCount: 1 }, { name: 'srtTarget', maxCount: 1 }]), async (req, res) => {
+    const { projectId, targetLang, title,
+        voiceAuto, voiceContentType, speakerUuid, dictionaryUuids, voiceSpeed } = req.body;
+    const srtFile = req.files?.srt?.[0];
+    if (!srtFile || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu file SRT hoặc projectId' });
+    try {
+        const targetDir = path.join(MEDIA_DIR, projectId);
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        const srtPath = path.join(targetDir, 'input.srt');
+        fs.renameSync(srtFile.path, srtPath);
+        let srtTargetPath = '';
+        if (req.files?.srtTarget?.[0]) {
+            srtTargetPath = path.join(targetDir, 'input_target.srt');
+            fs.renameSync(req.files.srtTarget[0].path, srtTargetPath);
+        }
+        // multipart -> mọi field là chuỗi; dictionaryUuids gửi dạng JSON
+        const isYes = (v) => v === true || v === 'true' || v === '1' || v === 'on';
+        let dicts = [];
+        try { dicts = dictionaryUuids ? JSON.parse(dictionaryUuids) : []; } catch { dicts = []; }
+        const wantVoice = isYes(voiceAuto) && speakerUuid;
+        if (wantVoice) {
+            // Podcast không có hình -> không lips sync, chỉ giọng đọc.
+            writeVoiceAutoConfig(projectId, {
+                speakerUuid, contentType: voiceContentType || 'content', dictionaryUuids: dicts,
+                lips: null, speed: voiceSpeed,
+            });
+        }
+        // podcast_srt.js đọc tham số THEO VỊ TRÍ: [srt, projectId, srtĐích, targetLang]; --title đứng cuối.
+        // Không có bản dịch vẫn phải giữ chỗ args[2] bằng '' kẻo targetLang tụt xuống ô đó -> parseSrt('vi') -> ENOENT.
+        const args = ['src/workers/podcast_srt.js', srtPath, projectId, srtTargetPath, targetLang || 'vi'];
+        const cleanTitle = (title || '').trim();
+        if (cleanTitle) args.push('--title', cleanTitle);
+        const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+        child.stdout.on('data', d => process.stdout.write(`[podcast] ${d}`));
+        child.stderr.on('data', d => process.stderr.write(`[podcast] ${d}`));
+        child.on('exit', (code) => {
+            if (code !== 0) return console.warn(`[podcast] import lỗi (code ${code}) — bỏ qua auto voice ${projectId}`);
+            if (wantVoice) orchestrateAutoVoice(projectId).catch(e => console.error('[podcast] auto voice lỗi:', e.message));
+        });
+        child.unref();
+        res.json({ success: true, projectId });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== KHO VIDEO PODCAST =====
+// Thư mục PHẲNG dùng chung mọi dự án podcast (podcast chỉ có tiếng nên không tự cào được hình,
+// hình phải do người dùng bỏ vào kho này rồi chọn). Đặt TRONG MEDIA_DIR để dùng luôn hai endpoint
+// sẵn có: /api/media?path= (xem, có proxy 480p) và /api/thumb?path= (ảnh đại diện) — khỏi viết mới.
+const PODCAST_VIDEO_DIRNAME = '_podcast_videos';
+const PODCAST_VIDEO_DIR = path.join(MEDIA_DIR, PODCAST_VIDEO_DIRNAME);
+const PODCAST_VIDEO_EXTS = new Set(['.mp4', '.mov', '.mkv', '.webm', '.m4v']);
+// ffprobe mỗi lần liệt kê thì kho vài chục file là treo cả giây; nhớ theo (tên|size|mtime)
+// nên file bị thay bằng bản khác vẫn đo lại đúng.
+const podcastDurCache = new Map();
+
+async function podcastVideoDuration(name, size, mtime) {
+    const key = `${name}|${size}|${mtime}`;
+    if (podcastDurCache.has(key)) return podcastDurCache.get(key);
+    const d = await ffprobeDuration(path.join(PODCAST_VIDEO_DIR, name)).catch(() => 0);
+    const val = Number.isFinite(d) && d > 0 ? d : 0;
+    podcastDurCache.set(key, val);
+    return val;
+}
+
+app.get('/api/podcast-videos', async (req, res) => {
+    try {
+        fs.mkdirSync(PODCAST_VIDEO_DIR, { recursive: true });
+        const items = [];
+        for (const e of fs.readdirSync(PODCAST_VIDEO_DIR, { withFileTypes: true })) {
+            if (!e.isFile() || !PODCAST_VIDEO_EXTS.has(path.extname(e.name).toLowerCase())) continue;
+            let size = 0, mtime = 0;
+            try { const st = fs.statSync(path.join(PODCAST_VIDEO_DIR, e.name)); size = st.size; mtime = st.mtimeMs; } catch { continue; }
+            items.push({ name: e.name, size, mtime, relativePath: `${PODCAST_VIDEO_DIRNAME}/${e.name}`, duration: await podcastVideoDuration(e.name, size, mtime) });
+        }
+        items.sort((a, b) => b.mtime - a.mtime);   // mới nhất lên đầu
+        res.json({ dir: PODCAST_VIDEO_DIR, items });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/podcast-videos/upload', upload.array('files', 100), (req, res) => {
+    try {
+        if (!req.files?.length) return res.status(400).json({ error: 'Không có file nào' });
+        fs.mkdirSync(PODCAST_VIDEO_DIR, { recursive: true });
+        const saved = [], skipped = [];
+        for (const file of req.files) {
+            const name = safeMediaName(file.originalname);
+            const ext = name ? path.extname(name).toLowerCase() : '';
+            if (!name || !PODCAST_VIDEO_EXTS.has(ext)) {
+                skipped.push(file.originalname);
+                try { fs.unlinkSync(file.path); } catch {}
+                continue;
+            }
+            // Trùng tên thì thêm hậu tố thay vì ghi đè — người khác có thể đang dùng file cũ.
+            let dest = path.join(PODCAST_VIDEO_DIR, name);
+            if (fs.existsSync(dest)) {
+                const stem = name.slice(0, name.length - ext.length);
+                let i = 1;
+                do { dest = path.join(PODCAST_VIDEO_DIR, `${stem}_${i}${ext}`); i++; } while (fs.existsSync(dest));
+            }
+            // rename hỏng khi _tmp_uploads khác phân vùng với MEDIA_DIR -> chép rồi xoá.
+            try { fs.renameSync(file.path, dest); }
+            catch { fs.copyFileSync(file.path, dest); try { fs.unlinkSync(file.path); } catch {} }
+            saved.push(path.basename(dest));
+        }
+        res.json({ success: true, saved, skipped });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/podcast-videos', (req, res) => {
+    try {
+        const name = safeMediaName(req.query.name);
+        if (!name || !PODCAST_VIDEO_EXTS.has(path.extname(name).toLowerCase())) return res.status(400).json({ error: 'Tên file không hợp lệ' });
+        const target = path.join(PODCAST_VIDEO_DIR, name);
+        // Chặn path traversal lần nữa: phải nằm ĐÚNG trong thư mục kho.
+        if (path.dirname(path.resolve(target)) !== path.resolve(PODCAST_VIDEO_DIR)) return res.status(400).json({ error: 'Đường dẫn không hợp lệ' });
+        if (!fs.existsSync(target)) return res.status(404).json({ error: 'File không tồn tại' });
+        fs.unlinkSync(target);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Mốc thời gian của file SRT ĐẦU VÀO (dự án podcast), quy về từng ParagraphDetail để client
+// xuất lại .srt đúng timeline gốc — dùng được cả khi dự án chưa/không tạo voice.
+// srt_timing.json v2 lưu theo cặp (scene = Paragraph."order", line = ParagraphDetail."order")
+// nên tra ra ĐÚNG mốc của từng câu. Câu do người dùng tách thêm sau này (không khớp cặp nào)
+// thì chia đều khoảng thời gian của cả cảnh — chấp nhận xê xích, còn hơn mất cue.
+// v1 (1 cue = 1 cảnh) vẫn đọc được: coi như cảnh chỉ có 1 mốc, chia đều cho các câu trong cảnh.
+app.get('/api/srt-timing/:postId', async (req, res) => {
+    let db;
+    try {
+        db = await getDb();
+        const post = await db.get('SELECT id, project_id FROM Post WHERE id = ?', [req.params.postId]);
+        if (!post) { await db.close(); return res.status(404).json({ error: 'Post not found' }); }
+        const file = path.join(MEDIA_DIR, post.project_id, 'srt_timing.json');
+        if (!fs.existsSync(file)) { await db.close(); return res.json({ items: [] }); }
+        const exact = new Map();      // "cảnh:câu" -> mốc chính xác
+        const sceneSpan = new Map();  // cảnh -> [đầu, cuối] (để chia đều cho câu không khớp)
+        for (const c of (JSON.parse(fs.readFileSync(file, 'utf8')).cues || [])) {
+            const scene = Number(c.scene ?? c.order);   // v1 dùng 'order'
+            const start = Number(c.start), end = Number(c.end);
+            if (c.line != null) exact.set(`${scene}:${Number(c.line)}`, { start, end });
+            const cur = sceneSpan.get(scene);
+            sceneSpan.set(scene, cur ? [Math.min(cur[0], start), Math.max(cur[1], end)] : [start, end]);
+        }
+        const paras = await db.all('SELECT id, "order" FROM Paragraph WHERE post_id = ? ORDER BY id', [post.id]);
+        const items = [];
+        for (const p of paras) {
+            const scene = Number(p.order);
+            const span = sceneSpan.get(scene);
+            if (!span) continue;
+            const details = await db.all('SELECT id, "order" FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"', [p.id]);
+            const step = Math.max(0, span[1] - span[0]) / (details.length || 1);
+            details.forEach((d, i) => {
+                const hit = exact.get(`${scene}:${Number(d.order)}`);
+                items.push(hit ? { detailId: d.id, ...hit }
+                               : { detailId: d.id, start: span[0] + step * i, end: span[0] + step * (i + 1) });
+            });
+        }
+        await db.close(); db = null;
+        res.json({ items });
+    } catch (e) {
+        if (db) await db.close().catch(() => {});
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // API: Cào thêm X theo keyword nhập tay -> thêm vào block section='x' của post
 app.post('/api/x-crawl', express.json(), async (req, res) => {
     const { postId, keyword } = req.body;
@@ -1491,7 +1838,7 @@ app.post('/api/generate-title', async (req, res) => {
     if (!postId) return res.status(400).json({ error: 'Thiếu postId' });
     try {
         const db = await getDb();
-        const post0 = await db.get('SELECT project_id, target_lang FROM Post WHERE id = ?', [postId]);
+        const post0 = await db.get('SELECT project_id, target_lang, genre FROM Post WHERE id = ?', [postId]);
         const pick = (r) => (r.content || r.content_vi || '').trim();
         const parts = [];
         for (const tbl of ['HookDetail', 'SummaryDetail']) {
@@ -1511,9 +1858,11 @@ app.post('/api/generate-title', async (req, res) => {
         if (!script.trim()) return res.status(400).json({ error: 'Dự án chưa có nội dung để sinh title' });
 
         lang = post0?.target_lang || detectLang(script) || lang || (post0?.project_id || '').match(/_([a-z]{2})$/)?.[1] || 'en';
-        console.log(`[Title SEO] postId=${postId} lang=${lang} (target_lang=${post0?.target_lang || '-'})`);
+        // genre quyết định BỘ FILE prompt SEO (sport -> Nhiemvu_bongda/tieudemau_bongda).
+        const seoGenre = post0?.genre || null;
+        console.log(`[Title SEO] postId=${postId} lang=${lang} genre=${seoGenre || '-'} (target_lang=${post0?.target_lang || '-'})`);
 
-        const result = await generateSeoTitle(script, lang); // { target, vi }
+        const result = await generateSeoTitle(script, lang, seoGenre); // { target, vi }
         const db2 = await getDb();
         await db2.run('UPDATE Post SET seo_title = ? WHERE id = ?', [JSON.stringify(result), postId]);
         await db2.close();
@@ -1698,19 +2047,44 @@ app.post('/api/crop', async (req, res) => {
     if (!fs.existsSync(fullPath)) return res.status(404).json({ error: '404' });
     const ext = path.extname(fullPath);
     const outPath = fullPath.replace(ext, `_cropped${ext}`);
+    const isImage = IMAGE_EXTS.has(ext.toLowerCase());
     try {
-        // Crop bắt buộc re-encode → dùng NVENC cho nhanh (libx264 mặc định mất vài giây/clip 1080p)
-        const vcodec = hasNvenc
-            ? ['-c:v', 'h264_nvenc', '-preset', 'p4', '-b:v', '8M']
-            : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20'];
-        await runFfmpeg(['-i', fullPath, '-vf', `crop=${width}:${height}:${x}:${y}`, ...vcodec, '-c:a', 'copy', '-y', outPath]);
+        // ẢNH và VIDEO phải encode KHÁC NHAU. Trước đây dùng chung nhánh video (h264_nvenc) cho cả ảnh:
+        // ffmpeg vẫn EXIT 0 nhưng nhét luồng H.264 vào file .jpg → rename đè lên ảnh gốc → ảnh hỏng, mất luôn bản gốc.
+        let args;
+        if (isImage) {
+            // Để ffmpeg tự chọn encoder theo đuôi file (mjpeg/png/webp). -update 1 -frames:v 1 = ghi ĐÚNG
+            // 1 ảnh tĩnh (không có cờ này ffmpeg coi đường dẫn là mẫu image-sequence). Không có -c:a: ảnh không có tiếng.
+            const q = /^\.(jpg|jpeg|webp)$/i.test(ext) ? ['-q:v', '2'] : [];
+            args = ['-i', fullPath, '-vf', `crop=${width}:${height}:${x}:${y}`, '-frames:v', '1', '-update', '1', ...q, '-y', outPath];
+        } else {
+            // Crop video bắt buộc re-encode → dùng NVENC cho nhanh (libx264 mặc định mất vài giây/clip 1080p)
+            const vcodec = hasNvenc
+                ? ['-c:v', 'h264_nvenc', '-preset', 'p4', '-b:v', '8M']
+                : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20'];
+            args = ['-i', fullPath, '-vf', `crop=${width}:${height}:${x}:${y}`, ...vcodec, '-c:a', 'copy', '-y', outPath];
+        }
+        await runFfmpeg(args);
+
+        // CHỐT AN TOÀN trước khi đè lên bản gốc: exit code 0 của ffmpeg KHÔNG đủ để kết luận file ra dùng được
+        // (đúng ca hỏng ở trên: exit 0 nhưng ra H.264 trong .jpg). Sai kiểu thì giữ nguyên bản gốc và báo lỗi.
+        const outCodec = await ffprobeVideoCodec(outPath);
+        const okSize = fs.existsSync(outPath) && fs.statSync(outPath).size > 0;
+        const okKind = isImage ? STILL_IMAGE_CODECS.has(outCodec) : !!outCodec && !STILL_IMAGE_CODECS.has(outCodec);
+        if (!okSize || !okKind) {
+            try { fs.unlinkSync(outPath); } catch {}
+            throw new Error(`Crop ra file không hợp lệ (codec='${outCodec || 'không đọc được'}') → giữ nguyên file gốc.`);
+        }
         // Ghi đè lên file gốc
         fs.renameSync(outPath, fullPath);
         const db = await getDb();
         await db.run('UPDATE Asset SET duration = ? WHERE file_path = ?', [duration || null, relativePath]);
         await db.close();
         res.json({ success: true, newRelativePath: relativePath });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) {
+        try { if (fs.existsSync(outPath)) fs.unlinkSync(outPath); } catch {}
+        res.status(500).json({ error: e.message });
+    }
 });
 
 app.post('/api/trim', async (req, res) => {
@@ -2184,6 +2558,83 @@ app.get('/api/lips-sync/jobs/:id', async (req, res) => {
         res.status(502).json({ error: 'Không kết nối được lips_sync server: ' + e.message });
     }
 });
+// ===== GIẢI PHÓNG VRAM cho Lips Sync =====
+// LatentSync (:8010) hay OOM khi tiến trình GPU khác đang giữ VRAM (WhisperX align, matte RVM...).
+// Nút này kill CÁC WORKER GPU CỦA CHÍNH APP (whisperx / matte) để nhường VRAM, KHÔNG đụng vào
+// server lips (latentsync), node server, hay tiến trình lạ (browser, app khác) — trừ khi aggressive=true.
+async function nvidiaGpuMem() {
+    // Trả { total, used, free } (MiB) của GPU đầu tiên; null nếu không có nvidia-smi.
+    try {
+        const { stdout } = await execFileP('nvidia-smi',
+            ['--query-gpu=memory.total,memory.used,memory.free', '--format=csv,noheader,nounits']);
+        const [total, used, free] = stdout.trim().split('\n')[0].split(',').map(s => parseInt(s.trim(), 10));
+        return { total, used, free };
+    } catch { return null; }
+}
+async function nvidiaComputeApps() {
+    // [{ pid, mem(MiB), cmd }] các tiến trình đang chiếm VRAM.
+    try {
+        const { stdout } = await execFileP('nvidia-smi',
+            ['--query-compute-apps=pid,used_memory', '--format=csv,noheader,nounits']);
+        return stdout.trim().split('\n').filter(Boolean).map(line => {
+            const [pid, mem] = line.split(',').map(s => s.trim());
+            let cmd = '';
+            try { cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').trim(); } catch {}
+            return { pid: parseInt(pid, 10), mem: parseInt(mem, 10) || 0, cmd };
+        }).filter(p => p.pid);
+    } catch { return []; }
+}
+app.post('/api/lips-sync/free-vram', async (req, res) => {
+    try {
+        const aggressive = !!(req.body && req.body.aggressive);
+        const before = await nvidiaGpuMem();
+        const apps = await nvidiaComputeApps();
+        // Worker GPU của app cạnh tranh với LatentSync -> được phép kill.
+        const KILL_RE = /\.venv-whisperx|align_words\.py|matte_lips\.py/;
+        // Không bao giờ kill: server lips (latentsync), node server, chính process này.
+        const PROTECT_RE = /lips_sync|app\.main|uvicorn|server\.js/;
+        const killed = [], skipped = [];
+        for (const p of apps) {
+            if (p.pid === process.pid) { skipped.push({ ...p, reason: 'server này' }); continue; }
+            if (PROTECT_RE.test(p.cmd)) { skipped.push({ ...p, reason: 'được bảo vệ (lips/node)' }); continue; }
+            const shouldKill = aggressive ? true : KILL_RE.test(p.cmd);
+            if (!shouldKill) { skipped.push({ ...p, reason: 'không phải worker của app' }); continue; }
+            try { process.kill(p.pid, 'SIGTERM'); killed.push(p); }
+            catch (e) { skipped.push({ ...p, reason: 'kill lỗi: ' + e.message }); }
+        }
+        // Chờ tiến trình nhả VRAM; SIGKILL cho đứa còn ngoan cố.
+        if (killed.length) {
+            await new Promise(r => setTimeout(r, 1500));
+            for (const p of killed) {
+                try { process.kill(p.pid, 0); process.kill(p.pid, 'SIGKILL'); } catch {}
+            }
+            await new Promise(r => setTimeout(r, 500));
+        }
+        const after = await nvidiaGpuMem();
+        const freed = (before && after) ? Math.max(0, after.free - before.free) : 0;
+        console.log(`[free-vram] kill ${killed.length} tiến trình, giải phóng ~${freed} MiB (free ${before?.free}→${after?.free})`);
+
+        // Đảm bảo server lips (latentsync) đang chạy — CHỈ (re)start khi nó đang DOWN, để không cắt job đang chạy.
+        let lipsServer = 'unknown';
+        try {
+            const h = await globalThis.fetch(`${LIPS_SYNC_BASE}/jobs`, { signal: AbortSignal.timeout(2000) });
+            lipsServer = h.ok ? 'online' : 'online'; // phản hồi được = còn sống
+        } catch {
+            lipsServer = 'down';
+            try {
+                await execFileP('pm2', ['restart', 'latentsync', '--update-env']);
+                lipsServer = 'restarting';   // pm2 nhận lệnh; pipeline cần ~60s để load vào VRAM vừa giải phóng
+                console.log('[free-vram] latentsync đang down → đã gọi pm2 restart');
+            } catch (e) {
+                lipsServer = 'restart-failed';
+                console.warn('[free-vram] không gọi được pm2 restart latentsync:', e.message);
+            }
+        }
+        res.json({ ok: true, before, after, freed, killed, skipped, hasGpu: !!before, lipsServer });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
 // Đường dẫn file cấu hình auto lips_sync của 1 project (ghi lúc tạo project nếu bật option)
 function lipsAutoConfigPath(rawProjectId) {
     const projectId = String(rawProjectId).replace(/_[a-z]{2}$/, '');
@@ -2327,7 +2778,51 @@ async function orchestrateAutoVoice(projectId) {
 
 // Chạy lips_sync cho TỪNG CÂU của 1 post: tải mp3 mỗi câu, gửi job, output lưu vào <project>/lips_sync/
 // Dùng chung cho endpoint thủ công (/run-post) lẫn auto sau khi tạo audio (/auto-run).
-async function runLipsSyncForPost({ postId, contentType: reqCt, force, guidanceScale }) {
+// Ngưỡng VRAM trống tối thiểu để bắt đầu bắn job lips (MiB). Đo thực tế: chạy khoẻ luôn còn
+// 6400-7400 MiB trống, lúc OOM chỉ còn ~100 MiB. Trùng ngưỡng MIN_FREE_VRAM_MB của server lips.
+const LIPS_MIN_FREE_VRAM_MB = parseInt(process.env.LIPS_MIN_FREE_VRAM_MB || '2048', 10);
+
+// Ảnh chụp các job CÒN SỐNG (queued/running) trên server lips, tra theo output_path.
+//
+// Vì sao cần: DB chỉ nhớ job_id MỚI NHẤT của mỗi (post, idx) — upsert ON CONFLICT ghi đè.
+// Bấm "chạy lips sync" lần 2 lúc lần 1 chưa xong => job cũ bị mất dấu trong DB nhưng VẪN
+// nằm trong hàng đợi và vẫn chạy: không tra ra dự án, không huỷ được qua UI, và 2-3 job
+// cùng ghi đè 1 file mp4. Đo thực tế đã có 174/221 job trong hàng đợi là bản trùng.
+// Tra theo output_path (không theo DB) nên tóm được cả job mồ côi từ các lần chạy trước.
+async function lipsLiveJobsByOutput() {
+    const map = new Map();   // output_path -> [jobId]
+    try {
+        const qr = await globalThis.fetch(`${LIPS_SYNC_BASE}/queue`, { signal: AbortSignal.timeout(5000) });
+        if (!qr.ok) return map;
+        const q = await qr.json();
+        const ids = [...(q.running || []), ...(q.waiting || [])];
+        await Promise.all(ids.map(async (jid) => {
+            try {
+                const r = await globalThis.fetch(`${LIPS_SYNC_BASE}/jobs/${encodeURIComponent(jid)}`, { signal: AbortSignal.timeout(5000) });
+                if (!r.ok) return;
+                const d = await r.json();
+                if (!d.output_path || !['queued', 'running'].includes(d.status)) return;
+                if (!map.has(d.output_path)) map.set(d.output_path, []);
+                map.get(d.output_path).push(jid);
+            } catch { /* 1 job tra lỗi không được làm hỏng cả ảnh chụp */ }
+        }));
+    } catch (e) {
+        console.warn('[lips] không đọc được hàng đợi để lọc trùng:', e.message);
+    }
+    return map;
+}
+
+async function cancelLipsJobs(jobIds) {
+    if (!jobIds || !jobIds.length) return;
+    try {
+        await globalThis.fetch(`${LIPS_SYNC_BASE}/jobs/cancel`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_ids: jobIds }), signal: AbortSignal.timeout(5000),
+        });
+    } catch (e) { console.warn('[lips] không huỷ được job cũ:', e.message); }
+}
+
+async function runLipsSyncForPost({ postId, contentType: reqCt, force, guidanceScale, ignoreVram }) {
     if (!postId) { const e = new Error('Thiếu postId'); e.status = 400; throw e; }
     const gs = Number(guidanceScale);
     const guidance = Number.isFinite(gs) ? gs : 2.2;
@@ -2346,12 +2841,35 @@ async function runLipsSyncForPost({ postId, contentType: reqCt, force, guidanceS
         e.status = 400; throw e;
     }
 
+    // CHẶN SỚM khi GPU đang bị app khác chiếm: bắn cả trăm job vào GPU không còn chỗ thì
+    // mỗi job chết OOM sau ~4s, và người dùng chỉ thấy "hàng trăm job chờ mà không chạy".
+    // Thà báo ngay ở đây, kèm tên tiến trình đang giữ VRAM, để còn tắt app đó rồi chạy lại.
+    if (!ignoreVram) {
+        const mem = await nvidiaGpuMem();
+        if (mem && mem.free < LIPS_MIN_FREE_VRAM_MB) {
+            const apps = await nvidiaComputeApps();
+            const hogs = apps
+                .filter(p => p.mem >= 200 && !/lips_sync|app\.main|uvicorn/.test(p.cmd))
+                .sort((a, b) => b.mem - a.mem)
+                .map(p => `${path.basename((p.cmd || '').split(' ')[0]) || 'pid ' + p.pid} (${p.mem} MiB)`);
+            const e = new Error(
+                `GPU chỉ còn ${mem.free}/${mem.total} MiB trống, cần tối thiểu ${LIPS_MIN_FREE_VRAM_MB} MiB. `
+                + (hogs.length ? `Đang chiếm VRAM: ${hogs.join(', ')}. Tắt bớt rồi chạy lại.` : 'Hãy chờ GPU rảnh rồi chạy lại.')
+            );
+            e.status = 409;
+            throw e;
+        }
+    }
+
     const contentType = reqCt || post.voice_content_type || 'content';
     const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
     const outDir = path.join(MEDIA_DIR, projectId, 'lips_sync');
     fs.mkdirSync(outDir, { recursive: true });
 
     const audioList = await getAllAudioUrls(postId, contentType);
+    // Job đang chờ/chạy cho CHÍNH các file mp4 sắp ghi. Bấm chạy lại lúc lượt trước chưa
+    // xong sẽ rơi vào đây và dùng lại job cũ thay vì gửi thêm bản trùng.
+    const liveByOutput = await lipsLiveJobsByOutput();
     const jobs = [];
     for (let i = 0; i < audioList.length; i++) {
             const idx = i + 1;
@@ -2364,6 +2882,16 @@ async function runLipsSyncForPost({ postId, contentType: reqCt, force, guidanceS
                 jobs.push({ index: idx, audioPath, outputPath, status: 'done', skipped: true });
                 continue;
             }
+            const live = liveByOutput.get(outputPath) || [];
+            if (live.length && !force) {
+                // Đã có job sống ghi đúng file này -> DÙNG LẠI (ghi job_id vào DB, nhận
+                // luôn cả job mồ côi của lần chạy trước), không gửi thêm job trùng.
+                jobs.push({ index: idx, jobId: live[0], status: 'queued', audioPath, outputPath, reused: true });
+                if (live.length > 1) await cancelLipsJobs(live.slice(1));   // dọn bản trùng cũ
+                continue;
+            }
+            // force = làm lại từ đầu: huỷ job cũ trước, tránh 2 job cùng ghi 1 file.
+            if (live.length) await cancelLipsJobs(live);
             try {
                 const buf = await fetchBunnyAudio(audioUrl);
                 fs.writeFileSync(audioPath, buf);
@@ -2644,7 +3172,10 @@ app.get('/api/thumb', async (req, res) => {
     if (!rel || !src.startsWith(root + path.sep)) return res.status(400).send('Bad path');
     try {
         const thumb = await ensureThumb(MEDIA_DIR, rel);
-        res.setHeader('Cache-Control', 'public, max-age=86400');
+        // Cache 1 ngày CHỈ khi URL có dấu phiên bản (?v=<id asset>). Xóa ảnh rồi cào lại thì file mới
+        // lấy đúng tên cũ (stock_1.jpg...) -> cùng URL, khác nội dung: trình duyệt giữ cache 24h nên
+        // hiện lại ẢNH CŨ. Không có ?v= (link cũ, chỗ khác gọi) thì bắt buộc kiểm lại với server.
+        res.setHeader('Cache-Control', req.query.v ? 'public, max-age=86400' : 'no-cache');
         res.sendFile(thumb, (err) => { if (err && !res.headersSent) res.status(404).end(); });
     } catch (e) {
         // Không tạo được thumb (file hỏng/ffmpeg lỗi) → trả 404, UI tự fallback về nền đen
@@ -2661,7 +3192,9 @@ app.get('/api/media', (req, res) => {
     if (!rel || !src.startsWith(root + path.sep) || !fs.existsSync(src)) return res.status(404).end();
 
     if (proxyReady(MEDIA_DIR, rel)) {
-        res.setHeader('Cache-Control', 'public, max-age=86400');
+        // Cùng lý do như /api/thumb: chỉ cache dài khi URL có ?v=<id asset>, kẻo file bị thay
+        // (xóa rồi cào lại trùng tên) mà trình duyệt vẫn phát bản cũ.
+        res.setHeader('Cache-Control', req.query.v ? 'public, max-age=86400' : 'no-cache');
         return res.sendFile(proxyPathFor(MEDIA_DIR, rel), (err) => { if (err && !res.headersSent) res.status(404).end(); });
     }
     ensureProxy(MEDIA_DIR, rel).catch(() => {});
@@ -2692,7 +3225,13 @@ app.get('/', (req, res) => {
 // Chỉ phục vụ public/ (index.html, media-upload.html). Trước đây static(__dirname) mở cả thư mục gốc
 // ra HTTP — nghĩa là /google_sheet.json (key service account) tải được từ trình duyệt. UI không dùng
 // file tĩnh nào ở gốc (chỉ /api/* + media từ MEDIA_DIR) nên bỏ đi là an toàn.
-app.use(express.static(path.join(__dirname, 'public')));
+// index.html chứa TOÀN BỘ app (Vue inline) → tuyệt đối không để trình duyệt dùng bản cache:
+// sửa dashboard xong mà tab cũ vẫn chạy JS cũ thì mọi nút mới/bản vá đều "không có tác dụng".
+app.use(express.static(path.join(__dirname, 'public'), {
+    setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-store, must-revalidate');
+    }
+}));
 app.use(express.static(MEDIA_DIR, {
     setHeaders: (res, path) => {
         res.setHeader('Accept-Ranges', 'bytes'); // Cho phép trình duyệt yêu cầu từng đoạn video để tua
@@ -2730,24 +3269,54 @@ app.get('/api/lips-sync/queues', async (req, res) => {
         const db = await getDb();
         const has = await db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='LipsSyncJob'");
         if (!has) { await db.close(); return res.json({ projects: [], queue: null }); }
-        const projects = await db.all(`
-            SELECT j.post_id AS postId, p.project_id AS projectId, COALESCE(p.title, p.project_id) AS title,
-                   COUNT(*) AS total,
-                   SUM(CASE WHEN j.status='done' THEN 1 ELSE 0 END) AS done,
-                   SUM(CASE WHEN j.status='queued' THEN 1 ELSE 0 END) AS queued,
-                   SUM(CASE WHEN j.status IN ('processing','running') THEN 1 ELSE 0 END) AS running,
-                   SUM(CASE WHEN j.status='error' THEN 1 ELSE 0 END) AS error,
-                   SUM(CASE WHEN j.status='cancelled' THEN 1 ELSE 0 END) AS cancelled,
-                   MAX(j.updated_at) AS updatedAt
-            FROM LipsSyncJob j LEFT JOIN Post p ON p.id = j.post_id
-            GROUP BY j.post_id
-            ORDER BY updatedAt DESC`);
         // Trạng thái worker inference (best-effort, không có cũng không sao)
         let queue = null;
         try {
             const r = await globalThis.fetch(`${LIPS_SYNC_BASE}/queue`);
             if (r.ok) queue = await r.json();
         } catch (_) {}
+
+        // KHÔNG tin cột status trong DB: nó chỉ được cập nhật bởi /api/lips-sync/status,
+        // mà endpoint đó chỉ chạy khi người dùng đang MỞ modal lips của đúng post đó.
+        // Hệ quả cũ: không dòng nào từng mang status 'running' -> cột "Đang chạy" luôn 0,
+        // và job đã xong từ lâu vẫn nằm ở 'queued' -> số "Đang chờ" phóng đại.
+        // Nay đối chiếu lại từng dòng với hàng đợi sống (:8010) + file mp4 có thật trên đĩa.
+        // CHỈ đối chiếu khi thực sự đọc được hàng đợi. Nếu :8010 đang down/timeout thì
+        // queue=null — lúc đó coi mọi job 'queued' là đã huỷ sẽ xoá sạch trạng thái thật
+        // chỉ vì một lần mất kết nối. Không có snapshot thì giữ nguyên status trong DB.
+        const canReconcile = !!queue && Array.isArray(queue.waiting);
+        const liveRunning = new Set(queue?.running || []);
+        const liveWaiting = new Set(queue?.waiting || []);
+        const rows = await db.all(`
+            SELECT j.post_id AS postId, j.job_id AS jobId, j.status AS status, j.output_path AS outputPath,
+                   j.updated_at AS updatedAt, p.project_id AS projectId, COALESCE(p.title, p.project_id) AS title
+              FROM LipsSyncJob j LEFT JOIN Post p ON p.id = j.post_id`);
+        const byPost = new Map();
+        const heal = [];   // dòng cần chữa lại status trong DB cho lần sau
+        for (const r of rows) {
+            let st;
+            if (!canReconcile) st = r.status || 'queued';
+            else if (r.jobId && liveRunning.has(r.jobId)) st = 'running';
+            else if (r.jobId && liveWaiting.has(r.jobId)) st = 'queued';
+            else if (r.outputPath && fs.existsSync(r.outputPath)) st = 'done';
+            else if (r.status === 'queued') st = 'cancelled';   // không còn trong hàng đợi, cũng không có file
+            else st = r.status || 'queued';
+            if (st !== r.status && st !== 'running' && r.jobId) heal.push([st, r.jobId]);
+            let g = byPost.get(r.postId);
+            if (!g) {
+                g = { postId: r.postId, projectId: r.projectId, title: r.title,
+                      total: 0, done: 0, queued: 0, running: 0, error: 0, cancelled: 0, updatedAt: 0 };
+                byPost.set(r.postId, g);
+            }
+            g.total++;
+            if (g[st] !== undefined) g[st]++;
+            if ((r.updatedAt || 0) > g.updatedAt) g.updatedAt = r.updatedAt || 0;
+        }
+        const projects = [...byPost.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        // Ghi lại trạng thái đã đối chiếu để DB tự lành dần (bỏ qua 'running' vì nó đổi liên tục).
+        for (const [st, jid] of heal) {
+            await db.run('UPDATE LipsSyncJob SET status = ? WHERE job_id = ?', [st, jid]);
+        }
         // Worker chỉ trả job_id trần (vd "d0156fa4f703") → tra ngược ra TÊN DỰ ÁN cho dễ nhận.
         if (queue) {
             const ids = [...(queue.running || []), ...(queue.waiting || [])].filter(Boolean);
@@ -2968,12 +3537,13 @@ async function announceSlack(postTitle, missingScenes) {
 }
 
 app.post('/api/crawl-status/notify', (req, res) => {
-    const { postTitle, status, scene, missingScenes } = req.body;
+    const { postTitle, status, scene, missingScenes, silent } = req.body;
     // scene=true → crawl xong 1 cảnh, chỉ báo dashboard nạp lại assets (KHÔNG đổi status, KHÔNG Slack)
     if (scene) { pushCrawlScene(postTitle); return res.json({ success: true }); }
     pushCrawlStatus(postTitle, status);
     // status === null = pipeline crawl XONG → bắn Slack (kèm cảnh thiếu ảnh nếu có)
-    if (status === null || status === 'done') announceSlack(postTitle, missingScenes);
+    // silent=true → chỉ xoá spinner trên dashboard (dự án lỗi/bị huỷ), KHÔNG báo "đã crawl xong"
+    if (!silent && (status === null || status === 'done')) announceSlack(postTitle, missingScenes);
     res.json({ success: true });
 });
 

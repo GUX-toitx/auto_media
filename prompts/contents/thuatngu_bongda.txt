@@ -1,0 +1,327 @@
+⚽ 1. 戦術・概念・スタイル (Chiến thuật, Lối chơi & Triết lý)
+カテナチオ (Catenaccio): Hệ thống phòng ngự "bê tông" truyền thống của bóng đá Ý.
+ウノゼロ (Uno-Zero): Triết lý chiến thắng tối thiểu 1-0 của người Ý.
+ティキ・タカ / ティキタカ (Tiki-Taka): Lối chơi chuyền ngắn, di chuyển liên tục để kiểm soát bóng áp đảo của Tây Ban Nha.
+シャンパンフットボール (Champagne Football): Lối đá hoa mỹ, ngẫu hứng truyền thống của tuyển Pháp.
+ポゼッション (Possession): Lối chơi kiểm soát bóng.
+ボール保持 (Ball Hoji): Việc kiểm soát/giữ bóng chủ動.
+ポジショナルプレイ (Positional Play): Triết lý đá theo vị trí không gian.
+堅守速攻 (Kenshu Sokkou): Chiến thuật phòng ngự chắc chắn, phản công nhanh.
+カウンター (Counter): Đòn phản công.
+高速カウンター (Kousoku Counter): Phản công tốc độ cao.
+ショートカウンター (Short Counter): Phản công ngắn (cướp bóng và dứt điểm nhanh ở cự ly gần).
+プレッシング (Pressing): Gây áp lực thu hồi bóng.
+プレスバック (Press-back): Lùi về hỗ trợ phòng ngự.
+ハイプレス (High Press): Gây áp lực tầm cao.
+ハイプレッシング (High Pressing): Ép sân tầm cao liên tục.
+高強度ハイプレス (Koukyoudo High Press): Gây áp lực tầm cao cường độ cực lớn.
+ミドルプレス (Middle Press): Gây áp lực khu vực giữa sân.
+即時奪還 (Sokuji Dakkan): Cướp lại bóng ngay lập tức sau khi để mất (Gegenpressing).
+ゲゲンプレス (Gegenpress): Lối chơi phản áp lực tức thì đặc trưng của HLV Jürgen Klopp.
+プレス回避 (Press Kaihi): Khả năng thoát vây/thoát press.
+ゾーンディフェンス (Zone Defense): Sơ đồ phòng ngự theo khu vực.
+ローブロック (Low Block): Hàng phòng ngự lùi rất sâu để bảo vệ vòng cấm.
+守備ブロック (Shubi Block): Khối phòng ngự tổ chức chặt chẽ.
+ハイライン (High Line): Hàng phòng ngự dâng cao.
+ハイブリッド (Hybrid): Lối chơi kết hợp linh hoạt giữa kiểm soát bóng và phản công.
+ハイブリッド型 (Hybrid-gata): Sơ đồ/lối chơi kết hợp linh hoạt giữa nhiều phong cách.
+可変システム (Kahen System): Hệ thống chiến thuật biến ảo (thay đổi sơ đồ linh hoạt khi công và thủ).
+オーバーロード (Overload): Chiến thuật dồn quân số về một khu vực/hành lang sân.
+ウイングゼロ (Wing Zero): Sơ đồ không sử dụng tiền đạo cánh thuần túy.
+フィジカルサッカー (Physical Football): Lối đá thiên về thể lực và tranh chấp sức mạnh.
+フィジカルゴリ押し / フィジカルゴリ押しフットボール: Lối chơi cậy sức, tì đè cơ bắp và cày ải thể lực.
+コンパクトさ (Compactness): Duy trì cự ly đội hình thu gọn, hạn chế khoảng trống.
+ハイインテンシティ (High Intensity): Lối chơi duy trì cường độ thi đấu cực cao.
+トランジション (Transition): Quá trình chuyển trạng thái giữa Tấn công <-> Phòng ngự.
+原理原則 (Genri Gensoku): Các nguyên tắc chiến thuật cốt lõi do HLV đề ra.
+メッシシステム (Messi System): Hệ thống chiến thuật vận hành tối ưu hóa xoay quanh Messi.
+塩試合 (Shio-shiai): Trận đấu thực dụng, tẻ nhạt, thiếu tính cống hiến.
+勝利至上主義 (Shouri Shijou Shugi): Triết lý "chiến thắng là trên hết".
+勝利主義 (Shouri Shugi): Triết lý ưu tiên chiến thắng.
+現実主義 (Genjitsu Shugi): Triết lý bóng đá thực dụng.
+アイデンティティ (Identity): Bản sắc/triết lý bóng đá riêng biệt.
+11人目のフィールドプレイヤー: Triết lý dùng thủ môn như một cầu thủ thứ 11 trên sân.
+創造的破壊 (Souzou-teki Hakai): Tự phá vỡ chiến thuật cũ để xây dựng lối chơi mới tiến bộ hơn.
+ヘビメタフットボール (Heavy Metal Football): Bóng đá "hạng nặng" rực lửa, giàu tốc độ của Klopp.
+矛対決 (Hoko Taiketsu): Cuộc đối đầu giữa các hàng tấn công mạnh nhất.
+矛と盾の対決 (Hoko to Tate no Taiketsu): Cuộc đối đầu giữa Hàng công mạnh nhất và Hàng thủ chắc nhất.
+マンツーマン (Man-to-man): Chiến thuật kèm người 1-1.
+番外戦術 (Bangai Senjutsu): Chiến thuật ngoài chuyên môn / Tâm lý chiến.
+ノーガード (No Guard): Lối đá đôi công cởi mở, không chú trọng phòng ngự.
+殴り合い (Naguriai): Màn rượt đuổi tỷ số đôi công sòng phẳng.
+左右非対称の設計 (Sayoutohitashou no Sekkei): Cấu trúc chiến thuật bất đối xứng giữa hai cánh.
+インバート (Invert): Di chuyển bó vào trung lộ.
+ポジションを絞る: Bó hẹp vị trí thi đấu vào trung lộ.
+リスク管理 (Risk Kanri): Bọc lót phòng ngự và quản trị rủi ro khi dâng cao.
+横滑り (Yokosuberi): Di chuyển bọc lót ngang sang hành lang cánh.
+ダイナミズム (Dynamism): Tính năng động, sự bùng nổ trong lối chơi.
+プランB (Plan B): Phương án chiến thuật dự phòng.
+いい守備からいい攻撃: Triết lý "Phòng ngự tốt tạo tiền đề cho Tấn công giỏi".
+出所を潰す守備: Phòng ngự chủ động,đánh chặn ngay từ nguồn khởi xướng.
+
+🏃 2. ポジション・役割 (Vị trí & Vai trò cầu thủ)
+ゴールキーパー (GK): Thủ môn.
+守護神 (Shugoshin): "Thần bảo hộ" (Thủ môn xuất sắc).
+正ゴールキーパー (Sei-GK): Thủ môn bắt chính.
+ショットストッパー (Shot Stopper): Thủ môn thiên về phản xạ cản phá trên vạch vôi.
+ディフェンダー (DF): Hậu vệ.
+守備陣 (Shubijin): Hàng phòng ngự.
+最終ライン (Saishuu Line): Hàng thủ cuối cùng.
+センターバック (CB): Trung vệ.
+左センターバック / 右センターバック: Trung vệ lệch trái / Trung vệ lệch phải.
+ビースト系センターバック: Trung vệ phong cách "mãnh thú" (thiên về sức mạnh, tốc độ).
+サイドバック (SB): Hậu vệ biên (hậu vệ cánh).
+右サイドバック / 左サイドバック: Hậu vệ cánh phải / Hậu vệ cánh trái.
+タワー型サイドバック: Hậu vệ biên thể hình cao lớn, tì đè càn lướt.
+ウイングバック / 左ウイングバック: Hậu vệ/Tiền vệ chạy cánh / Hậu vệ cánh trái dâng cao.
+リベロ (Libero): Hậu vệ tự do.
+ミッドフィールダー (MF): Tiền vệ.
+中盤 (Chuuban) / 中盤ユニット: Tuyến giữa / Bộ khung tiền vệ.
+ボランチ (Volante): Tiền vệ phòng ngự.
+ダブルボランチ (Double Volante): Cặp tiền vệ phòng ngự (tiền vệ trụ đôi).
+守備的ボランチ: Tiền vệ đánh chặn.
+アンカー (Anchor): Tiền vệ mỏ neo (chơi thấp nhất ở tuyến giữa).
+インサイドハーフ (Inside Half): Tiền vệ trung tâm di chuyển lệch cánh.
+トップ下 (Top-shita): Tiền vệ tấn công (chơi ngay sau tiền đạo).
+2列目 (2-retsume): Hàng tiền vệ tấn công / Tuyến hai.
+シャドウ (Shadow): Tiền vệ/Tiền đạo ảo di chuyển rộng hỗ trợ tấn công.
+トライアングル (Triangle): Bộ ba tiền vệ phối hợp tam giác ở tuyến giữa.
+司令塔 (Shireitou): Nhạc trưởng điều tiết lối chơi.
+マエストロ (Maestro): Bậc thầy điều tiết lối chơi.
+ゲームメーカー (Game Maker): Cầu thủ cầm nhịp, điều tiết trận đấu.
+プレーメーカー (Playmaker): Cầu thủ tổ chức và kiến tạo lối chơi.
+ボックストゥボックス (Box-to-Box): Tiền vệ trung tâm có phạm vi hoạt động bao phủ từ vòng cấm địa sân nhà đến vòng cấm địa sân đối phương, thực hiện xuất sắc cả nhiệm vụ phòng ngự lẫn hỗ trợ tấn công..
+8番 (Hachi-ban): Tiền vệ số 8 (tiền vệ trung tâm công thủ toàn diện).
+10番 (Juu-ban): Tiền vệ số 10 (nhạc trưởng sáng tạo).
+フォワード (FW): Tiền đạo.
+攻撃陣 (Kougekijin) / 前線 (Zensen): Hàng công / Tuyến trên.
+センターフォワード (CF): Tiền đạo trung tâm (trung phong).
+ストライカー (Striker): Sát thủ săn bàn / Chân sút chủ lực.
+点取り屋 (Tentoriya): Tay săn bàn thực thụ.
+9番 (Kyuu-ban): Số 9 (Tiền đạo cắm thuần túy).
+ボックスストライカー (Box Striker): sát thủ vòng cấm.
+隠れストライカー: "Sát thủ ẩn mình" (các cầu thủ ảo bất ngờ dâng cao ghi bàn).
+ゴリゴリ系センターフォワード: Tiền đạo cắm phong cách cày ải, tì đè mạnh mẽ.
+ウイング (Wing): Tiền đạo cánh.
+両ウイング / 左ウイング / 右ウイング: Hai hành lang cánh / Cánh trái / Cánh phải.
+ウイングマン (Wingman): Cầu thủ chạy cánh.
+爆速ウイング: Tiền đạo cánh sở hữu tốc độ xé gió.
+ワントップ / 2トップ: Sơ đồ 1 tiền đạo / 2 tiền đạo.
+偽ワントップ / 偽トップ: Sơ đồ tiền đạo cắm ảo.
+偽9番 (False 9): Tiền đạo cắm ảo (lùi sâu kéo giãn hàng thủ).
+ターゲットマン (Target Man): Tiền đạo mục tiêu (chuyên đè người, làm tường).
+フィニッシャー (Finisher): Cầu thủ dứt điểm / Nhân tố kết thúc đường bóng.
+アタッカー (Attacker): Cầu thủ tấn công nói chung.
+スタメン / スターティングメンバー: Đội hình ra sân chính thức.
+ベンチメンバー / 控え (Hikae): Cầu thủ dự bị.
+途中出場 (Tochuu Shutsujou): Vào sân thay người từ băng ghế dự bị.
+スーパーサブ (Super Sub): Cầu thủ dự bị vào sân gây đột変.
+ジョーカー (Joker): Quân bài tẩy / Nhân tố bất ngờ.
+切札 (Kirifuda) / 秘密兵器: Quân bài chiến lược / Vũ khí bí mật.
+キャプテン (Captain): Đội trưởng.
+ディフェンスリーダー (Defense Leader): Thủ lĩnh hàng phòng ngự.
+精神的支柱 (Seishin-teki Shichuu): Trụ cột tinh thần.
+キーマン (Keyman): Nhân tố chủ chốt / Cầu thủ chìa khóa.
+マーカー (Marker): Cầu thủ chịu trách nhiệm theo kèm đối phương.
+相棒 (Aibou): Đồng đội ăn ý / Bạn diễn trên sân.
+指揮官 / 監督 / 新監督: Người cầm quân / Trưởng BHL / Tân HLV.
+アシスタントコーチ (Assistant Coach): Trợ lý HLV.
+水運びの選手 (Water Carrier): Tiền vệ thu hồi bóng thầm lặng.
+チャンスメーカー (Chance Maker): Cầu thủ tạo cơ hội/kiến tạo.
+黒子 (Kuroko): Cầu thủ đóng góp thầm lặng cho chiến thắng.
+暗殺者 (Ansatsusha): "Sát thủ" (tiền vệ bất ngờ dâng cao dứt điểm).
+安全装置 (Anzen Souchi): "Chốt chặn an toàn" (hậu vệ dọn dẹp phía sau).
+カオスメーカー (Chaos Maker): Cầu thủ di chuyển gây nhiễu乱 hàng thủ đối phương.
+生え抜き (Haenuki): Cầu thủ "cây nhà lá vườn" (trưởng thành từ lò đào tạo trẻ CLB).
+ファーストチョイス (First Choice): Sự lựa chọn số 1 cho vị trí ra sân.
+カメレオン (Chameleon): Cầu thủ đa năng như "tắc kè hoa".
+ローテーション要員 (Rotation Yoin): Cầu thủ phục vụ cho việc xoay tua đội hình.
+サポートプレイヤー (Support Player): Cầu thủ đóng vai trò hỗ trợ/bọc lót.
+
+📐 3. フォーメーション・陣形 (Sơ đồ chiến thuật)
+フォーメーション (Formation): Sơ đồ đội hình.
+Các sơ đồ con số cụ thể: 4-4-2, 3-4-2-1, 4-2-3-1, 4-3-3, 4-3-1-2, 4-2-4, 4-3-1, 3-2-4-1, 4-4-1-1.
+4バック (4-Back): Hàng thủ 4 hậu vệ.
+3バック (3-Back): Hàng thủ 3 hậu vệ.
+5バック (5-Back): Hàng thủ 5 hậu vệ.
+4トップ (4-Top): Sơ đồ dâng cao 4 tiền đạo.
+3トップ (3-Top): Sơ đồ 3 tiền đạo.
+スリーセンター (Three Center): Sơ đồ 3 tiền vệ trung tâm.
+ダブルチーム (Double Team): Tình huống kèm đôi / Vây ráp hai người.
+
+👟 4. プレー技術・能力・アクション (Kỹ thuật & Chỉ số)
+パス (Pass) / パスワーク (Passwork): Đường chuyền / Mảng miếng phối hợp chuyền bóng.
+ショートパス (Short Pass): Đường chuyền ngắn.
+縦パス (Tate Pass): Đường chuyền dọc sân (xuyên tuyến).
+ロングボール (Long Ball) / ロングフィード (Long Feed): Đường chuyền dài / Đường chuyền bổng cự ly xa.
+スルーパス (Through Pass): Đường chọc khe.
+フライスルーパス / 浮き玉のスルーパス: Đường chọc khe bổng.
+レーザーパス (Laser Pass): Đường chuyền dài chính xác như tia laser.
+ラストパス (Last Pass): Đường chuyền dọn cỗ (quyết định).
+クロス (Cross): Đường tạt bóng vào vòng cấm.
+アーリークロス (Early Cross): Đường tạt bóng sớm.
+ピンポイントクロス (Pinpoint Cross): Quả tạt bóng chuẩn xác từng milimét.
+ロングボール放り込み: Thả/phao bóng dài vào vòng cấm.
+ドリブル (Dribble) / ドリブル突破: Rê bóng / Đột phá bằng rê bóng.
+シザース (Scissors): Kỹ thuật đảo chân qua bóng.
+マルセイユ・ルーレット (Marseille Roulette): Kỹ thuật xoay 360 độ kiểu Marseille.
+カットイン (Cut-in): Kỹ thuật đi bóng ngoặt từ cánh vào trung lộ để dứt điểm.
+切り返し (Kirikaeshi): Động tác ngoặt bóng, đảo hướng di chuyển đột ngột.
+シュート (Shoot): Cú dứt điểm / Cú sút.
+ミドルシュート (Middle Shoot) / ロングレンジ: Cú sút xa ngoài vòng cấm / Cự ly xa.
+ボレーシュート (Volley Shoot) / ジャンピングボレー / 強烈なボレー: Cú sút vô-lê / Vô-lê bay người / Vô-lê uy lực.
+チップキック (Chip Kick): Cú sút bấm bóng nhẹ.
+トーキック (Toe Kick): Cú chích mũi giày.
+ループシュート (Loop Shoot): Cú sút cầu mây qua đầu thủ môn.
+ダイレクト (Direct): Cú dứt điểm một chạm.
+弾丸シュート (Dangan Shoot): Cú sút căng như kẻ chỉ (sút đạn bắn).
+フリーキック (FK) / 無回転フリーキック: Quả phạt trực tiếp / Quả sút phạt không xoáy.
+コーナーキック (CK) / ショートコーナー: Quả phạt góc / Phạt góc ngắn.
+セットプレー (Set Piece): Tình huống cố định (Phạt góc, phạt trực tiếp,...).
+セービング (Saving): Pha cản phá của thủ môn.
+シュートストップ (Shot Stop): Khả năng cản phá cú sút.
+ビッグセーブ (Big Save): Pha cứu thua xuất sắc.
+セーブ連発 (Save Renhatsu): Chuỗi cản phá cứu thua liên tục.
+インターセプト (Intercept): Đánh chặn đường chuyền.
+カバーリング (Covering): Bọc lót phòng ngự.
+ブロック (Block): Chắn cú sút / Chắn đường bóng.
+ポストプレー (Post Play): Kỹ thuật tì đè làm tường.
+レイオフ (Layoff): Kỹ thuật đập nhả/trả bóng một chạm ngược về cho tuyến hai.
+オーバーラップ (Overlap): Pha dâng cao chồng cánh của hậu vệ.
+クリア (Clear) / クリアミス (Clear Miss): Pha phá bóng / Pha phá bóng hỏng.
+デュエル (Duel): Pha tranh chấp 1 đấu 1.
+対人の強さ (Taijin no Tsuyosa): Khả năng tranh chấp 1-1 trực diện.
+マッチアップ (Match-up): Màn đối đầu trực tiếp giữa hai cầu thủ/ tương quan lực lượng giữa hai đội.
+オフザボール (Off the ball): Di chuyển không bóng.
+ダイヤゴナルラン (Diagonal Run): Đường chạy chéo sân xé rào hàng thủ đối phương.
+ビルドアップ (Build-up): Khâu triển khai bóng từ tuyến dưới lên.
+ファイナルサード (Final Third): 1/3 phần sân sát khung thành đối phương.
+ミドルサード (Middle Third): 1/3 khu vực giữa sân.
+バイタル (Vital Zone) / ボックス (Box): Khu vực nguy hiểm trước vòng cấm / Vòng cấm.
+ライン間 (Line-kan): Khoảng trống nằm giữa hàng tiền vệ và hàng hậu vệ đối phương.
+大外 (Oosoto): Hành lang cánh ngoài cùng sát đường biên.
+タッチライン (Touchline): Đường biên dọc.
+アウトスピン (Out-spin): Đường chuyền/sút bằng má ngoài.
+コンビネーション (Combination): Mảng miếng phối hợp nhỏ và nhanh.
+フィニッシュワーク (Finish Work): Khâu dứt điểm và dứt điểm cuối cùng.
+スプリント (Sprint): Pha bứt tốc cự ly ngắn.
+アジリティ (Agility): Độ linh hoạt, khả năng xoay xở nhanh.
+上下運動 (Jouge Uundou): Tần suất lên xuống dọc hành lang cánh.
+カバー範囲 (Cover Hani): Phạm vi bọc lót và bao quát phòng ngự.
+コーチング (Coaching): Khả năng giao tiếp, hô hào và chỉ đạo đồng đội trên sân.
+体幹の強さ (Taikan no Tsuyosa): Sức mạnh trọng tâm cơ thể / Thể trụ vững vàng.
+ターン (Turn): Động tác xoay người/ngoặt bóng thoát áp sát, đeo bám.
+スライド (Slide): Di chuyển bọc lót không gian.
+クリーンシート (Clean Sheet): Giữ sạch lưới.
+セーブ率 (Save Rate): Tỷ lệ cản phá thành công của thủ môn.
+枠内シュート (Wakunai Shoot): Cú sút trúng đích (hướng vào khung thành).
+ゴール期待値 (xG): Chỉ số bàn thắng kỳ vọng.
+ビッグチャンス数 (Big Chance): Số cơ hội nguy hiểm rõ rệt được tạo ra.
+パス試行数 / パス成功数 / 成功率: Số đường chuyền thực hiện / thành công / Tỷ lệ thành công.
+支配率 / ボール支配率: Tỷ lệ kiểm soát bóng.
+単騎性能 (Tanki Seinou): Năng lực tác chiến độc lập/ Khả năng gánh đội đơn độc.
+タックル (Tackle): Pha xoạc bóng / tắc bóng.
+立ち位置 (Tachi-ichi): Vị trí đứng chiến thuật để nhận bóng.
+
+🟨 5. ルール・判定・試合展開・移籍 (Luật, Trọng tài, Diễn biến & Quản lý)
+ファウル (Foul) / テクニカルファウル: Phạm lỗi / Phạm lỗi chiến thuật.
+イエローカード / 2枚目のイエロー: Thẻ vàng / Thẻ vàng thứ 2.
+レッドカード / 一発レッド: Thẻ đỏ / Thẻ đỏ trực tiếp.
+累積 / 累積警告 (Ruiseki Keikoku): Thẻ phạt tích lũy (dẫn đến treo giò).
+ペナルティエリア (Penalty Area): Vòng cấm地 (16m50).
+ペナルティキック (PK) / PK戦 (PK-sen) / PKを外す: Quả phạt đền 11m / Loạt sút luân lưu / Sút hỏng phạt đền.
+シミュレーション (Simulation): Hành vi ăn vạ.
+オフサイド (Offside): Lỗi việt vị.
+ハンド (Hand): Lỗi chạm tay vào bóng.
+主審 / 審判 (Shushin / Shinpan): Trọng tài chính / Trọng tài.
+誤審 (Goshin): Tiếng còi / Quyết định sai lầm của trọng tài.
+VAR (Video Assistant Referee): Công nghệ video trợ lý trọng tài.
+ゴールライン・テクノロジー (Goal-line Technology): Công nghệ vạch vôi xác định bàn thắng.
+ノックアウトステージ / 決勝トーナメント: Vòng loại trực tiếp (vòng knock-out).
+リーグフェーズ (League Phase): Vòng bảng dạng giải đấu.
+グループリーグ / グループステージ: Vòng bảng.
+ラウンド32 / ラウンド16: Vòng 32 / Vòng 1/8.
+準々決勝 / 準決勝 / 決勝戦: Vòng Tứ kết / Vòng Bán kết / Trận Chung kết.
+ファーストレグ / セカンドレグ: Trận lượt đi / Trận lượt về.
+プレーオフ (Playoff): Vòng đấu vớt / Trận play-off.
+ホーム / アウェイ: Sân nhà / Sân khách.
+勝ち点 (Kachiten): Điểm số trên bảng xếp hạng.
+自力突破 / 予選通過 / 予選敗退: Tự giành vé đi tiếp / Vượt qua vòng bảng / Bị loại từ vòng bảng.
+アディショナルタイム / ロスタイム: Thời gian bù giờ.
+延長戦 (Entchousen): Hiệp phụ.
+スコアレス / スコアレスドロー: Hòa không bàn thắng (0-0).
+シード / シード国: Đội hạt giống.
+ビハインド (Behind): Thế bị đối phương dẫn bàn.
+シーソーゲーム (Seesaw Game): Trận đấu rượt đuổi tỷ số kịch tính.
+乱打戦 (Randasen): Trận đấu đôi công rượt đuổi tỷ số sôi nổi.
+乱闘 (Rantou): Xô xát / Hỗn loạn trên sân.
+1対1のまま仕掛けさせる: Tạo điều kiện đối đầu 1-1 trực tiếp.
+ドロー (Draw): Trận hòa.
+逆転勝利 (Gyakuten Shouri): Chiến thắng lội ngược dòng.
+黒星 (Kuroboshi): Trận thua.
+無失点 (Mushitten): Giữ sạch lưới.
+交代カード (Koutai Card): Quyền/Lượt thay đổi cầu thủ.
+決定機 (Ketteiki): Cơ hội ăn bàn rõ rệt.
+フル出場 (Full Shutsujou): Thi đấu trọn vẹn cả trận.
+FIFAランク (FIFA Ranking): Bảng xếp hạng FIFA.
+移籍市場 (Iseki Shijou): Thị trường chuyển nhượng.
+契約満了 (Keiyaku Manryou): Hết hạn hợp đồng.
+退団 (Taidan): Rời câu lạc bộ.
+構想外 (Kousou-gai): Nằm ngoài kế hoạch chiến lược của HLV.
+双方合意のもと契約解消: Chấm dứt hợp đồng theo thỏa thuận đôi bên.
+レンタル (Rental): Hợp đồng cho mượn.
+武者修行 (Musha Shugyou): Mùa giải đi cho mượn để rèn luyện/tích lũy kinh nghiệm.
+移籍金 / ボーナス / 解除条項: Phí chuyển nhượng / Phụ phí / Điều khoản giải phóng hợp đồng.
+フリー補強 / フリー加入: Chiêu mộ / Gia nhập theo dạng chuyển nhượng tự do (0 đồng).
+トータルギャラクティコ (Total Galactico): Dự án dải ngân hà toàn diện / Siêu bom tấn chuyển nhượng.
+トレード (Trade): Trao đổi cầu thủ.
+紳士協定 (Shinshi Kyoutei): Thỏa thuận quân tử giữa các câu lạc bộ.
+補強 (Hokyou): Tăng cường lực lượng / Chiêu mộ tân binh.
+スポーツディレクター (Sports Director): Giám đốc thể thao.
+スカッド (Squad): Đội hình / Lực lượng cầu thủ.
+財務違反 (Zaimu Ihan): Vi phạm quy định tài chính (Fair Play tài chính).
+
+🏆 6. 大会・リーグ・ danh hiệu (Giải đấu, Cấp độ & Danh hiệu)
+ワールドカップ (World Cup) / W杯: Giải vô địch bóng đá thế giới.
+ユーロ (EURO): Giải vô địch bóng đá châu Âu.
+ネーションズリーグ (Nations League): Giải UEFA Nations League.
+コパ・アメリカ (Copa América): Giải vô địch bóng đá Nam Mỹ.
+チャンピオンズリーグ (Champions League) / CL: Giải Cúp C1 châu Âu.
+プレミアリーグ (Premier League): Giải Ngoại hạng Anh.
+ブンデスリーガ (Bundesliga): Giải vô địch quốc gia Đức.
+ラリーガ (La Liga): Giải vô địch quốc gia Tây Ban Nha.
+セリエA (Serie A): Giải vô địch quốc gia Ý.
+コパ・イタリア (Copa Italia): Cúp quốc gia Ý.
+コパ・デル・レイ (Copa del Rey): Cúp Nhà vua Tây Ban Nha.
+FAカップ (FA Cup): Cúp FA Anh.
+カラバウカップ (Carabao Cup): Cúp Liên đoàn Anh.
+クラブワールドカップ (Club World Cup): Giải vô địch bóng đá thế giới các câu lạc bộ.
+コミュニティシールド (Community Shield): Siêu cúp Anh.
+アジアカップ (Asian Cup) / アジア予選: Cúp bóng đá châu Á / Vòng loại khu vực châu Á.
+5大リーグ (Godai League): Top 5 giải VDQG hang đầu châu Âu.
+A代表 (A-Daihyou): Đội tuyển quốc gia cấp độ cao nhất.
+日の丸 (Hinomaru): Áo đấu ĐTQG Nhật Bản.
+ハットトリック (Hat-trick): Cú hat-trick (ghi 3 bàn/trận).
+得点王 (Tokuten-ou): Vua phá lưới.
+MVP: Cầu thủ xuất sắc nhất.
+バロンドール (Ballon d'Or): Quả bóng vàng thế giới.
+ゴールデンボール (Golden Ball): Quả bóng vàng World Cup.
+ゴールデングローブ (Golden Glove): Găng tay vàng (Thủ môn xuất sắc nhất).
+ゴールデンシュー (Golden Shoe): Chiếc giày vàng (Vua phá lưới).
+最優秀若手選手: Cầu thủ trẻ xuất sắc nhất.
+ベストイレブン (Best XI): Đội hình tiêu biểu.
+エースナンバー (Ace Number): Số áo cầu thủ trụ cột (thường là số 10).
+無敗優勝 (Muhai Yuushou): Vô địch bất bại.
+主要大会3連覇: Vô địch 3 giải đấu lớn liên tiếp (EURO - World Cup - EURO).
+欧州3冠 (Oushuu Sankan) / トレブル: Cú ăn ba châu Âu.
+センチュリオンズ (Centurions): Đội bóng đạt mốc 100 điểm lịch sử tại Premier League.
+4連覇 (4-Renpa): 4 lần vô địch liên tiếp.
+無冠のシーズン (Mukan no Season): Mùa giải trắng tay (không danh hiệu).
+大会新記録 / 最年少出場 / 最年少得点: Kỷ lục mới / Cầu thủ trẻ nhất ra sân / Cầu thủ trẻ nhất ghi bàn.
+代表引退 (Daihyou Intai): Giã từ sự nghiệp thi đấu quốc tế.
+ラストダンス (Last Dance): Vũ điệu cuối cùng (Giải đấu/Trận đấu cuối cùng trong sự nghiệp).
+
+📜 7. サッカー史における通称・出来事・人物像 (Lịch sử, Sự kiện & Biệt danh)
+カルチョスキャンダル / カルチョポリ (Calciopoli): Bê bối dàn xếp trọng tài lịch sử của bóng đá Ý năm 2006.
+スペシャルワン (Special One): Biệt danh "Người đặc biệt" của HLV José Mourinho.
+シティフットボールアカデミー (City Football Academy): Học viện đào tạo của Manchester City.

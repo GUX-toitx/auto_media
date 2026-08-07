@@ -60,6 +60,148 @@ export async function getBrowser(profileDir, proxy) {
     return chromium.launchPersistentContext(userDataDir, options);
 }
 
+// ===== Gỡ popup onboarding/giới thiệu của Flow =====
+// Thi thoảng Flow chặn cả UI bằng một popup giới thiệu, phải bấm "Bắt đầu" mới dùng tiếp được.
+// Google đổi popup này khá thường xuyên (đổi chữ, đổi số bước, có lúc dùng role=dialog có lúc không),
+// nên KHÔNG bắt bằng selector cứng. Muốn hỗ trợ chữ mới: thêm 1 dòng vào POPUP_BUTTON_PATTERNS —
+// khi gặp popup lạ, hàm này in ra sẵn toàn bộ nhãn nút của popup đó trong log.
+//
+// Xếp theo ĐỘ ƯU TIÊN: nút đi tiếp trước, nút bỏ qua sau — để không "Skip" mất một luồng
+// mà lẽ ra chỉ cần bấm "Bắt đầu" là vào thẳng.
+const POPUP_BUTTON_PATTERNS = [
+    'bắt đầu|get started|start now|let\'s go|dùng thử|try it',
+    'tiếp tục|continue|tiếp theo|^tiếp$|^next$|kế tiếp',
+    'đã hiểu|tôi hiểu|got it|i understand|^understood$|^ok$|^oke$',
+    'đồng ý|i agree|^agree$|^accept$|chấp nhận',
+    'xong|hoàn tất|^done$|^finish$|^close$|^đóng$',
+    'bỏ qua|^skip$|dismiss|not now|no thanks|để sau|không phải bây giờ|maybe later',
+];
+// Nút TUYỆT ĐỐI không bấm dù có khớp pattern nào ở trên (tránh tự phá tài khoản/dự án).
+const POPUP_BUTTON_BLOCKLIST = 'đăng xuất|sign out|log out|xoá|xóa|delete|remove|huỷ đăng ký|unsubscribe|nâng cấp|upgrade|mua|buy|subscribe|thanh toán';
+
+/**
+ * Tìm và bấm nút đóng popup. Gọi được nhiều lần, không có popup thì trả về null và không làm gì.
+ * KHÔNG BAO GIỜ throw — popup chỉ là vật cản phụ, lỗi ở đây không được làm hỏng cả lượt tạo media.
+ * @returns {Promise<string|null>} nhãn nút đã bấm, hoặc null nếu không bấm gì
+ */
+async function dismissFlowPopup(page) {
+    try {
+        const found = await page.evaluate(({ patterns, blocklist }) => {
+            const rxs = patterns.map(s => new RegExp(s, 'i'));
+            const blockRx = new RegExp(blocklist, 'i');
+            // Bỏ icon-font ra khỏi nhãn: <i class="google-symbols">arrow_forward</i> nằm TRONG nút
+            // sẽ lẫn chữ "arrow_forward" vào innerText, làm mọi regex khớp sai.
+            const label = (el) => {
+                const c = el.cloneNode(true);
+                c.querySelectorAll('i, svg, .google-symbols, .material-icons, .material-symbols-outlined, .material-symbols-rounded')
+                    .forEach(n => n.remove());
+                return (c.innerText || c.textContent || '').replace(/\s+/g, ' ').trim();
+            };
+            const visible = (el) => {
+                const r = el.getBoundingClientRect();
+                if (r.width < 2 || r.height < 2) return false;
+                const st = getComputedStyle(el);
+                return st.visibility !== 'hidden' && st.display !== 'none' && st.opacity !== '0';
+            };
+            const buttonsIn = (root) => [...root.querySelectorAll('button, [role=button], a[role=button]')]
+                .filter(visible)
+                .map(el => ({ el, text: label(el) }))
+                .filter(b => b.text && b.text.length <= 40);   // nhãn dài = đoạn văn, không phải nút
+
+            // 1) Ưu tiên hộp thoại thật: quét trong đó thì không thể bấm nhầm nút của trang chính.
+            const dialogs = [...document.querySelectorAll('[role=dialog], [role=alertdialog], dialog[open]')].filter(visible);
+            let scope = dialogs.length ? dialogs[dialogs.length - 1] : null;   // popup trên cùng
+            let cands = scope ? buttonsIn(scope) : [];
+
+            // 2) Không có hộp thoại chuẩn → quét toàn trang, nhưng CHỈ nhóm từ đặc trưng onboarding
+            //    (rxs[0]) để tránh bấm nhầm nút bình thường của Flow.
+            let onlyFirstPattern = false;
+            if (!cands.length) {
+                cands = buttonsIn(document);
+                onlyFirstPattern = true;
+            }
+            cands = cands.filter(b => !blockRx.test(b.text));
+
+            const active = onlyFirstPattern ? rxs.slice(0, 1) : rxs;
+            for (const rx of active) {
+                const hit = cands.find(b => rx.test(b.text));
+                if (hit) {
+                    hit.el.setAttribute('data-auto-popup-target', '1');
+                    return { text: hit.text, inDialog: !!scope };
+                }
+            }
+            // 3) Có popup mà không nút nào khớp → trả nhãn về để log, KHÔNG đoán bừa.
+            if (scope) return { unknown: true, labels: cands.map(b => b.text).slice(0, 12) };
+            return null;
+        }, { patterns: POPUP_BUTTON_PATTERNS, blocklist: POPUP_BUTTON_BLOCKLIST });
+
+        if (!found) return null;
+        if (found.unknown) {
+            console.warn('[Flow] ⚠️ Gặp popup LẠ chưa biết cách đóng. Nhãn các nút:', JSON.stringify(found.labels));
+            console.warn('[Flow]    → thêm chữ tương ứng vào POPUP_BUTTON_PATTERNS trong src/services/browser.js');
+            return null;
+        }
+        // Bấm bằng Playwright (không dùng el.click() trong evaluate) để đi qua đúng chuỗi
+        // sự kiện chuột thật — nút của Flow có chỗ chỉ phản hồi pointer event.
+        const target = page.locator('[data-auto-popup-target="1"]').first();
+        await target.click({ timeout: 5000 }).catch(async () => {
+            await page.evaluate(() => document.querySelector('[data-auto-popup-target="1"]')?.click());
+        });
+        await page.evaluate(() => document.querySelector('[data-auto-popup-target="1"]')?.removeAttribute('data-auto-popup-target'));
+        console.log(`[Flow] Đã đóng popup: "${found.text}"${found.inDialog ? '' : ' (không nằm trong dialog)'}`);
+        return found.text;
+    } catch (e) {
+        console.warn('[Flow] Bỏ qua lỗi khi gỡ popup:', e.message);
+        return null;
+    }
+}
+
+/**
+ * Chữ ký trạng thái popup, để biết cú bấm vừa rồi CÓ đổi được gì không.
+ *
+ * Phải gồm cả NỘI DUNG popup chứ không chỉ nhãn nút: onboarding nhiều bước thường giữ nguyên
+ * chữ trên nút ("Tiếp tục" ở cả bước 1 và 2), chỉ đổi phần nội dung — so bằng nhãn nút sẽ
+ * tưởng nhầm là đứng yên rồi bỏ dở onboarding giữa chừng.
+ */
+async function popupSignature(page) {
+    try {
+        return await page.evaluate(() => {
+            const visible = (el) => {
+                const r = el.getBoundingClientRect();
+                if (r.width < 2 || r.height < 2) return false;
+                const st = getComputedStyle(el);
+                return st.visibility !== 'hidden' && st.display !== 'none' && st.opacity !== '0';
+            };
+            // Cùng cách chọn phạm vi với dismissFlowPopup: hộp thoại trên cùng, không có thì cả trang.
+            const dialogs = [...document.querySelectorAll('[role=dialog], [role=alertdialog], dialog[open]')].filter(visible);
+            const scope = dialogs.length ? dialogs[dialogs.length - 1] : document.body;
+            return ((scope.innerText || scope.textContent || '').replace(/\s+/g, ' ').trim()).slice(0, 400);
+        });
+    } catch { return ''; }
+}
+
+/**
+ * Gỡ popup nhiều bước (onboarding kiểu Tiếp → Tiếp → Xong).
+ * Dừng ngay khi một vòng không bấm được gì nữa, nên không tốn thời gian khi không có popup.
+ */
+async function dismissFlowPopups(page, maxSteps = 5) {
+    const clicked = [];
+    for (let i = 0; i < maxSteps; i++) {
+        const before = await popupSignature(page);
+        const hit = await dismissFlowPopup(page);
+        if (!hit) break;
+        clicked.push(hit);
+        await page.waitForTimeout(1200);   // chờ bước kế của onboarding vẽ xong
+        // Bấm mà UI y nguyên = nút không đóng được popup (Google đổi cách hoạt động, hoặc
+        // nút chỉ là link). Bấm tiếp chỉ tổ spam đúng nút đó -> dừng và báo để còn biết mà sửa.
+        if (await popupSignature(page) === before) {
+            console.warn(`[Flow] ⚠️ Đã bấm "${hit}" nhưng popup không đổi → dừng để không bấm lặp.`);
+            break;
+        }
+    }
+    return clicked;
+}
+
 export async function generateFlowImage(keyword, saveDirPath, content = '', type = 'image', count = 2, lang = 'en', customPrompt = '', ratio = '16:9', videoMode = 'Frames', veo = 'Fast', selectedImages = []) {
     const MEDIA_DIR = process.env.MEDIA_DIR || '/usr/gux/media-team';
     let promptTemplate = customPrompt;
@@ -97,6 +239,8 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
         // Vào Flow
         await page.goto('https://labs.google/fx/tools/flow', { waitUntil: 'networkidle', timeout: 30000 });
         await page.waitForTimeout(3000);
+        // Popup giới thiệu hay chặn ngay khi vừa mở Flow → gỡ trước khi tìm bất kỳ nút nào.
+        await dismissFlowPopups(page);
 
         // Nếu bị redirect về accounts.google.com (chọn account hoặc login)
         if (page.url().includes('accounts.google.com')) {
@@ -113,6 +257,8 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
             await page.waitForURL(url => !url.toString().includes('accounts.google.com'), { timeout: 120000 });
             await page.waitForTimeout(3000);
             console.log('[Flow] Xác thực xong, tiếp tục...');
+            // Đăng nhập xong Flow hay chào lại bằng popup onboarding.
+            await dismissFlowPopups(page);
         }
 
         // Nếu có nút add_2 thì click tạo project mới
@@ -141,6 +287,10 @@ export async function generateFlowImage(keyword, saveDirPath, content = '', type
                 await page.waitForTimeout(8000);
             }
         }
+
+        // Vào được project rồi Flow vẫn có thể bật popup mẹo/tính năng mới. Gỡ nốt trước khi
+        // đụng vào settings + ô prompt: popup che thì click rơi vào lớp phủ, gõ prompt mất trắng.
+        await dismissFlowPopups(page);
 
         // Mở modal settings (button chứa cả ratio và count, ví dụ: "Videocrop_16_9x2")
         const settingsBtn = page.locator('button:visible').filter({ hasText: /x[1-4]$/ });
