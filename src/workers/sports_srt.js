@@ -935,7 +935,44 @@ function buildSrtFile(cues, texts) {
     return cues.map((c, i) => `${c.index}\n${c.timecode}\n${(texts[i] || c.text).trim()}\n`).join('\n');
 }
 
-async function getKeywordsFromGPT(sentence) {
+// CHỦ THỂ của cả bài (đội / cầu thủ / giải đấu), sinh 1 LẦN cho mỗi project.
+//
+// Vì sao cần: getKeywordsFromGPT chỉ nhận ĐÚNG MỘT CÂU, không biết bài đang nói về ai. Câu nào nêu
+// tên đội thì ra keyword đúng; câu nào không (vd "nguyên nhân sụp đổ nằm ở phòng thay đồ bất hoà")
+// thì model ĐOÁN BỪA — đo thực tế: bài về Real Madrid mà cảnh 2 ra toàn keyword パリ・サンジェルマン,
+// cào về một loạt ảnh du lịch Paris (Bing khớp パリ = Paris).
+async function buildMediaContext(db, postId) {
+    const fallback = { subject: '', entities: [] };
+    try {
+        const rows = await db.all('SELECT content_vi, content FROM Paragraph WHERE post_id = ? ORDER BY "order" LIMIT 8', [postId]);
+        const sample = rows.map(r => (r.content_vi || r.content || '').trim()).filter(Boolean).join('\n').slice(0, 5000);
+        if (!sample) return fallback;
+        const res = await httpsPost(
+            'https://api.openai.com/v1/chat/completions',
+            { 'Authorization': `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+            {
+                model: 'gpt-4o-mini',
+                temperature: 0,
+                response_format: { type: 'json_object' },
+                messages: [
+                    { role: 'system', content: 'Đọc phần mở đầu của một kịch bản video bóng đá và xác định CHỦ THỂ CHÍNH. Trả về DUY NHẤT JSON: {"subject":"<1 câu tiếng Việt nêu bài này nói về ai/chuyện gì>","entities":["<tên CLB, cầu thủ, HLV, giải đấu xuất hiện thật trong bài>", ...]}. entities tối đa 12 mục, chỉ lấy tên riêng CÓ THẬT trong đoạn văn, không suy diễn thêm.' },
+                    { role: 'user', content: sample },
+                ],
+            }
+        );
+        if (res.status !== 200) return fallback;
+        const j = JSON.parse(JSON.parse(res.body).choices?.[0]?.message?.content || '{}');
+        const ctx = {
+            subject: String(j.subject || '').trim(),
+            entities: Array.isArray(j.entities) ? j.entities.map(String).filter(Boolean).slice(0, 12) : [],
+        };
+        console.log(`[sports_srt] 🎯 Chủ thể bài: ${ctx.subject || '(không xác định)'}`);
+        if (ctx.entities.length) console.log(`[sports_srt] 🎯 Nhân vật/đội trong bài: ${ctx.entities.join(', ')}`);
+        return ctx;
+    } catch (e) { console.warn('[sports_srt] không xác định được chủ thể bài:', e.message); return fallback; }
+}
+
+async function getKeywordsFromGPT(sentence, ctx = null, prevText = '') {
     const res = await Promise.race([
         httpsPost(
             'https://api.openai.com/v1/chat/completions',
@@ -945,9 +982,46 @@ async function getKeywordsFromGPT(sentence) {
                 messages: [
                     {
                         role: 'system',
-                        content: 'You are a sports image search expert for Japanese Bing image search. Given a Vietnamese sports commentary sentence, return Japanese search queries optimized for Bing Images Japan. Rules: 1) Each query MUST be in Japanese (日本語). 2) Return as many queries as needed to fully cover the meaning of the sentence - typically 4 to 7 queries for normal sentences, but if the sentence contains many distinct subjects (multiple players, teams, events, historical moments), return as many as needed with no upper limit. For very simple sentences with one subject, return as few as 2. 3) Be SPECIFIC: include exact player names (in Japanese), team names, tournament names, and year if mentioned. 4) Each query should target a different visual subject in the sentence. 5) Avoid generic or overlapping queries. 6) Use Japanese sports terminology naturally used by Japanese media. 7) Return ONLY a raw JSON array of strings, no explanation.'
+                        content: [
+                            'You are a sports image search expert for Bing image search. Given a Vietnamese sports commentary sentence, return ENGLISH search queries optimized for Bing Images.',
+                            'Rules: 1) Each query MUST be in English. 2) Return as many queries as needed to fully cover the meaning of the sentence - typically 4 to 7 queries for normal sentences, but if the sentence contains many distinct subjects (multiple players, teams, events, historical moments), return as many as needed with no upper limit. For very simple sentences with one subject, return as few as 2. 3) Be SPECIFIC: use the exact name a player/coach/club/competition is known by in the English-language press (e.g. "Vinicius Junior", "Real Madrid", "Champions League"), plus the year if mentioned. 4) Each query should target a different visual subject in the sentence. 5) Avoid generic or overlapping queries. 6) Use the football vocabulary English-language sports media actually uses.',
+                            // Luật dưới đây rút ra từ ĐO ĐẠC log crawl thật (khi keyword còn là tiếng Nhật).
+                            // Tỉ lệ ảnh về từ trang bóng đá/báo chí:
+                            //   "モウリーニョ 戦術", "モウリーニョ ヴィニシウス・ジュニオール"  -> 100%
+                            //   "レアル・マドリードの移籍劇", "...の戦略", "...のドラマ"       -> 0%
+                            //   MỌI query "パリ・サンジェルマン + X"                        -> 0% (Bing khớp パリ = Paris -> ảnh du lịch)
+                            // Khác biệt quyết định là CÓ TÊN NGƯỜI hay không, chứ không phải trừu tượng hay cụ thể:
+                            // "レアル・マドリード 試合" (rất cụ thể) cũng 0%, còn "モウリーニョ 戦術" (khá trừu
+                            // tượng) lại 100%. Tên CLB đứng một mình khớp quá rộng nên Bing trả về đủ thứ.
+                            // Đổi sang tiếng Anh không làm quy luật này mất hiệu lực (tên CLB vẫn là cụm rộng),
+                            // NHƯNG con số 100%/0% ở trên đo trên truy vấn tiếng Nhật, chưa đo lại cho tiếng Anh.
+                            '',
+                            '===== PUT A PERSON IN EVERY QUERY (most important rule — measured) =====',
+                            '- A query built on a CLUB NAME alone returns junk (travel photos, stock, wallpapers). A query containing a PERSON name returns real football photos.',
+                            '- So: most queries MUST contain the name of a player, a coach, a club president or a referee (e.g. "Jose Mourinho", "Vinicius Junior", "Florentino Perez").',
+                            '- If the sentence names people, use them. If it does not, take the people from the CONTEXT section below and pair them with what the sentence is about.',
+                            '- Good shapes: "<person>", "<person> <club>", "<person> <person>", "<person> <topic>".',
+                            '- Bad shapes (do NOT produce): "<club> <abstract noun>" — e.g. "Real Madrid transfer drama", "Real Madrid strategy", "PSG dressing room problems".',
+                            '- If a query really cannot contain a person (a stadium, a trophy, a crowd), add the word "football" so it stays in the football domain.',
+                            '- Return at most 2 queries without a person name; all the others must contain one.',
+                            '',
+                            'OUTPUT FORMAT: a raw JSON array of objects, each {"q":"<the English search query>","person":"<the person name inside q, or empty string if the query has no person>"}. Nothing else.',
+                            // Luật CHỦ THỂ — câu phụ đề rời rạc rất hay KHÔNG nêu tên đội, model không có ngữ cảnh
+                            // sẽ tự gán cho một CLB nổi tiếng nào đó và cào về cả loạt ảnh sai đội.
+                            (ctx?.subject || ctx?.entities?.length) ? [
+                                '',
+                                '===== CONTEXT — THE WHOLE VIDEO IS ABOUT THIS =====',
+                                ctx.subject ? `Topic: ${ctx.subject}` : '',
+                                ctx.entities?.length ? `Clubs / players / competitions in this video: ${ctx.entities.join(', ')}` : '',
+                                'HARD RULES ABOUT SUBJECT (override everything above):',
+                                '- Every query MUST be about the clubs/players/competitions listed above.',
+                                '- If the sentence does NOT name a club or player, infer it from the context above — do NOT guess a famous club.',
+                                '- NEVER introduce a club, player or competition that is not in the context and not in the sentence.',
+                            ].filter(Boolean).join('\n') : '',
+                        ].filter(Boolean).join('\n')
                     },
-                    { role: 'user', content: sentence }
+                    // Câu liền trước giúp phân giải đại từ / "họ" / "gã khổng lồ áo trắng" ở câu hiện tại.
+                    { role: 'user', content: (prevText ? `Câu trước đó (chỉ để tham khảo ngữ cảnh, KHÔNG sinh keyword cho nó): ${prevText}\n\nCâu cần sinh keyword: ` : '') + sentence }
                 ],
                 temperature: 0.3
             }
@@ -961,16 +1035,36 @@ async function getKeywordsFromGPT(sentence) {
     if (data.error) console.log(`    [DEBUG] GPT error: ${JSON.stringify(data.error)}`);
     // Strip markdown code block nếu có
     content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    let arr = [];
     try {
         const parsed = JSON.parse(content);
-        if (Array.isArray(parsed)) return parsed.filter(Boolean);
-        const val = Object.values(parsed)[0];
-        return Array.isArray(val) ? val.filter(Boolean) : [];
+        arr = Array.isArray(parsed) ? parsed : (Array.isArray(Object.values(parsed)[0]) ? Object.values(parsed)[0] : []);
     } catch {
-        const match = content.match(/\[.*?\]/s);
-        if (match) try { return JSON.parse(match[0]).filter(Boolean); } catch(_) {}
-        return [];
+        const match = content.match(/\[[\s\S]*\]/);
+        if (match) try { arr = JSON.parse(match[0]); } catch (_) { arr = []; }
     }
+    return enforcePersonQuota(arr);
+}
+
+// Ép luật "phải có tên người" bằng CODE, vì gpt-4o-mini không tuân thủ triệt để lời dặn:
+// đo thực tế vẫn lọt 3/7 query dạng "<CLB> <khái niệm>" — đúng dạng cho 0% ảnh bóng đá.
+// Giữ toàn bộ query CÓ người, cộng tối đa 2 query không người (để còn ảnh sân vận động / cúp).
+// Model trả mảng chuỗi kiểu cũ thì nhận nguyên (không có cơ sở để lọc, thà giữ còn hơn mất trắng).
+const MAX_QUERIES_WITHOUT_PERSON = 2;
+function enforcePersonQuota(arr) {
+    const items = (arr || []).map(x => (typeof x === 'string'
+        ? { q: x.trim(), person: null }
+        : { q: String(x?.q || '').trim(), person: String(x?.person || '').trim() })).filter(x => x.q);
+    if (!items.length) return [];
+    if (items.every(x => x.person === null)) return items.map(x => x.q);   // định dạng cũ -> giữ nguyên
+
+    const withPerson = items.filter(x => x.person);
+    const without = items.filter(x => !x.person);
+    const kept = [...withPerson, ...without.slice(0, MAX_QUERIES_WITHOUT_PERSON)];
+    const dropped = without.length - Math.min(without.length, MAX_QUERIES_WITHOUT_PERSON);
+    if (dropped > 0) console.log(`    (bỏ ${dropped} keyword không có tên người: ${without.slice(MAX_QUERIES_WITHOUT_PERSON).map(x => x.q).join(' | ')})`);
+    // Cực đoan: không query nào có người -> giữ nguyên bản gốc, đừng để cảnh trắng ảnh.
+    return (kept.length ? kept : items).map(x => x.q);
 }
 
 async function main() {
@@ -980,21 +1074,39 @@ async function main() {
     const args = [];
     let minutes = 0;
     let wantTranslate = false;
+    let translateTo = '';   // '--translate <lang>'; thiếu <lang> thì lấy ngôn ngữ đích (tương thích lệnh cũ)
+    let mediaOnly = false, mediaPostId = 0, mediaForce = false;
     for (let i = 0; i < argv.length; i++) {
+        if (argv[i] === '--mediaOnly') { mediaOnly = true; continue; }
+        if (argv[i] === '--postId') { mediaPostId = parseInt(argv[++i], 10) || 0; continue; }
+        if (argv[i] === '--force') { mediaForce = true; continue; }
         if (argv[i] === '--minutes') { minutes = parseInt(argv[++i], 10) || 0; continue; }
-        if (argv[i] === '--translate') { wantTranslate = true; continue; }
+        if (argv[i] === '--translate') {
+            wantTranslate = true;
+            // Giá trị đi kèm chỉ tính khi nó là mã ngôn ngữ, không phải cờ khác.
+            if (argv[i + 1] && !argv[i + 1].startsWith('--') && /^[a-z]{2}$/i.test(argv[i + 1])) translateTo = argv[++i].toLowerCase();
+            continue;
+        }
         args.push(argv[i]);
     }
+    // Chỉ cào media cho post đã có nội dung (nút "Crawl Media" gọi vào đây) — không đụng kịch bản.
+    if (mediaOnly) {
+        if (!mediaPostId) { console.error('Usage: node sports_srt.js --mediaOnly --postId <id> [--force]'); process.exit(1); }
+        return mediaOnlyMain(mediaPostId, mediaForce);
+    }
+
     const isPromptMode = args[0] === '--prompt';
     const projectId = isPromptMode ? args[1] : args[1];
     const targetLang = isPromptMode ? (args[3] || 'vi') : (args[3] || 'vi');
 
     if (!projectId) {
-        console.error('Usage: node sports_srt.js <file.srt> <projectId> [file_translated.srt] [targetLang]');
+        console.error('Usage: node sports_srt.js <file.srt> <projectId> [file_translated.srt] [targetLang] [--translate <lang>]');
         console.error('       node sports_srt.js --prompt <projectId> <promptText> [targetLang] [--minutes 30]');
         process.exit(1);
     }
     teeLogToProject(projectId);
+    // Không nêu rõ dịch sang đâu -> dịch sang ngôn ngữ đích (giữ hành vi cũ: SRT tiếng Việt -> bản đích).
+    if (wantTranslate && !translateTo) translateTo = targetLang;
 
     let rawSentences; // [{ index, text }]
     let postTitle = '';
@@ -1035,31 +1147,37 @@ async function main() {
         let translatedSentences = srtTranslatedPath ? parseSrt(srtTranslatedPath) : null;
         console.log(`[sports_srt] Đọc được ${srtSentences.length} câu từ ${srtPath}`);
 
-        // Bật --translate mà KHÔNG kèm file dịch sẵn -> tự dịch rồi ghi ra file .srt đã dịch.
+        // Bật --translate <lang> mà KHÔNG kèm file dịch sẵn -> tự dịch rồi ghi ra file .srt đã dịch.
         // Có file dịch sẵn thì tôn trọng file đó, không dịch đè (người dùng đã bỏ công dịch tay).
-        if (wantTranslate && !translatedSentences && targetLang !== 'vi') {
+        //
+        // HAI CỘT trong DB: content = ngôn ngữ đích (giọng đọc chính), content_vi = cột tiếng Việt.
+        // File SRT upload KHÔNG mặc định là tiếng Việt: nó có thể là bản tiếng Nhật cần dịch sang Việt.
+        // Vậy nên xếp cột theo HƯỚNG DỊCH — dịch sang 'vi' thì bản dịch vào cột vi, file gốc vào cột đích;
+        // ngược lại thì file gốc là bản tiếng Việt, bản dịch vào cột đích (như trước).
+        const srcTexts = srtSentences.map(s => s.text);
+        let viTexts = srcTexts, tgTexts = srcTexts;
+
+        if (translatedSentences) {
+            // Có file dịch sẵn: giữ đúng quy ước cũ — file gốc là cột vi, file dịch là cột đích.
+            tgTexts = srtSentences.map(s => translatedSentences.find(t => t.index === s.index)?.text || s.text);
+        } else if (wantTranslate && translateTo) {
             await setSportsStatus(projectId, `translating:0/${srtSentences.length}`, { title: projectId });
-            console.log(`[sports_srt] 🌐 Dịch ${srtSentences.length} dòng phụ đề sang '${targetLang}'...`);
-            const { translations, failed } = await translateSrtTexts(srtSentences.map(s => s.text), targetLang, projectId);
+            console.log(`[sports_srt] 🌐 Dịch ${srtSentences.length} dòng phụ đề sang '${translateTo}'...`);
+            const { translations, failed } = await translateSrtTexts(srcTexts, translateTo, projectId);
             if (failed >= srtSentences.length) {
                 // Không dịch được dòng nào -> ĐỪNG ghi file "đã dịch" y hệt bản gốc, nhìn là tưởng dịch xong.
-                console.error('[sports_srt] ❌ Dịch thất bại hoàn toàn → không ghi input_translated.srt, dùng câu gốc cho cả 2 cột.');
+                console.error('[sports_srt] ❌ Dịch thất bại hoàn toàn → không ghi file đã dịch, dùng câu gốc cho cả 2 cột.');
             } else {
-                const outPath = path.join(MEDIA_DIR, projectId, 'input_translated.srt');
+                const outPath = path.join(MEDIA_DIR, projectId, `input_${translateTo}.srt`);
                 fs.mkdirSync(path.dirname(outPath), { recursive: true });
                 fs.writeFileSync(outPath, buildSrtFile(srtSentences, translations));
                 console.log(`[sports_srt] 💾 Đã ghi file SRT đã dịch: ${outPath}` + (failed ? ` (${failed} dòng giữ nguyên bản gốc)` : ''));
-                translatedSentences = srtSentences.map((s, i) => ({ ...s, text: translations[i] }));
+                if (translateTo === 'vi') { viTexts = translations; tgTexts = srcTexts; }
+                else { viTexts = srcTexts; tgTexts = translations; }
             }
-        } else if (wantTranslate && targetLang === 'vi') {
-            console.log('[sports_srt] Ngôn ngữ đích là tiếng Việt = ngôn ngữ nguồn → bỏ qua bước dịch.');
         }
 
-        rawSentences = srtSentences.map(({ index, text }) => ({
-            index,
-            text: translatedSentences?.find(s => s.index === index)?.text || text,
-            textVi: text
-        }));
+        rawSentences = srtSentences.map((s, i) => ({ index: s.index, text: tgTexts[i], textVi: viTexts[i] }));
 
         // Lưu mốc thời gian gốc (cùng định dạng v2 của podcast) để nút "📄 Tải SRT" xuất lại
         // đúng timeline ban đầu — chế độ SRT của sport là 1 cue = 1 cảnh = 1 câu đọc.
@@ -1132,12 +1250,40 @@ async function main() {
     // Kịch bản đã xong, sang khâu cào ảnh: đổi nhãn trên dashboard + đẩy tên bài thật (đang là mã dự án).
     await setSportsStatus(projectId, 'crawling', { title: postTitleVi || postTitle || projectId });
 
-    // Bước 2: Crawl ảnh cho từng câu
-    for (const { index, text, paragraphId } of paragraphIds) {
+    await runMediaStage(db, projectId, postId, { force: false });
+    await db.close();
+    await setSportsStatus(projectId, null);   // xoá spinner trên dashboard (+ báo Slack như các pipeline khác)
+    console.log('\n[sports_srt] ✅ Hoàn thành!');
+}
+
+// ===== KHÂU MEDIA: chủ thể bài -> gợi ý ảnh -> keyword tiếng Nhật -> cào ảnh, cho TỪNG cảnh =====
+// Tách riêng để chạy được ở 2 thời điểm: ngay sau khi tạo dự án, HOẶC khi bấm "Crawl Media".
+// Luôn đọc nội dung MỚI NHẤT từ DB nên keyword bám đúng bản đã chỉnh sửa.
+//   force=false: bỏ qua cảnh đã có ảnh (chỉ bù cảnh trống) | force=true: cào lại tất cả
+async function runMediaStage(db, projectId, postId, { force = false } = {}) {
+    const paragraphs = await db.all('SELECT id, "order" FROM Paragraph WHERE post_id = ? ORDER BY "order"', [postId]);
+    console.log(`[sports_srt] 🖼️  Khâu media: ${paragraphs.length} cảnh (force=${force})`);
+    // Chủ thể của bài: sinh 1 lần, kèm vào MỌI lượt sinh gợi ý ảnh + keyword.
+    const ctx = await buildMediaContext(db, postId);
+    let prevText = '';
+
+    for (const [n, para] of paragraphs.entries()) {
+        const paragraphId = para.id;
+        const index = para.order;
+        const paraRow = await db.get('SELECT content, content_vi FROM Paragraph WHERE id=?', [paragraphId]);
+        const text = paraRow?.content || '';
         // Luôn đọc content_vi từ DB để đảm bảo dùng tiếng Việt
-        const paraRow = await db.get('SELECT content_vi FROM Paragraph WHERE id=?', [paragraphId]);
         const textVi = paraRow?.content_vi || text;
-        console.log(`\n[${index}/${rawSentences.length}] "${text.slice(0, 60)}..."`);
+        console.log(`\n[${n + 1}/${paragraphs.length}] cảnh ${index}: "${(textVi || text).slice(0, 60)}..."`);
+        // Cập nhật mồi ngữ cảnh NGAY, trước mọi nhánh `continue` — cảnh bị bỏ qua vì đã có ảnh mà
+        // không cập nhật thì cảnh kế mất mạch, đúng lúc cần nhất (nó vốn hay không nêu tên đội).
+        const ctxPrev = prevText;
+        prevText = (textVi || text).slice(0, 300);
+
+        if (!force) {
+            const has = await db.get('SELECT COUNT(*) c FROM Asset WHERE paragraph_id = ?', [paragraphId]);
+            if (has.c > 0) { console.log(`    (đã có ${has.c} ảnh → bỏ qua)`); continue; }
+        }
 
         // Sinh image_suggestion chỉ khi chưa có (SRT mode không có GPT-5 suggestions)
         const existingSugs = await db.get("SELECT COUNT(*) as c FROM Keyword WHERE paragraph_id=? AND type='image_suggestion'", [paragraphId]);
@@ -1149,7 +1295,8 @@ async function main() {
                     {
                         model: 'gpt-4o-mini',
                         messages: [
-                            { role: 'system', content: 'You are a sports image suggestion expert. Read the given sports text and return a JSON array of Vietnamese search terms describing images that would illustrate the paragraph. Example: ["logo đội tuyển Nhật Bản", "Moriyasu huấn luyện viên", "World Cup 2026"]. Return ONLY a JSON array, no explanation.' },
+                            { role: 'system', content: 'You are a sports image suggestion expert. Read the given sports text and return a JSON array of Vietnamese search terms describing images that would illustrate the paragraph. Example: ["logo đội tuyển Nhật Bản", "Moriyasu huấn luyện viên", "World Cup 2026"]. Return ONLY a JSON array, no explanation.'
+                                + ((ctx?.subject || ctx?.entities?.length) ? `\n\nCẢ VIDEO NÓI VỀ: ${ctx.subject || ''}${ctx.entities?.length ? '\nCLB/cầu thủ/giải đấu trong bài: ' + ctx.entities.join(', ') : ''}\nBẮT BUỘC: mọi gợi ý phải xoay quanh đúng những chủ thể trên, ưu tiên TÊN NGƯỜI. Câu không nêu tên đội thì suy từ ngữ cảnh này, TUYỆT ĐỐI không tự đưa CLB/cầu thủ khác vào.` : '') },
                             { role: 'user', content: textVi || text }
                         ],
                         temperature: 0.3
@@ -1178,7 +1325,7 @@ async function main() {
                 if (attempt > 0) await new Promise(r => setTimeout(r, 2000 * attempt));
                 const inputText = textVi || text;
                 console.log(`    [DEBUG] Gửi GPT (attempt ${attempt+1}): "${inputText.slice(0, 80)}"`);
-                keywords = await getKeywordsFromGPT(inputText);
+                keywords = await getKeywordsFromGPT(inputText, ctx, ctxPrev);
                 console.log(`    [DEBUG] GPT raw trả về ${keywords.length} keywords`);
             } catch (e) {
                 console.error(`    GPT lỗi (attempt ${attempt+1}): ${e.message}`);
@@ -1206,22 +1353,40 @@ async function main() {
 
         const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(0), ms))]);
         // Chạy tuần tự, sync vào DB ngay sau mỗi keyword. Xoay vòng Bing/Google + log theo dự án.
+        // 150s chứ không phải 60s: crawlKeywordImageRotate giờ đi Google -> bù Bing -> thử lại Bing,
+        // mỗi nguồn đã có hạn giờ riêng; cắt ở 60s là chặn mất đúng khâu fallback sinh ra ảnh.
         for (const [i, kw] of keywords.entries()) {
             console.log(`    -> Crawl ảnh: "${kw}"`);
             await withTimeout(
                 crawlKeywordImageRotate(kw, imgDir, i, IMAGES_PER_KEYWORD)
                     .then(got => console.log(`    -> Tải được: ${got} ảnh (${kw})`))
                     .catch(e => console.error(`    -> Lỗi crawl: ${e.message}`)),
-                60000
+                150000
             );
             await syncImages(); // sync ngay sau mỗi keyword
         }
     }
-
     await db.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]);
-    await db.close();
-    await setSportsStatus(projectId, null);   // xoá spinner trên dashboard (+ báo Slack như các pipeline khác)
-    console.log('\n[sports_srt] ✅ Hoàn thành!');
+}
+
+// Chỉ chạy khâu media cho 1 post đã có nội dung: node sports_srt.js --mediaOnly --postId 12 [--force]
+// Nút "Crawl Media" gọi vào đây — nhờ vậy cảnh CHƯA CÓ keyword vẫn được sinh keyword rồi cào,
+// thay vì bị bỏ qua như vòng lặp cũ trong server (xoá hết keyword là bấm nút không có gì xảy ra).
+async function mediaOnlyMain(postId, force) {
+    const db = await getDb();
+    const post = await db.get('SELECT id, project_id FROM Post WHERE id = ?', [postId]);
+    if (!post) { await db.close(); throw new Error(`Không tìm thấy post ${postId}`); }
+    teeLogToProject(post.project_id);
+    await db.run('UPDATE Post SET status = ? WHERE id = ?', ['crawling', postId]);
+    await notifyDashboard(post.project_id, 'crawling');
+    try {
+        await runMediaStage(db, post.project_id, postId, { force });
+    } finally {
+        await db.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]).catch(() => {});
+        await db.close().catch(() => {});
+        await notifyDashboard(post.project_id, null);
+    }
+    console.log('\n[sports_srt] ✅ Khâu media hoàn thành!');
 }
 
 main().catch(async (e) => {
@@ -1229,6 +1394,9 @@ main().catch(async (e) => {
     // Dọn "ghost project": row tạo sớm để hiện dự án lúc đang viết kịch bản, nhưng GPT lỗi giữa chừng
     // nên chưa có câu nào → xoá, không để dashboard kẹt 1 dự án rỗng quay mãi.
     // projectId nằm ở argv[3] trong CẢ 2 chế độ: [--prompt, projectId, ...] và [file.srt, projectId, ...].
+    // Chế độ --mediaOnly không tạo post nào (chỉ cào ảnh cho post có sẵn) -> không có ghost để dọn,
+    // và argv[3] lúc đó là '--postId' chứ không phải mã dự án. Thoát luôn, đừng đụng DB.
+    if (process.argv.includes('--mediaOnly')) process.exit(1);
     const projectId = process.argv[3];
     try {
         const db = await getDb();

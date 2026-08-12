@@ -32,7 +32,57 @@ const blockDomains = [
     'navitime', 'jorudan', 'tabikobo', 'tour.ne.jp', 'yokoso',
     'gltjp.com', 'japan-web-magazine', 'simpleviewinc', 'tourism', 'travel.',
     'airport.or.jp', 'kansai-airport', 'narita-airport', 'haneda-airport', 'centrair',
+    // Bổ sung sau khi soi log crawl thật: keyword trừu tượng khiến Bing nới truy vấn và trả về đúng
+    // những nguồn này — ảnh phong cảnh/du lịch, ảnh stock miễn phí, hình nền, rao vặt, slide học tập.
+    'beautiful-photo.net', 'worldheritagesite', 'mapple.net', 'arukikata', 'howtravel',
+    'paris-mag', '4travel.jp', 'veltra.com', 'eikoku-guide', 'pxhere',
+    'wallpaperbetter', 'wallpaper.forfun', 'hdwall365', 'kabekin',
+    'auctions.c.yimg.jp', 'aucfree', 'mercari', 'media-amazon',
+    'gtcarlot', 'bidhistory', 'goo-net', 'carsensor',
+    'slidesharecdn', 'teacherspayteachers', 'examples.com', 'toolerific', 'moge.ai',
 ];
+
+// Nguồn ẢNH BÓNG ĐÁ/BÁO CHÍ đáng tin. KHÔNG dùng để lọc bỏ (lọc cứng dễ ra cảnh trắng ảnh), mà để
+// XẾP LẠI THỨ TỰ: tải mấy nguồn này trước, phần còn lại chỉ dùng khi chưa đủ số ảnh.
+// Bing xếp hạng rất tạp mà ta chỉ lấy neededCount ảnh đầu — nên chỉ đổi thứ tự là chất lượng đổi hẳn.
+// Nguồn ẢNH BÓNG ĐÁ/BÁO CHÍ đáng tin. KHÔNG dùng để lọc bỏ (lọc cứng dễ ra cảnh trắng ảnh), mà để
+// XẾP LẠI THỨ TỰ: tải mấy nguồn này trước, phần còn lại chỉ dùng khi chưa đủ số ảnh.
+// Bing xếp hạng rất tạp mà ta chỉ lấy neededCount ảnh đầu — nên chỉ đổi thứ tự là chất lượng đổi hẳn.
+//
+// Keyword là TIẾNG ANH nên Bing trả về nhiều từ báo Anh ngữ, NHƯNG đo thực tế còn rất nhiều ảnh đúng
+// đến từ báo bóng đá TIẾNG VIỆT (znews, bongda24h, thethaovanhoa...) và TÂY BAN NHA (marca, okdiario,
+// elnacional...). Thiếu 2 nhóm đó thì phép đếm "ảnh từ nguồn bóng đá" báo nhầm ảnh đúng thành rác.
+// Viết dạng MẢNG thay vì regex literal 1 dòng cho dễ đọc và dễ thêm bớt.
+const PREFERRED_SOURCES = [
+    // chung / hãng ảnh
+    'goal\\.com', 'soccer', 'football', 'getty', 'reuters', 'apnews', 'olympics\\.com',
+    // giải đấu & CLB
+    'uefa\\.com', 'fifa\\.com', 'premierleague', 'laliga', 'bundesliga', 'seriea',
+    'fcbarcelona', 'realmadrid', 'psg\\.fr',
+    // báo thể thao Anh ngữ
+    'espn', 'skysports', 'sky\\.com', 'bbci\\.co', 'bbc\\.co', 'talksport', '90min', 'givemesport',
+    'onefootball', 'sofascore', 'whoscored', 'transfermarkt', 'tribuna', 'si\\.com', 'cbssports',
+    'cbsistatic', 'foxsports', 'beinsports', 'eurosport', 'sportbible', 'sportshub',
+    'theguardian', 'guim\\.co', 'telegraph\\.co', 'standard\\.co', 'mirror\\.co', 'independent\\.co',
+    // báo Tây Ban Nha
+    'marca', 'unidadeditorial', 'mundodeportivo', 'sport\\.es', 'relevo', 'okdiario',
+    'elnacional\\.cat', 'diariogol', 'planetarealmadrid', 'elmundo', 'estadiodeportivo', 'defensacentral',
+    // báo Việt Nam
+    'znews\\.vn', 'bongda24h', 'thethaovanhoa', 'vnecdn', '24h\\.com\\.vn', 'baomoi', 'bongdaplus',
+    'thethao247', 'webthethao', 'vtcnews', 'dantri', 'vnexpress', 'tuoitre', 'thanhnien', 'soha\\.vn',
+    // báo Nhật (giữ lại từ thời keyword tiếng Nhật)
+    'footballchannel', 'sponichi', 'nikkansports', 'sanspo', 'number\\.bunshun', 'jleague', 'sportiva',
+    'dazn', 'thedigestweb', 'qoly', 'footballista', 'smt\\.news', 'nhk\\.or\\.jp', 'asahi\\.com',
+    'mainichi', 'yomiuri', 'jiji\\.com', 'kyodonews', 'sportsnavi', 'gekisaka', 'theworldmagazine',
+];
+const PREFERRED_DOMAINS = new RegExp('(' + PREFERRED_SOURCES.join('|') + ')', 'i');
+
+// Ưu tiên nguồn bóng đá/báo chí lên đầu, giữ nguyên thứ tự tương đối trong mỗi nhóm.
+function rankBySource(urls) {
+    const good = [], rest = [];
+    for (const u of urls) (PREFERRED_DOMAINS.test(u) ? good : rest).push(u);
+    return [...good, ...rest];
+}
 
 // Lấy danh sách URL ảnh gốc (murl) từ HTML trang Bing Images
 function parseBingMurls(html) {
@@ -120,8 +170,15 @@ export async function fetchFromBingImageBot(keyword, type, targetDir, neededCoun
     }
     if (!html) return 0;
 
-    const urls = parseBingMurls(html);
-    console.log(`      [${keyword}][Bing IMG] Tìm được ${urls.length} ảnh, đang tải...`);
+    const rawUrls = parseBingMurls(html);
+    const urls = rankBySource(rawUrls);
+    const nGood = rawUrls.filter(u => PREFERRED_DOMAINS.test(u)).length;
+    console.log(`      [${keyword}][Bing IMG] Tìm được ${urls.length} ảnh (${nGood} từ nguồn bóng đá/báo — ưu tiên tải trước), đang tải...`);
+    // 0 nguồn bóng đá = dấu hiệu keyword trừu tượng hoặc bị Bing nới truy vấn -> ghi lại để soi khi ảnh ra rác.
+    if (urls.length && nGood === 0) {
+        logCrawlError({ source: 'Bing', keyword, url: searchUrl, reason: `0/${urls.length} ảnh từ nguồn bóng đá — keyword có thể quá trừu tượng` });
+        console.warn(`      [${keyword}][Bing IMG] ⚠️ không ảnh nào từ nguồn bóng đá/báo — keyword có thể quá trừu tượng`);
+    }
     if (urls.length === 0) {
         logCrawlError({ source: 'Bing', keyword, url: searchUrl, reason: '0 ảnh (parse murl rỗng - có thể đổi cấu trúc HTML)' });
         return 0;

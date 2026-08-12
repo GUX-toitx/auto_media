@@ -104,7 +104,7 @@ async function main() {
                 crawlKeywordImageRotate(kw, imgDir, i, IMAGES_PER_KEYWORD)
                     .then(got => console.log(`    -> ${got} ảnh (${kw})`))
                     .catch(e => console.error(`    -> Lỗi: ${e.message}`)),
-                60000
+                150000   // đủ cho chuỗi Google -> bù Bing -> thử lại Bing
             );
         }));
 

@@ -1969,19 +1969,40 @@
                     <input ref="sportSrtInput" type="file" accept=".srt" class="hidden" @change="e => sportsModal.file = e.target.files[0]">
                 </div>
             </div>
-            <!-- Dịch tự động: chỉ có nghĩa khi ngôn ngữ đích khác nguồn VÀ chưa có file dịch sẵn -->
-            <div v-if="sportsModal.targetLang !== 'vi'" class="border border-gray-800 rounded-lg p-3 bg-gray-950/40">
+            <!-- Dịch tự động. File SRT có thể là BẤT KỲ ngôn ngữ nào (vd tiếng Nhật) nên phải cho chọn dịch sang đâu. -->
+            <div class="border border-gray-800 rounded-lg p-3 bg-gray-950/40 space-y-2">
                 <label class="flex items-center gap-2 select-none" :class="sportsModal.fileTranslated ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'">
                     <input type="checkbox" v-model="sportsModal.translate" :disabled="!!sportsModal.fileTranslated" class="accent-orange-500 w-4 h-4">
-                    <span class="text-[12px] font-black text-orange-300">🌐 Tự dịch sang ngôn ngữ đích ({{ sportsModal.targetLang }})</span>
+                    <span class="text-[12px] font-black text-orange-300">🌐 Tự dịch file SRT</span>
                 </label>
-                <p v-if="sportsModal.fileTranslated" class="text-[9px] text-gray-600 mt-1.5">Đã có file SRT đã dịch ở dưới → dùng file đó, không dịch lại.</p>
-                <p v-else-if="sportsModal.translate" class="text-[9px] text-gray-500 mt-1.5 leading-relaxed">
-                    Chỉ cần 1 file SRT gốc. AI dịch theo lô để giữ mạch giữa các dòng, dùng glossary thuật ngữ bóng đá,
-                    <b>giữ nguyên số thứ tự + timecode</b> và ghi ra file <span class="font-mono">input_translated.srt</span> trong thư mục dự án.
-                    Tải về sau bằng nút <b>📄 Tải SRT</b>.
-                </p>
-                <p v-else class="text-[9px] text-gray-600 mt-1.5">Không bật → cột ngôn ngữ đích dùng luôn câu gốc (như trước).</p>
+                <p v-if="sportsModal.fileTranslated" class="text-[9px] text-gray-600">Đã có file SRT đã dịch ở dưới → dùng file đó, không dịch lại.</p>
+                <template v-else-if="sportsModal.translate">
+                    <div>
+                        <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Dịch sang</label>
+                        <div class="flex flex-wrap gap-1.5">
+                            <button v-for="l in [{code:'vi',name:'🇻🇳 Việt'},{code:'en',name:'🇬🇧 EN'},{code:'ja',name:'🇯🇵 JA'},{code:'ko',name:'🇰🇷 KO'},{code:'zh',name:'🇨🇳 ZH'},{code:'fr',name:'🇫🇷 FR'},{code:'es',name:'🇪🇸 ES'}]" :key="l.code"
+                                @click="sportsModal.translateTo = l.code"
+                                class="px-2.5 py-1 rounded-lg text-[10px] font-black transition-colors"
+                                :class="sportsModal.translateTo === l.code ? 'bg-orange-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">
+                                {{ l.name }}
+                            </button>
+                        </div>
+                        <input v-model="sportsModal.translateTo" type="text" placeholder="hoặc nhập thủ công: th, id, ar..."
+                            class="w-full mt-2 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-[11px] text-gray-200 outline-none focus:border-orange-500">
+                    </div>
+                    <p class="text-[9px] text-gray-500 leading-relaxed">
+                        Ngôn ngữ <b>nguồn</b> của file AI tự nhận, không cần khai. Dịch theo lô để giữ mạch, dùng glossary thuật ngữ bóng đá,
+                        <b>giữ nguyên số thứ tự + timecode</b>, ghi ra <span class="font-mono">input_{{ sportsModal.translateTo || '??' }}.srt</span> trong thư mục dự án.
+                    </p>
+                    <p v-if="sportsModal.translateTo === 'vi'" class="text-[9px] text-cyan-500/90 leading-relaxed">
+                        Dịch sang tiếng Việt → file gốc thành cột <b>ngôn ngữ đích ({{ sportsModal.targetLang }}, dùng cho giọng đọc)</b>, bản dịch vào cột tiếng Việt.
+                        Nhớ đặt "Ngôn ngữ đích" ở trên đúng bằng ngôn ngữ của file SRT.
+                    </p>
+                    <p v-else-if="sportsModal.translateTo" class="text-[9px] text-gray-600 leading-relaxed">
+                        File gốc vào cột tiếng Việt, bản dịch vào cột ngôn ngữ đích.
+                    </p>
+                </template>
+                <p v-else class="text-[9px] text-gray-600">Không bật → cả 2 cột dùng luôn câu trong file SRT (như trước).</p>
             </div>
             <div>
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">File SRT đã dịch <span class="text-gray-600 normal-case font-normal">(tuỳ chọn)</span></label>
@@ -3190,10 +3211,10 @@ createApp({
         const genreChooser = ref({ open: false });
 
         // ===== SPORT (port từ nhánh main_sports): 2 chế độ — upload SRT | nhập prompt cho GPT-5 tự viết bài =====
-        const sportsModal = ref({ open: false, mode: 'srt', projectId: '', file: null, fileTranslated: null, prompt: '', loading: false, targetLang: 'vi', minutes: 10, translate: false });
+        const sportsModal = ref({ open: false, mode: 'srt', projectId: '', file: null, fileTranslated: null, prompt: '', loading: false, targetLang: 'vi', minutes: 10, translate: false, translateTo: 'vi' });
 
         async function submitSports() {
-            const { file, fileTranslated, targetLang, mode, prompt, minutes, translate } = sportsModal.value;
+            const { file, fileTranslated, targetLang, mode, prompt, minutes, translate , translateTo } = sportsModal.value;
             const projectId = sportsModal.value.projectId.trim() || stampProjectId('sport_');
             sportsModal.value.loading = true;
             try {
@@ -3210,7 +3231,7 @@ createApp({
                     form.append('projectId', projectId);
                     form.append('targetLang', targetLang);
                     // Có file dịch sẵn thì file thắng — server cũng tự bỏ cờ, đây chỉ là chốt chặn ở client
-                    if (translate && !fileTranslated && targetLang !== 'vi') form.append('translate', 'true');
+                    if (translate && !fileTranslated && translateTo) { form.append('translate', 'true'); form.append('translateTo', translateTo); }
                     res = await fetch('/api/create-sports', { method: 'POST', body: form });
                 }
                 const r = await res.json();
@@ -3219,11 +3240,12 @@ createApp({
                     sportsModal.value.file = null;
                     sportsModal.value.fileTranslated = null;
                     sportsModal.value.translate = false;
+                    sportsModal.value.translateTo = 'vi';
                     sportsModal.value.prompt = '';
                     sportsModal.value.projectId = '';
                     activeGenre.value = 'sport';   // nhảy sang menu ⚽ để thấy dự án vừa tạo
                     // Chế độ prompt: GPT-5 viết kịch bản trước (vài phút) rồi mới cào ảnh — dự án hiện ngay với nhãn trạng thái.
-                    showToast(mode !== 'prompt' ? (translate && !fileTranslated && targetLang !== 'vi' ? '✅ Đã khởi động Sport — đang dịch phụ đề rồi mới crawl ảnh...' : '✅ Đã khởi động Sport, đang crawl ảnh...')
+                    showToast(mode !== 'prompt' ? (translate && !fileTranslated && translateTo ? `✅ Đã khởi động Sport — đang dịch phụ đề sang ${translateTo} rồi mới crawl ảnh...` : '✅ Đã khởi động Sport, đang crawl ảnh...')
                         : minutes >= 12 ? `✅ Đã khởi động Sport ${minutes}′ — AI đang lên dàn ý rồi viết từng phần (~15-40 phút)...`
                         : '✅ Đã khởi động Sport, GPT-5 đang viết kịch bản...', minutes >= 12 ? 8000 : 4000);
                     await loadPosts();

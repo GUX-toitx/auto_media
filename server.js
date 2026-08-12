@@ -782,7 +782,7 @@ async function crawlSportImages(db, projectId, paragraphId, order, keywords) {
             crawlKeywordImageRotate(kw, dir, i, SPORT_IMAGES_PER_KEYWORD)
                 .then(got => console.log(`[sport-media] "${kw}" -> ${got} ảnh`))
                 .catch(e => console.error(`[sport-media] lỗi "${kw}": ${e.message}`)),
-            60000
+            150000   // đủ cho chuỗi Google -> bù Bing -> thử lại Bing (mỗi nguồn có hạn giờ riêng bên trong)
         );
         for (const file of fs.readdirSync(dir)) {
             if (!imageExts.has(path.extname(file).toLowerCase())) continue;
@@ -829,23 +829,26 @@ app.post('/api/crawl-all', async (req, res) => {
         // Project SPORT → chỉ cào lại ẢNH bằng đúng crawler của pipeline sport.
         // project_id KHÔNG cắt đuôi ngôn ngữ như nhánh dưới: sports_srt.js ghi media vào MEDIA_DIR/<project_id> nguyên vẹn.
         if (p0.genre === 'sport') {
-            const db = await getDb();
-            await db.run('UPDATE Post SET status = ? WHERE id = ?', ['crawling', postId]);
-            pushCrawlStatus(p0.project_id, 'crawling');
-            const paragraphs = await db.all('SELECT id, "order" FROM Paragraph WHERE post_id = ? ORDER BY "order"', [postId]);
-            for (const para of paragraphs) {
-                const kws = await db.all('SELECT content FROM Keyword WHERE paragraph_id = ?', [para.id]);
-                if (!kws.length) continue;
-                if (!force) { const c = await db.get('SELECT COUNT(*) c FROM Asset WHERE paragraph_id = ?', [para.id]); if (c.c > 0) continue; }   // mặc định chỉ bù cảnh trống
-                const n = await crawlSportImages(db, p0.project_id, para.id, para.order, kws.map(k => k.content));
-                console.log(`[crawl-all/sport] cảnh ${para.order}: +${n} ảnh`);
-                pushCrawlScene(p0.project_id);   // xong 1 cảnh → hiện ngay
-            }
-            await db.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]);
-            await db.close();
-            console.log(`[crawl-all/sport] ✅ Xong post ${postId}`);
-            pushCrawlStatus(p0.project_id, null);
-            announceSlack(p0.project_id);
+            // Chạy KHÂU MEDIA của chính pipeline sport (sports_srt.js --mediaOnly) thay vì lặp tay ở đây.
+            // Vòng lặp cũ chỉ cào lại bằng keyword CÓ SẴN: cảnh nào chưa có keyword là `continue`, nên
+            // sau khi xoá keyword thì bấm nút xong ngay mà không cào gì. Worker tự sinh chủ thể bài +
+            // gợi ý ảnh + keyword tiếng Nhật từ nội dung MỚI NHẤT trong DB rồi mới cào.
+            const args = ['src/workers/sports_srt.js', '--mediaOnly', '--postId', String(postId)];
+            if (force) args.push('--force');
+            console.log(`[crawl-all/sport] post ${postId} → khâu media (${force ? 'cào lại toàn bộ' : 'bù cảnh thiếu'})`);
+            const child = spawn('node', args, { detached: false, stdio: ['ignore', 'pipe', 'pipe'] });
+            child.stdout.on('data', d => process.stdout.write(`[crawl-all/sport] ${d}`));
+            child.stderr.on('data', d => process.stderr.write(`[crawl-all/sport] ${d}`));
+            child.on('exit', async (code) => {
+                console.log(`[crawl-all/sport] post ${postId} xong (code ${code})`);
+                // Worker tự POST /api/crawl-status/notify khi xong; chỉ dọn khi nó chết giữa chừng
+                // kẻo Post kẹt status 'crawling' mãi.
+                if (code !== 0) {
+                    try { const d = await getDb(); await d.run('UPDATE Post SET status = NULL WHERE id = ?', [postId]); await d.close(); } catch (_) {}
+                    pushCrawlStatus(p0.project_id, null);
+                }
+            });
+            child.unref();
             return;
         }
 
@@ -1568,7 +1571,7 @@ app.post('/api/create-sports-prompt', express.json(), async (req, res) => {
 
 // Tạo dự án Sport từ file SRT (gốc bắt buộc, bản dịch tuỳ chọn)
 app.post('/api/create-sports', upload.fields([{ name: 'srt', maxCount: 1 }, { name: 'srtTranslated', maxCount: 1 }]), async (req, res) => {
-    const { projectId, targetLang, translate } = req.body;
+    const { projectId, targetLang, translate, translateTo } = req.body;
     const srtFile = req.files?.srt?.[0];
     const srtTranslatedFile = req.files?.srtTranslated?.[0];
     if (!srtFile || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu file SRT hoặc projectId' });
@@ -1589,7 +1592,12 @@ app.post('/api/create-sports', upload.fields([{ name: 'srt', maxCount: 1 }, { na
         // Cờ ở CUỐI (worker tách cờ trước khi đọc tham số vị trí). Có file dịch sẵn thì bỏ qua cờ:
         // worker vẫn tôn trọng file người dùng đưa, nhưng đừng gửi cờ thừa cho khỏi hiểu nhầm khi đọc log.
         const wantTranslate = translate === true || translate === 'true' || translate === '1' || translate === 'on';
-        if (wantTranslate && !srtTranslatedPath) args.push('--translate');
+        if (wantTranslate && !srtTranslatedPath) {
+            // Ngôn ngữ DỊCH SANG có thể khác ngôn ngữ đích: file SRT tiếng Nhật dịch sang tiếng Việt
+            // thì targetLang='ja' (cột giọng đọc) còn translateTo='vi'.
+            const to = String(translateTo || '').trim().toLowerCase();
+            args.push('--translate', /^[a-z]{2}$/.test(to) ? to : (targetLang || 'vi'));
+        }
         spawnSportsJob(args, 'sports_srt', projectId, res);
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
