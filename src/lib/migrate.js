@@ -130,6 +130,19 @@ export async function initDB() {
     await db.run('ALTER TABLE Asset ADD COLUMN summary_detail_id INTEGER DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Asset ADD COLUMN paragraph_detail_id INTEGER DEFAULT NULL').catch(() => {});
     await db.run('ALTER TABLE Asset ADD COLUMN sentence_detail_id INTEGER DEFAULT NULL').catch(() => {});
+    // Tự chọn media (auto_select.js): điểm hợp cảnh + đặc trưng ảnh, cache lại để chạy lần sau khỏi tính lại.
+    //   auto=1 → asset này do máy chọn (UI gắn nhãn "AI chọn"; chạy lại chỉ ghi đè lựa chọn của máy, không đụng của người)
+    //   score  → điểm CLIP/SigLIP với nội dung cảnh, dùng để SẮP POOL trên UI kể cả khi chọn tay
+    //   dhash  → vân tay ảnh 64-bit, bắt trùng mà md5 bỏ sót (cùng ảnh khác kích thước/nén)
+    await db.run('ALTER TABLE Asset ADD COLUMN auto INTEGER NOT NULL DEFAULT 0').catch(() => {});
+    await db.run('ALTER TABLE Asset ADD COLUMN score REAL DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Asset ADD COLUMN width INTEGER DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Asset ADD COLUMN height INTEGER DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE Asset ADD COLUMN dhash TEXT DEFAULT NULL').catch(() => {});
+    // Chỗ ở CŨ của asset trước khi máy điều nó sang cảnh khác (JSON {post_id, section}). Drama cào X về
+    // một rổ chung section='x', máy gán vào cảnh nào là mất dấu rổ cũ — có cột này thì bỏ chọn/chạy lại
+    // trả được asset về đúng rổ, không kẹt lại ở cảnh mà lần trước lỡ gán.
+    await db.run('ALTER TABLE Asset ADD COLUMN auto_home TEXT DEFAULT NULL').catch(() => {});
     await db.run(`CREATE TABLE IF NOT EXISTS SentenceDetail (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sentence_id INTEGER NOT NULL,

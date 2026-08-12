@@ -136,12 +136,16 @@ app.get('/api/posts/:postId', async (req, res) => {
         const sections = {};
         for (const section of ['hook', 'summary', 'conclusion', 'thumbnail', 'x']) {
             const kws = await db.all('SELECT id, content, type FROM Keyword WHERE post_id = ? AND section = ? ORDER BY id', [post.id, section]);
-            const assets = await db.all('SELECT id, type, selected, "order", file_path, duration, source_url FROM Asset WHERE post_id = ? AND section = ? ORDER BY selected DESC, COALESCE(source_id, id), id', [post.id, section]);
+            // Sắp theo ĐIỂM hợp cảnh (auto_select chấm) ngay sau nhóm đã chọn: ảnh đáng dùng nổi lên đầu
+            // pool, khỏi phải lướt hết 40-250 thumbnail. Asset chưa chấm có score NULL -> SQLite xếp
+            // xuống cuối khi DESC, thứ tự cũ giữ nguyên ở các nhánh còn lại.
+            const assets = await db.all('SELECT id, type, selected, auto, score, "order", file_path, duration, source_url FROM Asset WHERE post_id = ? AND section = ? ORDER BY selected DESC, score DESC, COALESCE(source_id, id), id', [post.id, section]);
             const projectId = (post.project_id || '').replace(/_[a-z]{2}$/, '');
+            const mapAsset = a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, auto: !!a.auto, score: a.score, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null });
             sections[section] = {
                 keywords: kws,
-                videos: assets.filter(a => a.type === 'video').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null })),
-                images: assets.filter(a => a.type === 'image').map(a => ({ id: a.id, name: path.basename(a.file_path), url: `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, duration: a.duration || 0, sourceUrl: a.source_url || null })),
+                videos: assets.filter(a => a.type === 'video').map(mapAsset),
+                images: assets.filter(a => a.type === 'image').map(mapAsset),
             };
         }
 
@@ -182,15 +186,16 @@ app.get('/api/posts/:postId', async (req, res) => {
 
             // File media từ DB (exclude assets assigned to details)
             const assets = await db.all(
-                'SELECT id, type, selected, "order", file_path, sentence_id, paragraph_id, duration FROM Asset WHERE (paragraph_id = ? OR sentence_id IN (SELECT id FROM Sentence WHERE paragraph_id = ?)) ORDER BY id',
+                'SELECT id, type, selected, auto, score, "order", file_path, sentence_id, paragraph_id, duration FROM Asset WHERE (paragraph_id = ? OR sentence_id IN (SELECT id FROM Sentence WHERE paragraph_id = ?)) ORDER BY selected DESC, score DESC, id',
                 [para.id, para.id]
             );
+            const mapParaAsset = type => a => ({ id: a.id, type, name: path.basename(a.file_path), url: a.file_path.startsWith('http') ? a.file_path : `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, auto: !!a.auto, score: a.score, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0 });
             para.videos = assets
                 .filter(a => a.type === 'video' && (a.paragraph_id || a.sentence_id))
-                .map(a => ({ id: a.id, type: 'video', name: path.basename(a.file_path), url: a.file_path.startsWith('http') ? a.file_path : `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0 }));
+                .map(mapParaAsset('video'));
             para.images = assets
                 .filter(a => a.type === 'image' && (a.paragraph_id || a.sentence_id))
-                .map(a => ({ id: a.id, type: 'image', name: path.basename(a.file_path), url: a.file_path.startsWith('http') ? a.file_path : `/${a.file_path}`, relativePath: a.file_path, selected: !!a.selected, order: a.order || 0, sentenceId: a.sentence_id || null, duration: a.duration || 0 }));
+                .map(mapParaAsset('image'));
 
             // Audios & generated videos từ thư mục output
             para.audios = {};
@@ -913,8 +918,51 @@ app.post('/api/crawl-all', async (req, res) => {
         // Giống pipeline hoàn tất: dashboard SSE + Slack + tự tạo voice (+lips) nếu project có cấu hình
         pushCrawlStatus(post.project_id, null);
         announceSlack(post.project_id);
+        maybeAutoSelectAfterCrawl(post.project_id);
         orchestrateAutoVoice(projectId).catch(e => console.error('[crawl-all] auto voice lỗi:', e.message));
     })().catch(e => console.error('[crawl-all]', e.message));
+});
+
+// ===== TỰ CHỌN ẢNH/VIDEO =====
+// Chạy src/workers/auto_select.js: chấm điểm hợp cảnh bằng CLIP/SigLIP trên GPU rồi chọn đủ lấp
+// thời lượng lời đọc. Mất vài chục giây tới vài phút (tuỳ số asset) nên trả lời ngay và cho UI poll.
+const autoSelectJobs = new Map();   // postId -> { running, log[], picked, code, error, startedAt }
+
+app.post('/api/auto-select', async (req, res) => {
+    const { postId, scope, force } = req.body || {};
+    if (!postId) return res.status(400).json({ error: 'Thiếu postId' });
+    const key = String(postId);
+    if (autoSelectJobs.get(key)?.running) return res.json({ success: true, message: 'Đang chạy rồi' });
+
+    const job = { running: true, log: [], picked: 0, code: null, error: null, startedAt: Date.now() };
+    autoSelectJobs.set(key, job);
+    res.json({ success: true, message: 'Đang tự chọn media...' });
+
+    const args = ['src/workers/auto_select.js', '--postId', key, '--scope', scope === 'all' ? 'all' : 'missing'];
+    if (force) args.push('--force');
+    const child = spawn('node', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const take = (d) => {
+        const s = String(d);
+        process.stdout.write(`[auto-select] ${s}`);
+        job.log.push(...s.split('\n').filter(Boolean));
+        if (job.log.length > 400) job.log.splice(0, job.log.length - 400);   // dự án to log rất dài
+    };
+    child.stdout.on('data', take);
+    child.stderr.on('data', take);
+    child.on('exit', (code) => {
+        job.running = false;
+        job.code = code;
+        job.picked = Number(job.log.join('\n').match(/✅ chọn (\d+) media/)?.[1] || 0);
+        if (code !== 0) job.error = job.log.slice(-3).join(' | ') || `exit ${code}`;
+        console.log(`[auto-select] post ${key} xong (code ${code}, chọn ${job.picked})`);
+    });
+    child.on('error', (e) => { job.running = false; job.error = e.message; });
+});
+
+app.get('/api/auto-select/status/:postId', (req, res) => {
+    const job = autoSelectJobs.get(String(req.params.postId));
+    if (!job) return res.json({ running: false, picked: 0, log: [] });
+    res.json({ ...job, log: job.log.slice(-40) });
 });
 
 // Gen voice (+lips) cho 1 post NGAY khi content sẵn sàng — KHÔNG cần chờ crawl ảnh/video xong.
@@ -1344,6 +1392,57 @@ app.post('/api/toggle', async (req, res) => {
         await db.close();
         res.json({ success: true, selected });
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// THAY MỘT MEDIA ĐÃ CHỌN bằng một cái khác trong pool: cái mới nhận nguyên chỗ của cái cũ
+// (đúng cảnh, đúng thứ tự, đúng số giây), cái cũ rơi về pool. Đỡ phải bỏ chọn -> chọn lại -> gõ lại
+// số giây -> kéo về đúng vị trí.
+app.post('/api/replace-asset', async (req, res) => {
+    const { oldPath, newPath } = req.body || {};
+    if (!oldPath || !newPath) return res.status(400).json({ error: 'Thiếu oldPath hoặc newPath' });
+    if (oldPath === newPath) return res.status(400).json({ error: 'Trùng chính nó' });
+    let db;
+    try {
+        db = await getDb();
+        const cols = 'id, type, selected, "order", duration, paragraph_id, sentence_id, post_id, section, auto, auto_home';
+        const oldA = await db.get(`SELECT ${cols} FROM Asset WHERE file_path = ?`, [oldPath]);
+        const newA = await db.get(`SELECT ${cols} FROM Asset WHERE file_path = ?`, [newPath]);
+        if (!oldA || !newA) { await db.close(); return res.status(404).json({ error: 'Không tìm thấy asset' }); }
+        if (!oldA.selected) { await db.close(); return res.status(400).json({ error: 'Media bị thay chưa được chọn' }); }
+
+        // Số giây giữ nguyên theo yêu cầu. Video thay cho ảnh mà clip ngắn hơn ô thời lượng thì
+        // export tự đứng hình bù (freeze-pad), nên không cần cắt gọt gì thêm ở đây.
+        const keep = { order: oldA.order, duration: oldA.duration };
+
+        // Cái mới vào ĐÚNG chỗ cũ. auto = 0: đây là lựa chọn của người, lần tự chọn sau không đụng tới.
+        await db.run(`UPDATE Asset SET selected = 1, auto = 0, "order" = ?, duration = ?,
+                      paragraph_id = ?, sentence_id = ?, post_id = ?, section = ? WHERE id = ?`,
+            [keep.order, keep.duration, oldA.paragraph_id, oldA.sentence_id, oldA.post_id, oldA.section, newA.id]);
+
+        // Cái cũ về pool. Nếu nó vốn ở rổ chung (máy điều sang) thì trả đúng rổ đó, không bỏ lại
+        // trong pool của cảnh — kẻo lần chạy tự chọn sau không còn nhận ra nó thuộc về đâu.
+        let home = null;
+        try { home = oldA.auto_home ? JSON.parse(oldA.auto_home) : null; } catch (_) {}
+        if (home?.post_id) {
+            await db.run(`UPDATE Asset SET selected = 0, auto = 0, "order" = 0, auto_home = NULL,
+                          paragraph_id = NULL, sentence_id = NULL, post_id = ?, section = ? WHERE id = ?`,
+                [home.post_id, home.section, oldA.id]);
+        } else if (oldA.post_id && oldA.section) {
+            await db.run('UPDATE Asset SET selected = 0, auto = 0, "order" = 0 WHERE id = ?', [oldA.id]);
+        } else {
+            // Về pool của luận điểm cha (giống hệt /api/toggle lúc bỏ chọn)
+            const pid = oldA.paragraph_id
+                || (await db.get('SELECT paragraph_id FROM Sentence WHERE id = ?', [oldA.sentence_id]))?.paragraph_id;
+            await db.run('UPDATE Asset SET selected = 0, auto = 0, "order" = 0, sentence_id = NULL, paragraph_id = ? WHERE id = ?',
+                [pid || null, oldA.id]);
+        }
+
+        await db.close();
+        res.json({ success: true, order: keep.order, duration: keep.duration });
+    } catch (e) {
+        if (db) await db.close().catch(() => {});
+        res.status(500).json({ error: e.message });
+    }
 });
 
 // Sắp xếp lại thứ tự asset đã chọn (video + ảnh chung 1 dãy order) trong 1 luận điểm
@@ -2598,7 +2697,7 @@ app.post('/api/lips-sync/free-vram', async (req, res) => {
         const before = await nvidiaGpuMem();
         const apps = await nvidiaComputeApps();
         // Worker GPU của app cạnh tranh với LatentSync -> được phép kill.
-        const KILL_RE = /\.venv-whisperx|align_words\.py|matte_lips\.py/;
+        const KILL_RE = /\.venv-whisperx|align_words\.py|matte_lips\.py|media_score\.py/;
         // Không bao giờ kill: server lips (latentsync), node server, chính process này.
         const PROTECT_RE = /lips_sync|app\.main|uvicorn|server\.js/;
         const killed = [], skipped = [];
@@ -3544,6 +3643,23 @@ async function announceSlack(postTitle, missingScenes) {
     await postSlack(`✅ Dự án đã crawl xong: *${name}* (\`${postTitle}\`)${warn}\n🔗 Mở (cùng mạng LAN): ${url}`);
 }
 
+// Crawl xong thì tự chọn media luôn, để mở dự án ra là đã có sẵn bản gợi ý mà soát.
+// MẶC ĐỊNH TẮT: mỗi lượt chạy chiếm GPU vài chục giây, mà GPU còn phải nuôi lips-sync — bật khi cần
+// bằng AUTO_SELECT_ON_CRAWL=1 trong .env.
+async function maybeAutoSelectAfterCrawl(projectId) {
+    if (process.env.AUTO_SELECT_ON_CRAWL !== '1') return;
+    try {
+        const db = await getDb();
+        const post = await db.get('SELECT id FROM Post WHERE project_id = ? OR project_id LIKE ? ORDER BY id DESC LIMIT 1',
+            [projectId, `${projectId}\\_%`]);
+        await db.close();
+        if (!post) return;
+        console.log(`[auto-select] crawl xong ${projectId} → tự chọn media cho post ${post.id}`);
+        spawn('node', ['src/workers/auto_select.js', '--postId', String(post.id), '--scope', 'missing'],
+            { stdio: 'ignore', detached: true }).unref();
+    } catch (e) { console.error('[auto-select] chạy sau crawl lỗi:', e.message); }
+}
+
 app.post('/api/crawl-status/notify', (req, res) => {
     const { postTitle, status, scene, missingScenes, silent } = req.body;
     // scene=true → crawl xong 1 cảnh, chỉ báo dashboard nạp lại assets (KHÔNG đổi status, KHÔNG Slack)
@@ -3551,7 +3667,10 @@ app.post('/api/crawl-status/notify', (req, res) => {
     pushCrawlStatus(postTitle, status);
     // status === null = pipeline crawl XONG → bắn Slack (kèm cảnh thiếu ảnh nếu có)
     // silent=true → chỉ xoá spinner trên dashboard (dự án lỗi/bị huỷ), KHÔNG báo "đã crawl xong"
-    if (!silent && (status === null || status === 'done')) announceSlack(postTitle, missingScenes);
+    if (!silent && (status === null || status === 'done')) {
+        announceSlack(postTitle, missingScenes);
+        maybeAutoSelectAfterCrawl(postTitle);
+    }
     res.json({ success: true });
 });
 

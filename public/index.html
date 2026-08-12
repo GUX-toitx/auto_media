@@ -11,6 +11,10 @@
         ::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
         .keyword-tag { background:#1e293b; color:#94a3b8; padding:4px 10px; border-radius:6px; font-size:11px; display:flex; align-items:center; gap:6px; border:1px solid #334155; font-family:monospace; }
         .card-asset { transition: all 0.3s cubic-bezier(0.4,0,0.2,1); }
+        /* Media do máy tự chọn: viền vàng + nhãn 🤖 ở góc -> lướt qua là biết cái nào nên soát lại.
+           Dùng ::after nên không phải chèn thẻ vào từng chỗ render thẻ media. */
+        .auto-pick::after { content: '🤖'; position: absolute; top: 2px; left: 2px; font-size: 10px;
+            line-height: 1; background: rgba(0,0,0,.65); border-radius: 4px; padding: 2px; z-index: 20; pointer-events: none; }
     </style>
 </head>
 <body class="bg-gray-950 text-gray-100 font-sans h-screen flex overflow-hidden">
@@ -121,6 +125,8 @@
                         <button @click.stop="showMediaMenu = !showMediaMenu; showVoiceMenu = false; showCapcutMenu = false" class="bg-teal-600 hover:bg-teal-500 px-5 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎨 Media ▾<span v-if="activePost.intro_path || activePost.outro_path" class="ml-1 inline-block w-2 h-2 rounded-full bg-green-400 align-middle"></span></button>
                         <div v-show="showMediaMenu" class="absolute top-full right-0 mt-1 flex flex-col gap-1 z-50 min-w-[240px] bg-gray-900 border border-gray-700 rounded-xl p-1.5 shadow-xl">
                             <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-700 hover:bg-orange-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}</button>
+                            <button @click="triggerAutoSelect(false)" :disabled="autoSelecting" class="bg-amber-600 hover:bg-amber-500 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Máy chấm điểm ảnh/video theo nội dung từng cảnh rồi chọn đủ lấp thời lượng lời đọc. Cảnh đã chọn tay được giữ nguyên."><span v-if="autoSelecting" class="animate-spin inline-block mr-1">⏳</span>{{ autoSelecting ? 'Đang chọn...' : '🤖 Tự chọn ảnh/video' }}</button>
+                            <button @click="triggerAutoSelect(true)" :disabled="autoSelecting" class="bg-amber-800 hover:bg-amber-700 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Chọn lại TẤT CẢ các cảnh, ghi đè cả lựa chọn tay">🤖 Tự chọn lại tất cả</button>
                             <button v-if="activePost?.genre === 'sport'" @click="sportsRetry" class="bg-yellow-600 hover:bg-yellow-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Cào bù các câu chưa có keyword nào (GPT lỗi/timeout lúc chạy pipeline)">🔁 Retry câu thiếu</button>
                             <button @click="openProcessLog" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Log tiến độ pipeline của dự án (bài dài: đang viết phần mấy, điểm từng phần)">📜 Log tiến độ</button>
                             <button @click="openXBrowseLog" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Xem MỌI bài X đã lướt qua khi crawl (kèm link)">🐦 Log X đã lướt</button>
@@ -270,7 +276,7 @@
                         </div>
                         <div v-if="activePost.sections['hook']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.hook?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" 
-                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                 :class="autoCls(v)" class="card-asset bg-gray-900 p-1 rounded-lg relative">
                                 <button @click="deleteSectionAsset(v,'hook')" class="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white text-xs w-6 h-6 rounded-full z-10 flex items-center justify-center font-bold shadow-lg">&times;</button>
                                 <video v-if="previewMode" muted loop preload="none" :poster="thumbUrl(v)" :src="mediaUrl(v)" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video',null,'hook')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                 <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
@@ -290,7 +296,7 @@
                         </div>
                         <div v-if="activePost.sections['hook']._selImageOpen !== false" class="grid grid-cols-6 gap-1 mt-1">
                             <div v-for="img in (activePost.sections?.hook?.images||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="img.relativePath" 
-                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                 :class="autoCls(img)" class="card-asset bg-gray-900 p-1 rounded-lg relative">
                                 <img v-if="previewMode" :src="thumbUrl(img)" loading="lazy" @click="openPreview(img,'image',null,'hook')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
                                 <a v-else :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
                                 <div class="flex gap-1">
@@ -324,6 +330,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v, 'hook', 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
+                                    <button v-if="!v.selected" @click="openReplaceModal(v, null, 'hook')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Thay cho một media đã chọn (giữ nguyên thứ tự + số giây)">⇄</button>
                                     <button @click="openMoveModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
@@ -350,6 +357,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img, 'hook', 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
+                                    <button v-if="!img.selected" @click="openReplaceModal(img, null, 'hook')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Thay cho một media đã chọn (giữ nguyên thứ tự + số giây)">⇄</button>
                                     <button @click="openMoveModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
@@ -427,7 +435,7 @@
                         </div>
                         <div v-if="activePost.sections['summary']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.summary?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" 
-                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                 :class="autoCls(v)" class="card-asset bg-gray-900 p-1 rounded-lg relative">
                                 <video v-if="previewMode" muted loop preload="none" :poster="thumbUrl(v)" :src="mediaUrl(v)" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video',null,'summary')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                 <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
                                 <div class="flex gap-1">
@@ -446,7 +454,7 @@
                         </div>
                         <div v-if="activePost.sections['summary']._selImageOpen !== false" class="grid grid-cols-6 gap-1 mt-1">
                             <div v-for="img in (activePost.sections?.summary?.images||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="img.relativePath" 
-                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                 :class="autoCls(img)" class="card-asset bg-gray-900 p-1 rounded-lg relative">
                                 <img v-if="previewMode" :src="thumbUrl(img)" loading="lazy" @click="openPreview(img,'image',null,'summary')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
                                 <a v-else :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
                                 <div class="flex gap-1">
@@ -480,6 +488,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v, 'summary', 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
+                                    <button v-if="!v.selected" @click="openReplaceModal(v, null, 'summary')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Thay cho một media đã chọn (giữ nguyên thứ tự + số giây)">⇄</button>
                                     <button @click="openMoveModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
@@ -507,6 +516,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img, 'summary', 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
+                                    <button v-if="!img.selected" @click="openReplaceModal(img, null, 'summary')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Thay cho một media đã chọn (giữ nguyên thứ tự + số giây)">⇄</button>
                                     <button @click="openMoveModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
@@ -675,7 +685,7 @@
                                 </div>
                                 <div v-if="para._paraSelOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
                                     <div v-for="item in selectedMedia(para)" :key="item.relativePath"
-                                         class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative cursor-move"
+                                         :class="autoCls(item)" class="card-asset bg-gray-900 p-1 rounded-lg relative cursor-move"
                                          draggable="true"
                                          @dragstart="onSelMediaDragStart($event, para, item)"
                                          @dragover.prevent
@@ -775,6 +785,7 @@
                                                     <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
                                                         :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
                                                     <button @click="openEdit(v, 'video', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                    <button v-if="!v.selected" @click="openReplaceModal(v, para, null, s.id)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Thay cho một media đã chọn (giữ nguyên thứ tự + số giây)">⇄</button>
                                                     <button @click="openMoveModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                                 </div>
                                             </div>
@@ -796,6 +807,7 @@
                                                     <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
                                                         :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
                                                     <button @click="openEdit(img, 'image', para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-yellow-500 hover:bg-yellow-400 text-black">Edit</button>
+                                                    <button v-if="!img.selected" @click="openReplaceModal(img, para, null, s.id)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Thay cho một media đã chọn (giữ nguyên thứ tự + số giây)">⇄</button>
                                                     <button @click="openMoveModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                                 </div>
                                             </div>
@@ -837,6 +849,7 @@
                                     <span v-if="v.selected" class="text-[9px] font-black py-1 px-2 rounded bg-blue-600 text-white min-w-[24px] text-center">#{{ v.order }}</span>
                                     <button @click="toggleSelect(v, para, 'video')" class="flex-1 text-[9px] font-black py-1 rounded uppercase transition-colors"
                                         :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
+                                    <button v-if="!v.selected" @click="openReplaceModal(v, para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Thay cho một media đã chọn (giữ nguyên thứ tự + số giây)">⇄</button>
                                     <button @click="openMoveModal(v,'video')" class="text-[9px] font-black py-1 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                     <button @click="openEdit(v, 'video', para)" :disabled="!v.selected"
                                         class="text-[9px] font-black py-1 px-2 rounded transition-colors"
@@ -881,6 +894,7 @@
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white min-w-[20px] text-center">#{{ img.order }}</span>
                                     <button @click="toggleSelect(img, para, 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors"
                                         :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
+                                    <button v-if="!img.selected" @click="openReplaceModal(img, para)" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Thay cho một media đã chọn (giữ nguyên thứ tự + số giây)">⇄</button>
                                     <button @click="openMoveModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                     <button @click="openEdit(img, 'image', para)" :disabled="!img.selected"
                                         class="text-[9px] font-black py-0.5 px-1.5 rounded transition-colors"
@@ -962,7 +976,7 @@
                         </div>
                         <div v-if="activePost.sections['conclusion']._selVideoOpen !== false" class="grid grid-cols-4 gap-1 mt-1">
                             <div v-for="v in (activePost.sections?.conclusion?.videos||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="v.relativePath" 
-                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                 :class="autoCls(v)" class="card-asset bg-gray-900 p-1 rounded-lg relative">
                                 <video v-if="previewMode" muted loop preload="none" :poster="thumbUrl(v)" :src="mediaUrl(v)" @mouseenter="$event.target.play()" @mouseleave="$event.target.pause()" @click="openPreview(v,'video',null,'conclusion')" class="w-full h-20 object-cover rounded mb-1 bg-black cursor-pointer"></video>
                                 <a v-else :href="v.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ v.name }}</a>
                                 <div class="flex gap-1">
@@ -981,7 +995,7 @@
                         </div>
                         <div v-if="activePost.sections['conclusion']._selImageOpen !== false" class="grid grid-cols-6 gap-1 mt-1">
                             <div v-for="img in (activePost.sections?.conclusion?.images||[]).filter(a=>a.selected).sort((x,y)=>x.order-y.order)" :key="img.relativePath" 
-                                 class="card-asset bg-gray-900 p-1 rounded-lg border border-green-500 ring-1 ring-green-500/20 relative">
+                                 :class="autoCls(img)" class="card-asset bg-gray-900 p-1 rounded-lg relative">
                                 <img v-if="previewMode" :src="thumbUrl(img)" loading="lazy" @click="openPreview(img,'image',null,'conclusion')" class="w-full h-14 object-cover rounded mb-1 cursor-pointer">
                                 <a v-else :href="img.url" target="_blank" class="block text-[10px] text-blue-400 truncate mb-1 hover:underline">{{ img.name }}</a>
                                 <div class="flex gap-1">
@@ -1015,6 +1029,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="v.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ v.order }}</span>
                                     <button @click="toggleSectionAsset(v, 'conclusion', 'video')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="v.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ v.selected ? '✓' : 'Chọn' }}</button>
+                                    <button v-if="!v.selected" @click="openReplaceModal(v, null, 'conclusion')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Thay cho một media đã chọn (giữ nguyên thứ tự + số giây)">⇄</button>
                                     <button @click="openMoveModal(v,'video')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
@@ -1042,6 +1057,7 @@
                                 <div class="flex gap-1">
                                     <span v-if="img.selected" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-blue-600 text-white">#{{ img.order }}</span>
                                     <button @click="toggleSectionAsset(img, 'conclusion', 'image')" class="flex-1 text-[9px] font-black py-0.5 rounded uppercase transition-colors" :class="img.selected ? 'bg-green-600' : 'bg-gray-800 hover:bg-blue-600'">{{ img.selected ? '✓' : 'Chọn' }}</button>
+                                    <button v-if="!img.selected" @click="openReplaceModal(img, null, 'conclusion')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-indigo-700 hover:bg-indigo-600 text-white" title="Thay cho một media đã chọn (giữ nguyên thứ tự + số giây)">⇄</button>
                                     <button @click="openMoveModal(img,'image')" class="text-[9px] font-black py-0.5 px-1.5 rounded bg-teal-700 hover:bg-teal-600 text-white" title="Di chuyển sang cảnh khác">📦</button>
                                 </div>
                             </div>
@@ -2725,6 +2741,34 @@
 
     <!-- MOVE ASSET MODAL -->
     <!-- Assign to Detail Modal - Expandable Sections -->
+
+    <!-- ⇄ THAY MEDIA ĐÃ CHỌN -->
+    <div v-if="replaceModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50" @click.self="replaceModal.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-[560px] space-y-3">
+            <div class="flex justify-between items-center">
+                <h3 class="text-sm font-black text-white">⇄ Thay vào chỗ media nào?</h3>
+                <button @click="replaceModal.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+            <div class="flex items-center gap-3 bg-gray-950/60 border border-gray-800 rounded-xl p-2">
+                <video v-if="replaceModal.asset?.type === 'video'" muted :poster="thumbUrl(replaceModal.asset)" :src="mediaUrl(replaceModal.asset)" class="w-28 h-16 object-cover rounded bg-black"></video>
+                <img v-else :src="thumbUrl(replaceModal.asset)" class="w-28 h-16 object-cover rounded bg-black">
+                <p class="text-[10px] text-gray-400 leading-relaxed">Media này sẽ vào <span class="text-white font-bold">đúng vị trí</span> và giữ <span class="text-white font-bold">nguyên số giây</span> của cái bạn chọn bên dưới. Cái bị thay rơi về pool.</p>
+            </div>
+            <div class="grid grid-cols-4 gap-2 max-h-[380px] overflow-y-auto">
+                <button v-for="t in replaceModal.targets" :key="t.relativePath" @click="doReplace(t)"
+                        class="bg-gray-800 hover:bg-blue-700 border border-gray-700 hover:border-blue-500 rounded-lg p-1 text-left transition-colors">
+                    <video v-if="t.type === 'video'" muted :poster="thumbUrl(t)" :src="mediaUrl(t)" class="w-full h-16 object-cover rounded mb-1 bg-black"></video>
+                    <img v-else :src="thumbUrl(t)" loading="lazy" class="w-full h-16 object-cover rounded mb-1 bg-black">
+                    <div class="flex items-center gap-1 px-0.5">
+                        <span class="text-[9px] font-black px-1.5 rounded bg-blue-600 text-white">#{{ t.order }}</span>
+                        <span class="text-[9px] text-gray-400 font-bold">⏱ {{ (t.duration || 0).toFixed(1) }}s</span>
+                        <span v-if="t.auto" class="text-[9px] ml-auto" title="Máy chọn">🤖</span>
+                    </div>
+                </button>
+            </div>
+            <button @click="replaceModal.open = false" class="w-full py-2 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
+        </div>
+    </div>
 
     <div v-if="moveModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50" @click.self="moveModal.open = false">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-[420px] space-y-3">
@@ -4429,6 +4473,97 @@ createApp({
         const showCapcutMenu = ref(false);
         const showVoiceMenu = ref(false);
         const showMediaMenu = ref(false);
+        // ===== Tự chọn ảnh/video =====
+        // Máy chấm điểm hợp cảnh rồi chọn đủ lấp thời lượng lời đọc. Kết quả là GỢI Ý: viền vàng + 🤖
+        // để soát lại, chạy lại KHÔNG đụng cảnh đã chọn tay (trừ khi bấm "chọn lại tất cả").
+        const autoSelecting = ref(false);
+        function autoCls(a) {
+            return a?.auto ? 'border border-amber-500 ring-1 ring-amber-500/30 auto-pick'
+                           : 'border border-green-500 ring-1 ring-green-500/20';
+        }
+        // ===== Thay media đã chọn =====
+        // Bấm ⇄ ở một media dưới pool -> chọn media đã chọn ở trên để thay. Cái mới giữ NGUYÊN thứ tự
+        // và số giây của cái cũ, cái cũ rơi về pool.
+        const replaceModal = ref({ open: false, asset: null, para: null, section: null, targets: [] });
+
+        // sentenceId != null -> chỉ liệt kê media đã chọn CỦA LUẬN CỨ đó (luận điểm và luận cứ là 2 cảnh
+        // riêng trong CapCut, thay chéo nhau là hình nhảy sang cảnh khác).
+        function openReplaceModal(asset, para, section = null, sentenceId = null) {
+            let targets;
+            if (sentenceId != null) {
+                targets = [...(para?.videos || []), ...(para?.images || [])]
+                    .filter(a => a.selected && a.sentenceId == sentenceId);
+            } else if (para) {
+                targets = selectedMedia(para);
+            } else {
+                targets = [...(activePost.value?.sections?.[section]?.videos || []), ...(activePost.value?.sections?.[section]?.images || [])]
+                    .filter(a => a.selected);
+            }
+            targets = targets.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+            if (!targets.length) return showToast('⚠️ Cảnh này chưa chọn media nào để thay', 4000);
+            replaceModal.value = { open: true, asset, para, section, targets };
+        }
+
+        async function doReplace(target) {
+            const { asset, para, section } = replaceModal.value;
+            replaceModal.value.open = false;
+            try {
+                const res = await fetch('/api/replace-asset', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ oldPath: target.relativePath, newPath: asset.relativePath }),
+                });
+                const r = await res.json();
+                if (!res.ok || r.error) throw new Error(r.error || `lỗi ${res.status}`);
+                showToast(`✅ Đã thay vào vị trí #${r.order} (${r.duration || 0}s)`, 4000);
+                if (para) await reloadParaAssets(para);
+                else await reloadSectionAssets(section);
+            } catch (e) { showToast('❌ Thay media lỗi: ' + e.message, 8000); }
+        }
+
+        async function triggerAutoSelect(force = false) {
+            if (autoSelecting.value) return;
+            if (!activePostId.value) return showToast('⚠️ Chưa mở dự án nào', 4000);
+            if (force && !confirm('Chọn lại TẤT CẢ các cảnh? Lựa chọn tay hiện có sẽ bị ghi đè.')) return;
+            autoSelecting.value = true;
+            showToast('🤖 Đang chấm điểm và chọn media...', 8000);
+            const postId = activePostId.value;
+            try {
+                const res = await fetch('/api/auto-select', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ postId, scope: force ? 'all' : 'missing', force }),
+                });
+                // 404 = server chưa nạp code mới (chưa restart). Không bắt lỗi ở đây thì vòng hỏi trạng
+                // thái bên dưới cứ quay mãi, nút kẹt "Đang chọn..." mà không báo gì.
+                if (!res.ok) throw new Error(res.status === 404
+                    ? 'Server chưa có /api/auto-select — cần restart server (pm2 restart auto-media)'
+                    : `Máy chủ trả lỗi ${res.status}`);
+                // Chấm điểm cả dự án mất vài chục giây tới vài phút -> hỏi trạng thái, đừng để treo nút.
+                await new Promise((resolve, reject) => {
+                    let fails = 0;
+                    const poll = setInterval(async () => {
+                        try {
+                            const r = await fetch(`/api/auto-select/status/${postId}`);
+                            if (!r.ok) throw new Error(`status ${r.status}`);
+                            const st = await r.json();
+                            fails = 0;
+                            if (st.running) return;
+                            clearInterval(poll);
+                            if (st.error) showToast('❌ Tự chọn lỗi: ' + st.error, 12000);
+                            else showToast(`✅ Đã tự chọn ${st.picked} media — soát lại thẻ viền vàng 🤖`, 6000);
+                            resolve();
+                        } catch (e) {
+                            // Mạng chớp nháy thì vòng sau hỏi lại; hỏng thật (5 lần liền) thì thôi, báo lỗi.
+                            if (++fails < 5) return;
+                            clearInterval(poll);
+                            reject(new Error('mất liên lạc với server: ' + e.message));
+                        }
+                    }, 3000);
+                });
+                if (activePostId.value === postId) await selectPost({ id: postId });
+            } catch (e) { showToast('❌ ' + e.message, 12000); }
+            autoSelecting.value = false;
+        }
+
         async function triggerCrawlAll() {
             if (!activePostId.value) return;
             crawling.value = true;
@@ -6314,7 +6449,8 @@ createApp({
             pollingTimer,
             startPollingVoice,
             crawling, thumbLoading, createThumbnail, selectThumbnail, capcutExporting, capcutRendering, capcutLang, showCapcutMenu, showVoiceMenu, showMediaMenu, matteLips, matteState,
-            triggerCrawlAll, exportCapcut, renderCapcut,
+            triggerCrawlAll, triggerAutoSelect, autoSelecting, autoCls, exportCapcut, renderCapcut,
+            replaceModal, openReplaceModal, doReplace,
             refetchMedia,
             aiGenerate,
             submitAiGenerate,
