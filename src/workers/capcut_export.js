@@ -21,6 +21,20 @@ const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 // UUIDv4 với dấu gạch ngang, in hoa — đúng format CapCut
 const uuid = () => crypto.randomUUID().toUpperCase();
 
+// ===== BÁO TIẾN ĐỘ =====
+// Bài podcast 557 câu + vài GB clip: export chạy hàng chục phút mà trước đây im thin thít, người dùng
+// không biết đang ở khâu nào hay đã treo. In ra stdout dạng máy đọc được để server bóc rồi đẩy lên UI.
+// Bơm quá dày thì log ngập, nên chặn nhịp 400ms (mốc đầu/cuối mỗi khâu luôn được gửi).
+const PROGRESS_TAG = '@@PROGRESS ';
+let lastProgressAt = 0;
+function progress(phase, done, total, label = '') {
+    const now = Date.now();
+    const edge = done === 0 || (total && done >= total);
+    if (!edge && now - lastProgressAt < 400) return;
+    lastProgressAt = now;
+    process.stdout.write(PROGRESS_TAG + JSON.stringify({ phase, done, total, label }) + '\n');
+}
+
 // Microseconds timestamp
 const nowUs = () => Date.now() * 1000;
 
@@ -28,6 +42,71 @@ const nowUs = () => Date.now() * 1000;
 const TEMPLATE_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..', 'config');
 const templateContent = JSON.parse(fs.readFileSync(path.join(TEMPLATE_DIR, 'template_draft_content.json'), 'utf8'));
 const templateMeta = JSON.parse(fs.readFileSync(path.join(TEMPLATE_DIR, 'template_draft_meta_info.json'), 'utf8'));
+
+// ===== ÉP VIDEO VỀ FULL HD =====
+// Kho stock toàn clip 4K (có file 385MB cho 20 giây). Draft CapCut chép nguyên xi từng clip nên một
+// podcast 99 clip ra draft 6GB, zip 4.5GB, export lẫn tải về đều lê thê — mà dựng xong xuất 1080p là
+// cùng, giữ 4K chẳng để làm gì.
+// Bản hạ 1080p được CACHE ở MEDIA_DIR/_hd1080/<đường dẫn gốc>.mp4: lần export sau, và mọi dự án khác
+// dùng chung clip đó, đều lấy lại ngay khỏi encode lại.
+const MAX_EXPORT_W = parseInt(process.env.CAPCUT_MAX_WIDTH || '1920', 10);
+const MAX_EXPORT_H = parseInt(process.env.CAPCUT_MAX_HEIGHT || '1080', 10);
+const HD_DIRNAME = '_hd1080';
+const hasNvenc = (() => {
+    try { return execSync('ffmpeg -hide_banner -encoders 2>/dev/null || true', { encoding: 'utf8' }).includes('h264_nvenc'); }
+    catch { return false; }
+})();
+
+// Trả về đường dẫn NÊN CHÉP vào draft: bản 1080p nếu clip to hơn khung cho phép, không thì chính file gốc.
+function fitToExportSize(srcAbs) {
+    if (!(MAX_EXPORT_H > 0) || !/\.(mp4|mov|mkv|webm|m4v)$/i.test(srcAbs)) return srcAbs;
+    let info, st;
+    try { st = fs.statSync(srcAbs); info = getMediaInfo(srcAbs); } catch (_) { return srcAbs; }
+    if (info.width <= MAX_EXPORT_W && info.height <= MAX_EXPORT_H) return srcAbs;
+
+    // Đặt tên cache theo INODE chứ không theo đường dẫn: media lấy từ kho podcast là hardlink, nhiều
+    // tên khác nhau nhưng CHUNG một khối dữ liệu. Chế độ "một video xuyên suốt" tạo cả trăm hardlink
+    // tới đúng 1 file — theo đường dẫn thì encode cả trăm lần, theo inode thì đúng một lần.
+    const dest = path.join(MEDIA_DIR, HD_DIRNAME, `${st.ino}_${st.size}_${MAX_EXPORT_H}p.mp4`);
+    try {
+        if (fs.existsSync(dest) && fs.statSync(dest).size > 10000) return dest;   // đã có bản hạ, dùng lại
+    } catch (_) {}
+
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    const tmp = dest + '.part';                                                   // encode dở không được lộ ra
+    // Chỉ hạ khung hình là chưa đủ: NVENC để mặc định vẫn giữ bitrate của bản 4K nên file mới nhẹ
+    // được 1.7 lần. Ghim bitrate mới ăn — đo trên clip 4K 27s: 74.7MB → 17.1MB (nhẹ 4.4 lần).
+    // Muốn nhẹ nữa thì hạ CAPCUT_VIDEO_BITRATE (3M ≈ nhẹ 7 lần, hình động nhiều sẽ hơi bết).
+    const br = process.env.CAPCUT_VIDEO_BITRATE || '5M';
+    const brNum = parseFloat(br) || 5;
+    const vcodec = hasNvenc
+        ? `-c:v h264_nvenc -preset p5 -b:v ${br} -maxrate ${(brNum * 1.4).toFixed(1)}M -bufsize ${(brNum * 2).toFixed(0)}M`
+        : `-c:v libx264 -preset veryfast -crf 23 -maxrate ${br} -bufsize ${(brNum * 2).toFixed(0)}M`;
+    // Vừa khít trong khung, GIỮ TỈ LỆ (clip dọc vẫn dọc), rồi ép về số chẵn cho h264.
+    const vf = `scale=w=${MAX_EXPORT_W}:h=${MAX_EXPORT_H}:force_original_aspect_ratio=decrease`
+        + `,scale=trunc(iw/2)*2:trunc(ih/2)*2`;
+    try {
+        execSync(`ffmpeg -y -hide_banner -loglevel error -i "${srcAbs}" -vf "${vf}" ${vcodec} `
+            + `-c:a aac -b:a 128k -movflags +faststart -f mp4 "${tmp}"`, { timeout: 600000, stdio: 'ignore' });
+        if (!(fs.existsSync(tmp) && fs.statSync(tmp).size > 10000)) throw new Error('file ra rỗng');
+        fs.renameSync(tmp, dest);
+        return dest;
+    } catch (e) {
+        try { fs.unlinkSync(tmp); } catch (_) {}
+        console.warn(`[CapCut] hạ 1080p lỗi (${path.basename(srcAbs)}): ${e.message.slice(0, 80)} → dùng bản gốc`);
+        return srcAbs;                                                            // thà nặng còn hơn mất clip
+    }
+}
+
+// Tổng dung lượng 1 thư mục (đệ quy) — dùng làm mẫu số cho tiến độ nén.
+function dirSize(dir) {
+    let n = 0;
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        try { n += e.isDirectory() ? dirSize(p) : fs.statSync(p).size; } catch (_) {}
+    }
+    return n;
+}
 
 function getMediaDuration(filePath) {
     try {
@@ -504,21 +583,41 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     const tfAlt = primaryUseVi ? 'title_audio' : 'title_vi_audio';
 
     // Tải 1 audio unit về assets, trả { matId, durUs }. nameBase → tên file (khớp tên với clip lips cùng câu).
+    // Hụt 1 câu là bài xuất ra THIẾU HẲN tiếng câu đó (trong CapCut thấy số câu nhảy cóc, vd 44 → 54),
+    // nên thà chậm thêm vài giây còn hơn: curl tự retry, rồi worker nghỉ ngơi thử thêm 2 vòng nữa.
     const fetchUnitAudio = (url, nameBase) => {
         if (!url) return null;
-        try {
-            const base = process.env.BUNNYCDN_BASE_URL || '', key = process.env.BUNNYCDN_ACCESS_KEY || '';
-            const full = url.startsWith('http') ? url : `${base}/${url}`;
-            const fn = `${nameBase || ('audio_' + (fileIndex++))}.mp3`;
-            const dest = path.join(assetsDir, fn);
-            // Retry: mạng chập chờn tới CDN mà tải hụt 1 câu → slot rơi về mặc định → timeline bị nén → lips LỆCH DẦN.
-            execSync(`curl -sL --retry 4 --retry-delay 1 --retry-all-errors --max-time 45 -H "AccessKey: ${key}" "${full}" -o "${dest}"`, { timeout: 60000 });
-            if (!(fs.existsSync(dest) && fs.statSync(dest).size > 1000)) return null;
-            const durUs = getMediaDuration(dest);
-            const matId = uuid();
-            content.materials.audios.push(buildAudioMaterial(matId, `${WIN_DRAFT_ROOT}/${draftId}/assets/${fn}`, durUs, fn));
-            return { matId, durUs };
-        } catch (e) { console.error('[CapCut] audio unit lỗi:', e.message); return null; }
+        const base = process.env.BUNNYCDN_BASE_URL || '', key = process.env.BUNNYCDN_ACCESS_KEY || '';
+        const full = url.startsWith('http') ? url : `${base}/${url}`;
+        const fn = `${nameBase || ('audio_' + (fileIndex++))}.mp3`;
+        const dest = path.join(assetsDir, fn);
+        // 5 lần, nghỉ giãn dần 2/4/8/16s. Đã gặp thật: CDN khựng đúng lúc tải câu đó, thử lại sau
+        // 3 phút thì file về trong 0.16s — nên cái đáng giá là CHỜ ĐỦ LÂU, không phải thử dồn dập.
+        let lastErr = '';
+        for (let attempt = 1; attempt <= 5; attempt++) {
+            try {
+                if (attempt > 1) execSync(`sleep ${2 ** (attempt - 1)}`);
+                const maxTime = attempt >= 4 ? 120 : 60;
+                const code = execSync(
+                    `curl -sL --retry 4 --retry-delay 1 --retry-all-errors --max-time ${maxTime} -w '%{http_code}' `
+                    + `-H "AccessKey: ${key}" "${full}" -o "${dest}"`,
+                    { timeout: (maxTime + 30) * 1000, encoding: 'utf8' }).trim();
+                if (fs.existsSync(dest) && fs.statSync(dest).size > 1000) {
+                    const durUs = getMediaDuration(dest);
+                    const matId = uuid();
+                    content.materials.audios.push(buildAudioMaterial(matId, `${WIN_DRAFT_ROOT}/${draftId}/assets/${fn}`, durUs, fn));
+                    if (attempt > 1) console.warn(`[CapCut] ${fn}: tải được ở lần thử ${attempt}`);
+                    return { matId, durUs };
+                }
+                lastErr = `HTTP ${code}, file ${fs.existsSync(dest) ? fs.statSync(dest).size + 'B' : 'không có'}`;
+                // 404/403/410 = link ttsmin HẾT HẠN, file không còn trên CDN — thử lại bao nhiêu lần cũng
+                // vô ích. Bài cũ mà cả trăm câu hết hạn thì kiên trì kiểu này ngồi chờ hàng giờ.
+                if (['404', '403', '410'].includes(code)) { lastErr += ' (link đã hết hạn)'; break; }
+            } catch (e) { lastErr = e.message.slice(0, 120); }
+        }
+        console.error(`[CapCut] ❌ TẢI HỤT ${fn} sau 5 lần — ${lastErr} — ${full}`);
+        try { fs.unlinkSync(dest); } catch (_) {}                       // đừng để lại file cụt trong draft
+        return null;
     };
     // Đặt clip lips tại start, slot = slotDur (khớp audio; lips ngắn hơn → đứng hình, dài hơn → cắt). Mute.
     const placeLips = (lipsPath, start, slotDur, nameBase) => {
@@ -560,6 +659,7 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     // asset CUỐI kéo dài lấp hết khoảng còn lại → tổng luôn khớp lời của sub-scene. Trả về segment cuối
     // (để sub-scene không có media kéo dài clip trước phủ vào, tránh nền đen).
     let lastBrollSeg = null;
+    let mediaCopied = 0, totalAssetsPlanned = 0, hdShrunk = 0;   // đếm cho thanh tiến độ khâu chép media
     const brollVideoClips = [];   // {segment, material, destPath} — video b-roll, để hậu xử lý freeze-pad nếu bị kéo giãn
     const SNAP_US = 400_000;   // ngưỡng snap b-roll vào mốc kết thúc câu (0.4s): sửa lệch nhỏ, không gộp cả câu
     const layBroll = (assets, sceneStart, sceneDur, unitEnds = []) => {
@@ -587,11 +687,18 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
             }
             const srcPath = path.join(MEDIA_DIR, asset.file_path);
             if (!fs.existsSync(srcPath)) { cur += slotDur; continue; }
-            const ext = path.extname(asset.file_path).toLowerCase();
+            // Clip 4K được hạ về Full HD trước khi vào draft (có cache) — draft nhẹ đi cả chục lần.
+            const fitted = fitToExportSize(srcPath);
+            if (fitted !== srcPath) hdShrunk++;
+            // Đuôi file lấy theo FILE THẬT SẼ CHÉP: bản hạ luôn là mp4, nguồn .mov/.mkv mà giữ đuôi cũ
+            // thì draft có file .mkv chứa dữ liệu mp4 — CapCut đọc lệch định dạng.
+            const ext = path.extname(fitted).toLowerCase();
             const assetFileName = `asset_${fileIndex++}${ext}`;
             const destPath = path.join(assetsDir, assetFileName);
-            fs.copyFileSync(srcPath, destPath);
-            const isVideo = ['.mp4', '.mov', '.avi'].includes(ext);
+            fs.copyFileSync(fitted, destPath);
+            progress('media', ++mediaCopied, totalAssetsPlanned,
+                `Đang chép ảnh/video vào draft${hdShrunk ? ` (hạ ${hdShrunk} clip về ${MAX_EXPORT_H}p)` : ''}`);
+            const isVideo = ['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(ext);
             const mediaInfo = isVideo ? getMediaInfo(destPath) : { width: 1920, height: 1080 };
             const realDur = isVideo ? (asset.duration ? Math.round(asset.duration * 1_000_000) : slotDur) : slotDur;
             const srcDur = isVideo ? Math.min(realDur, slotDur) : slotDur;
@@ -649,7 +756,11 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     // Duyệt scene: mỗi câu → audio segment + lips (cùng mốc), giữa các câu chèn silence.
     // B-ROLL: kết thúc ĐÚNG lúc audio câu cuối (bỏ 1s nghỉ dư cuối cảnh, không giữ hình thừa);
     // khoảng nghỉ giữa 2 cảnh do ẢNH/VIDEO cảnh sau bắt đầu SỚM (từ mốc audio-end cảnh trước) lấp vào.
-    let lipsIdx = 0, placedLips = 0, prevBrollEnd = null, audioFail = 0;
+    // Tổng số câu / số clip phải xử lý — để báo tiến độ theo phần trăm chứ không để người dùng ngồi đoán.
+    const totalUnitsPlanned = scenes.reduce((n, s) => n + s.units.length, 0);
+    totalAssetsPlanned = scenes.reduce((n, s) => n + (s.assets?.length || 0), 0);
+    let lipsIdx = 0, placedLips = 0, prevBrollEnd = null, audioFail = 0, unitsDone = 0;
+    progress('audio', 0, totalUnitsPlanned, 'Đang tải giọng đọc');
     for (const scene of scenes) {
         const sceneStart = totalDuration;
         const unitEnds = [];   // mốc kết thúc (tuyệt đối) của TỪNG câu audio/lips → để snap b-roll cho khớp
@@ -676,6 +787,7 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
             if (unit.au && lipsByIdx[lipsIdx]) { placeLips(lipsByIdx[lipsIdx], totalDuration, slot, `${nb}_lips`); placedLips++; }
             totalDuration += slot + silenceUs;               // silenceUs=0: câu nối tiếp sát nhau (khớp narration UI)
             unitEnds.push(totalDuration);                    // mốc kết thúc câu này (audio/lips kết thúc tại đây)
+            progress('audio', ++unitsDone, totalUnitsPlanned, `Đang tải giọng đọc${audioFail ? ` (hụt ${audioFail})` : ''}`);
         }
         const sceneAudioEnd = totalDuration - silenceUs;     // hết audio câu cuối (silenceUs=0 → = totalDuration)
         const brollStart = (prevBrollEnd != null) ? prevBrollEnd : sceneStart;   // phủ cả khoảng nghỉ trước cảnh
@@ -691,8 +803,10 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     //   • video trim NGẮN hơn slot        → không kéo giãn/tua chậm nữa
     //   • FILE ngắn hơn trim (DB.duration) → không còn đen/thiếu hình ở đuôi
     // Đồng thời cắt ĐÚNG độ dài trim (không phát trọn file → hết "video thừa giây"). Chạy SAU mọi mở rộng target.
-    let brollFrozen = 0;
+    let brollFrozen = 0, checked = 0;
+    progress('freeze', 0, brollVideoClips.length, 'Đang căn lại clip cho khớp lời');
     for (const bc of brollVideoClips) {
+        progress('freeze', ++checked, brollVideoClips.length, 'Đang căn lại clip cho khớp lời');
         const src = bc.segment.source_timerange, tgt = bc.segment.target_timerange;
         const fileUs = getVideoStreamDuration(bc.destPath) || src.duration;
         const contentUs = Math.min(src.duration, fileUs);   // nội dung thật sẽ phát (tôn trọng trim + giới hạn file)
@@ -848,17 +962,23 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
 
     console.log(`[CapCut] Draft: ${draftDir} | Videos: ${videoSegments.length} | Audios: ${audioSegments.length}${audioSegments2.length ? `+${audioSegments2.length}(vi)` : ''} | Duration: ${(totalDuration/1e6).toFixed(1)}s`);
 
-    // Zip
+    // Zip — khâu lâu nhất với dự án nặng (draft vài GB), nên báo tiến độ theo SỐ BYTE đã nén.
     const zipPath = path.join(outputDir, `${post.project_id}_${Date.now()}_capcut.zip`);
+    const draftBytes = dirSize(draftDir);
     await new Promise((resolve, reject) => {
         const output = fs.createWriteStream(zipPath);
         const archive = archiver('zip', { zlib: { level: 6 } });
         archive.on('error', reject);
         output.on('close', resolve);
+        // archiver báo tổng byte ĐÃ ĐỌC từ nguồn -> so với tổng dung lượng draft là ra phần trăm thật.
+        archive.on('progress', (p) => progress('zip', p.fs?.processedBytes || 0, draftBytes,
+            `Đang nén ${(draftBytes / 1073741824).toFixed(1)}GB`));
         archive.pipe(output);
         archive.directory(draftDir, draftId);
+        progress('zip', 0, draftBytes, `Đang nén ${(draftBytes / 1073741824).toFixed(1)}GB`);
         archive.finalize();
     });
+    progress('done', 1, 1, 'Xong');
 
     fs.rmSync(draftDir, { recursive: true, force: true });
     console.log(`[CapCut] Zip: ${zipPath} (${(fs.statSync(zipPath).size/1024/1024).toFixed(1)}MB)`);
@@ -869,8 +989,12 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     fs.writeFileSync(batPath, generateBat(zipFileName, post.project_id));
     console.log(`[CapCut] Bat: ${batPath}`);
 
-    process.stdout.write(JSON.stringify({ zipPath, batPath, draftId, projectName: post.project_id }) + '\n');
-    return { zipPath, batPath, draftDir, draftId, projectName: post.project_id };
+    // audioFail/totalUnits đi kèm kết quả để server còn cảnh báo lên UI — trước đây con số này chỉ nằm
+    // trong log của tiến trình con, mà server thì nuốt log đó, nên bài thiếu tiếng vẫn xuất ra êm ru.
+    process.stdout.write(JSON.stringify({
+        zipPath, batPath, draftId, projectName: post.project_id, audioFail, totalUnits: lipsIdx,
+    }) + '\n');
+    return { zipPath, batPath, draftDir, draftId, projectName: post.project_id, audioFail, totalUnits: lipsIdx };
 }
 
 const INSTALL_SCRIPT = 'C:\\Users\\trinh\\workspace\\install_capcut.py';

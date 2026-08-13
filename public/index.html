@@ -41,9 +41,18 @@
             </button>
         </div>
         <!-- Podcast không tự cào được hình (chỉ có tiếng) -> kho video dùng chung, người dùng tự nạp -->
-        <div v-if="activeGenre === 'podcast'" class="px-3 pt-2">
+        <div v-if="activeGenre === 'podcast'" class="px-3 pt-2 space-y-1.5">
             <button @click="openPodcastLib" class="w-full py-2 rounded-lg text-[10px] font-black uppercase tracking-widest bg-purple-800 hover:bg-purple-700 text-purple-100 border border-purple-600/50">
-                🎬 Kho video Podcast
+                🎬 Kho hình Podcast
+            </button>
+            <button @click="openPodcastExports" class="w-full py-2 rounded-lg text-[10px] font-black uppercase tracking-widest bg-emerald-800 hover:bg-emerald-700 text-emerald-100 border border-emerald-600/50">
+                📂 File đã xuất
+            </button>
+            <button @click="podcastQueue.open = true; loadPodcastQueue()"
+                class="w-full py-2 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-colors"
+                :class="queueBusy ? 'bg-amber-700 hover:bg-amber-600 text-white border-amber-500 animate-pulse' : 'bg-gray-800 hover:bg-gray-700 text-gray-300 border-gray-700'">
+                <span v-if="queueBusy">⏳ Hàng đợi ({{ (podcastQueue.running ? 1 : 0) + podcastQueue.queued.length }})</span>
+                <span v-else>📋 Hàng đợi</span>
             </button>
         </div>
         <div class="flex-1 overflow-y-auto px-4 pb-4 pt-2 space-y-1">
@@ -127,6 +136,7 @@
                             <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-700 hover:bg-orange-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}</button>
                             <button @click="triggerAutoSelect(false)" :disabled="autoSelecting" class="bg-amber-600 hover:bg-amber-500 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Máy chấm điểm ảnh/video theo nội dung từng cảnh rồi chọn đủ lấp thời lượng lời đọc. Cảnh đã chọn tay được giữ nguyên."><span v-if="autoSelecting" class="animate-spin inline-block mr-1">⏳</span>{{ autoSelecting ? 'Đang chọn...' : '🤖 Tự chọn ảnh/video' }}</button>
                             <button @click="triggerAutoSelect(true)" :disabled="autoSelecting" class="bg-amber-800 hover:bg-amber-700 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Chọn lại TẤT CẢ các cảnh, ghi đè cả lựa chọn tay">🤖 Tự chọn lại tất cả</button>
+                            <button v-if="activePost?.genre === 'podcast'" @click="openPodcastLib(activePostId)" class="bg-purple-700 hover:bg-purple-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Lấp nền hình từ kho: random clip nối nhau, hoặc 1 ảnh/video chạy xuyên suốt">🎬 Lấp nền từ kho</button>
                             <button v-if="activePost?.genre === 'sport'" @click="sportsRetry" class="bg-yellow-600 hover:bg-yellow-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Cào bù các câu chưa có keyword nào (GPT lỗi/timeout lúc chạy pipeline)">🔁 Retry câu thiếu</button>
                             <button @click="openProcessLog" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Log tiến độ pipeline của dự án (bài dài: đang viết phần mấy, điểm từng phần)">📜 Log tiến độ</button>
                             <button @click="openXBrowseLog" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Xem MỌI bài X đã lướt qua khi crawl (kèm link)">🐦 Log X đã lướt</button>
@@ -2096,39 +2106,72 @@
             <!-- 2 file SRT -->
             <div class="grid grid-cols-2 gap-2">
                 <div>
-                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">SRT gốc <span class="text-red-400">*</span></label>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">SRT gốc <span class="text-red-400">*</span> <span class="text-gray-600 normal-case font-normal">— chọn được nhiều file</span></label>
+                    <!-- Mỗi file = 1 dự án riêng, tất cả xếp vào hàng đợi chạy lần lượt -->
                     <div class="border-2 border-dashed rounded-lg p-3 text-center cursor-pointer transition-colors"
-                        :class="podcastModal.file ? 'border-purple-400 bg-purple-500/10' : 'border-gray-700 hover:border-purple-500'"
-                        @dragover.prevent @drop.prevent="podcastModal.file = $event.dataTransfer.files[0] || null"
+                        :class="podcastModal.files.length ? 'border-purple-400 bg-purple-500/10' : 'border-gray-700 hover:border-purple-500'"
+                        @dragover.prevent @drop.prevent="addPodcastSrtFiles($event.dataTransfer.files)"
                         @click="$refs.podcastSrtInput.click()">
-                        <div class="text-[11px] truncate" :class="podcastModal.file ? 'text-purple-300 font-mono' : 'text-gray-500'">
-                            {{ podcastModal.file ? '📄 ' + podcastModal.file.name : 'Kéo thả / chọn file .srt' }}
+                        <div class="text-[11px]" :class="podcastModal.files.length ? 'text-purple-300 font-mono' : 'text-gray-500'">
+                            {{ podcastModal.files.length ? '📄 ' + podcastModal.files.length + ' file → ' + podcastModal.files.length + ' dự án' : 'Kéo thả / chọn file .srt (nhiều file cũng được)' }}
                         </div>
-                        <input ref="podcastSrtInput" type="file" accept=".srt" class="hidden"
-                            @change="podcastModal.file = $event.target.files[0] || null; $event.target.value=''">
+                        <input ref="podcastSrtInput" type="file" accept=".srt" multiple class="hidden"
+                            @change="addPodcastSrtFiles($event.target.files); $event.target.value=''">
+                    </div>
+                    <div v-if="podcastModal.files.length" class="mt-1 max-h-[110px] overflow-y-auto space-y-0.5">
+                        <div v-for="(f, i) in podcastModal.files" :key="f.name + i"
+                             class="flex items-center gap-1.5 bg-gray-950/60 border border-gray-800 rounded px-2 py-1">
+                            <span class="text-[9px] font-black text-gray-600 w-4">{{ i + 1 }}.</span>
+                            <span class="text-[10px] font-mono text-gray-300 flex-1 truncate" :title="f.name">{{ f.name }}</span>
+                            <button @click.stop="podcastModal.files.splice(i, 1)" class="text-red-500 hover:text-red-400 text-[11px] font-black shrink-0">×</button>
+                        </div>
                     </div>
                 </div>
                 <div>
-                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">SRT đã dịch (tuỳ chọn)</label>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">SRT đã dịch (tuỳ chọn) <span class="text-gray-600 normal-case font-normal">— nạp nhiều file, ghép theo cặp</span></label>
                     <div class="border-2 border-dashed rounded-lg p-3 text-center cursor-pointer transition-colors"
-                        :class="podcastModal.fileTarget ? 'border-green-400 bg-green-500/10' : 'border-gray-700 hover:border-green-500'"
-                        @dragover.prevent @drop.prevent="podcastModal.fileTarget = $event.dataTransfer.files[0] || null"
+                        :class="podcastModal.filesTarget.length ? 'border-green-400 bg-green-500/10' : 'border-gray-700 hover:border-green-500'"
+                        @dragover.prevent @drop.prevent="addPodcastSrtFiles($event.dataTransfer.files, 'target')"
                         @click="$refs.podcastSrtTargetInput.click()">
-                        <div class="text-[11px] truncate" :class="podcastModal.fileTarget ? 'text-green-300 font-mono' : 'text-gray-500'">
-                            {{ podcastModal.fileTarget ? '📄 ' + podcastModal.fileTarget.name : 'Kéo thả / chọn file .srt' }}
+                        <div class="text-[11px]" :class="podcastModal.filesTarget.length ? 'text-green-300 font-mono' : 'text-gray-500'">
+                            {{ podcastModal.filesTarget.length ? '📄 ' + podcastModal.filesTarget.length + ' file' : 'Kéo thả / chọn file .srt' }}
                         </div>
-                        <input ref="podcastSrtTargetInput" type="file" accept=".srt" class="hidden"
-                            @change="podcastModal.fileTarget = $event.target.files[0] || null; $event.target.value=''">
+                        <input ref="podcastSrtTargetInput" type="file" accept=".srt" multiple class="hidden"
+                            @change="addPodcastSrtFiles($event.target.files, 'target'); $event.target.value=''">
+                    </div>
+                    <div v-if="podcastModal.filesTarget.length" class="mt-1 max-h-[110px] overflow-y-auto space-y-0.5">
+                        <div v-for="(f, i) in podcastModal.filesTarget" :key="f.name + i"
+                             class="flex items-center gap-1.5 bg-gray-950/60 border border-gray-800 rounded px-2 py-1">
+                            <span class="text-[9px] font-black text-gray-600 w-4">{{ i + 1 }}.</span>
+                            <span class="text-[10px] font-mono text-gray-300 flex-1 truncate" :title="f.name">{{ f.name }}</span>
+                            <button @click.stop="podcastModal.filesTarget.splice(i, 1)" class="text-red-500 hover:text-red-400 text-[11px] font-black shrink-0">×</button>
+                        </div>
                     </div>
                 </div>
             </div>
-            <p class="text-[9px] text-gray-600">Ghép theo THỨ TỰ block của 2 file. Không có SRT đã dịch → dùng luôn câu gốc cho cả 2 cột.</p>
+
+            <!-- Ghép cặp gốc ↔ dịch: hiện rõ ra để soát, đừng để đoán mò cái nào đi với cái nào -->
+            <div v-if="podcastModal.filesTarget.length" class="border border-gray-800 rounded-lg p-2 bg-gray-950/40 space-y-1">
+                <p class="text-[10px] font-black uppercase tracking-widest" :class="srtPairs.warn ? 'text-orange-400' : 'text-gray-500'">
+                    Ghép cặp {{ srtPairs.pairs.length }} dự án<span v-if="srtPairs.warn"> — {{ srtPairs.warn }}</span>
+                </p>
+                <div class="max-h-[120px] overflow-y-auto space-y-0.5">
+                    <div v-for="(pr, i) in srtPairs.pairs" :key="i" class="flex items-center gap-1.5 text-[10px] font-mono">
+                        <span class="text-gray-600 w-4">{{ i + 1 }}.</span>
+                        <span class="text-purple-300 flex-1 truncate" :title="pr.src.name">{{ pr.src.name }}</span>
+                        <span class="text-gray-600">→</span>
+                        <span class="flex-1 truncate" :class="pr.tgt ? 'text-green-300' : 'text-gray-600 italic'" :title="pr.tgt?.name">{{ pr.tgt ? pr.tgt.name : '(không có bản dịch)' }}</span>
+                    </div>
+                </div>
+            </div>
+            <p class="text-[9px] text-gray-600">Ghép theo THỨ TỰ block trong từng cặp file. Không có SRT đã dịch → dùng luôn câu gốc cho cả 2 cột.</p>
 
             <!-- Project ID -->
             <div>
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Project ID (tùy chọn)</label>
-                <input v-model="podcastModal.projectId" type="text" placeholder="để trống → podcast_YYYY-MM-DD_HH-MM-SS"
-                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-purple-500">
+                <input v-model="podcastModal.projectId" type="text" :disabled="podcastModal.files.length > 1"
+                    :placeholder="podcastModal.files.length > 1 ? 'Nạp nhiều file → mỗi dự án tự đặt tên theo tên file SRT' : 'để trống → podcast_YYYY-MM-DD_HH-MM-SS'"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-purple-500 disabled:opacity-50">
             </div>
 
             <!-- Tạo voice hay không -->
@@ -2174,11 +2217,45 @@
                 </div>
             </div>
 
+            <!-- Dây chuyền tự động: nạp SRT xong là chạy thẳng tới file mang đi dựng -->
+            <div class="border-t border-gray-800 pt-3 space-y-2">
+                <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest">Sau khi nhập xong thì tự làm tiếp</p>
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" v-model="podcastModal.autoFill" class="accent-amber-500 w-4 h-4">
+                    <span class="text-[12px] font-bold text-gray-200">🎬 Lấp nền hình từ kho</span>
+                </label>
+                <div v-if="podcastModal.autoFill" class="pl-6 space-y-2">
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <select v-model="podcastModal.fillMode" class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-[12px] text-gray-200 outline-none focus:border-amber-500">
+                            <option value="random">Random clip nối nhau</option>
+                            <option value="single">1 ảnh/video xuyên suốt</option>
+                        </select>
+                        <label v-if="podcastModal.fillMode === 'random'" class="text-[10px] font-bold text-gray-400 flex items-center gap-1.5">
+                            mỗi clip tối đa
+                            <input type="number" min="2" max="120" v-model.number="podcastModal.maxClip" class="w-16 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none focus:border-amber-500"> giây
+                        </label>
+                    </div>
+                    <div v-if="podcastModal.fillMode === 'single'">
+                        <select v-model="podcastModal.fillName" @focus="!podcastLib.items.length && loadPodcastLib()"
+                            class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-[12px] text-gray-200 outline-none focus:border-amber-500">
+                            <option value="">-- Chọn ảnh/video trong kho --</option>
+                            <option v-for="v in podcastLib.items" :key="v.name" :value="v.name">{{ v.kind === 'image' ? '🖼️' : '🎬' }} {{ v.name }}</option>
+                        </select>
+                    </div>
+                </div>
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" v-model="podcastModal.autoExport" class="accent-pink-500 w-4 h-4">
+                    <span class="text-[12px] font-bold text-gray-200">📦 Xuất CapCut, lưu vào thư mục “File đã xuất”</span>
+                </label>
+                <p class="text-[10px] text-gray-600 leading-snug">Nạp bao nhiêu SRT cũng được — các dự án tự xếp hàng chạy lần lượt, xem tiến độ ở nút <span class="text-gray-400 font-bold">📋 Hàng đợi</span>.</p>
+            </div>
+
             <div class="flex gap-3 justify-end pt-1">
                 <button @click="podcastModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
-                <button @click="submitPodcast" :disabled="!podcastModal.file || podcastModal.loading"
+                <button @click="submitPodcast" :disabled="!podcastModal.files.length || podcastModal.loading"
                     class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-purple-600 hover:bg-purple-500 text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed">
-                    {{ podcastModal.loading ? '⏳ Đang xử lý...' : '🚀 Bắt đầu' }}
+                    {{ podcastModal.loading ? (podcastModal.progress || '⏳ Đang xử lý...')
+                       : podcastModal.files.length > 1 ? `🚀 Xếp hàng ${podcastModal.files.length} dự án` : '🚀 Bắt đầu' }}
                 </button>
             </div>
         </div>
@@ -2189,14 +2266,33 @@
         <div class="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-full max-w-5xl h-[85vh] flex flex-col gap-3">
             <div class="flex justify-between items-center">
                 <div>
-                    <h3 class="text-lg font-black text-white">🎬 Kho video Podcast</h3>
+                    <h3 class="text-lg font-black text-white">🎬 Kho hình Podcast</h3>
                     <p class="text-[10px] text-gray-500 font-mono">{{ podcastLib.dir || '…' }}</p>
                 </div>
                 <div class="flex items-center gap-3">
-                    <span class="text-[11px] font-bold text-gray-400">{{ podcastLib.items.length }} video · {{ podcastLibTotalSize }}</span>
+                    <span class="text-[11px] font-bold text-gray-400">{{ podcastLib.items.length }} file · {{ podcastLibTotalSize }}</span>
                     <button @click="loadPodcastLib" class="text-[11px] font-black uppercase px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300">🔄 Nạp lại</button>
                     <button @click="podcastLib.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
                 </div>
+            </div>
+
+            <!-- Mở từ trong dự án: hai kiểu lấp nền -->
+            <div v-if="podcastLib.pickFor" class="shrink-0 bg-gray-950/60 border border-purple-800/50 rounded-xl p-3 flex items-center gap-3 flex-wrap">
+                <button @click="runPodcastFill('random')" :disabled="podcastLib.filling"
+                    class="px-4 py-2 rounded-lg text-[11px] font-black uppercase tracking-widest bg-purple-700 hover:bg-purple-600 disabled:opacity-40 text-white">
+                    <span v-if="podcastLib.filling" class="animate-spin inline-block mr-1">⏳</span>🎲 Random clip nối nhau
+                </button>
+                <label class="text-[10px] font-bold text-gray-400 flex items-center gap-1.5">
+                    mỗi clip tối đa
+                    <input type="number" min="2" max="120" step="1" v-model.number="podcastLib.maxClip"
+                        class="w-16 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none focus:border-purple-500"> giây
+                </label>
+                <p class="text-[10px] text-gray-500 flex-1 min-w-[220px]">Clip ngắn hơn mức này giữ nguyên độ dài. Hoặc bấm <span class="text-purple-300 font-bold">“Dùng xuyên suốt”</span> ở một ô bên dưới để chỉ dùng đúng ảnh/video đó cho cả video.</p>
+                <!-- Độ dài mỗi cảnh đo theo mp3 giọng đọc; chưa có voice thì đành lấy mốc SRT gốc, mà
+                     export CapCut lại dựng timeline theo mp3 -> đọc nhanh/chậm khác bản gốc là hình lệch. -->
+                <p v-if="!podcastHasVoice" class="w-full text-[10px] text-orange-400 font-bold border-t border-gray-800 pt-2">
+                    ⚠️ Dự án chưa tạo voice — độ dài cảnh đang lấy theo mốc file SRT gốc. Nên tạo voice trước rồi lấp nền, hoặc lấp lại sau khi có voice để hình khớp đúng giọng đọc.
+                </p>
             </div>
 
             <!-- Vùng thả file -->
@@ -2210,10 +2306,10 @@
                     <div class="mt-2 h-1.5 bg-gray-800 rounded-full overflow-hidden"><div class="h-full bg-purple-500 transition-all" :style="{ width: podcastLib.progress + '%' }"></div></div>
                 </div>
                 <div v-else>
-                    <p class="text-[13px] text-gray-400">Kéo thả video vào đây hoặc <span class="text-purple-400 font-bold">nhấn để chọn</span></p>
-                    <p class="text-[10px] text-gray-600 mt-1">.mp4 .mov .mkv .webm .m4v — chọn được nhiều file cùng lúc</p>
+                    <p class="text-[13px] text-gray-400">Kéo thả video/ảnh vào đây hoặc <span class="text-purple-400 font-bold">nhấn để chọn</span></p>
+                    <p class="text-[10px] text-gray-600 mt-1">.mp4 .mov .mkv .webm .m4v · .jpg .png .webp — chọn được nhiều file cùng lúc</p>
                 </div>
-                <input ref="podcastLibInput" type="file" accept="video/*" multiple class="hidden"
+                <input ref="podcastLibInput" type="file" accept="video/*,image/*" multiple class="hidden"
                     @change="uploadPodcastVideos($event.target.files); $event.target.value=''">
             </div>
 
@@ -2227,9 +2323,11 @@
                             <video v-if="podcastLib.playing === v.name" :src="'/api/media?path=' + encodeURIComponent(v.relativePath)" class="w-full h-full object-contain" controls autoplay></video>
                             <template v-else>
                                 <img :src="'/api/thumb?path=' + encodeURIComponent(v.relativePath)" class="w-full h-full object-cover" loading="lazy" @error="$event.target.style.visibility='hidden'">
-                                <button @click="podcastLib.playing = v.name" class="absolute inset-0 flex items-center justify-center text-3xl opacity-0 group-hover:opacity-100 bg-black/40 transition-opacity">▶️</button>
+                                <!-- Ảnh thì không có gì để phát, chỉ video mới hiện nút ▶️ -->
+                                <button v-if="v.kind !== 'image'" @click="podcastLib.playing = v.name" class="absolute inset-0 flex items-center justify-center text-3xl opacity-0 group-hover:opacity-100 bg-black/40 transition-opacity">▶️</button>
                             </template>
                             <span v-if="v.duration" class="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/80 text-[10px] font-mono text-gray-200">{{ fmtDur(v.duration) }}</span>
+                            <span v-else-if="v.kind === 'image'" class="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/80 text-[10px] font-bold text-orange-300">ẢNH</span>
                         </div>
                         <div class="p-2 flex items-start gap-2">
                             <div class="flex-1 min-w-0">
@@ -2238,6 +2336,9 @@
                             </div>
                             <button @click="deletePodcastVideo(v)" class="text-red-500 hover:text-red-400 text-[10px] font-black uppercase shrink-0" title="Xoá khỏi kho">Xoá</button>
                         </div>
+                        <button v-if="podcastLib.pickFor" @click="runPodcastFill('single', v)" :disabled="podcastLib.filling"
+                            class="w-full py-1.5 text-[10px] font-black uppercase tracking-widest bg-indigo-700 hover:bg-indigo-600 disabled:opacity-40 text-white"
+                            title="Chỉ dùng đúng file này, chạy suốt từ đầu đến cuối video">⇢ Dùng xuyên suốt</button>
                     </div>
                 </div>
             </div>
@@ -2742,6 +2843,88 @@
     <!-- MOVE ASSET MODAL -->
     <!-- Assign to Detail Modal - Expandable Sections -->
 
+    <!-- 📋 HÀNG ĐỢI PODCAST -->
+    <div v-if="podcastQueue.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-6" @click.self="podcastQueue.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-full max-w-3xl max-h-[85vh] flex flex-col gap-3">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h3 class="text-lg font-black text-white">📋 Hàng đợi Podcast</h3>
+                    <p class="text-[10px] text-gray-500">Các dự án chạy lần lượt: nhập SRT → tạo voice → lấp nền → xuất CapCut</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button @click="loadPodcastQueue" class="text-[11px] font-black uppercase px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300">🔄 Nạp lại</button>
+                    <button @click="podcastQueue.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto space-y-3">
+                <div v-if="podcastQueue.running">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-amber-400 mb-1">Đang chạy</p>
+                    <div class="bg-gray-950/60 border border-amber-600/50 rounded-xl p-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-lg">{{ stateIcon(podcastQueue.running.state) }}</span>
+                            <span class="text-[12px] font-mono text-white flex-1 truncate">{{ podcastQueue.running.projectId }}</span>
+                            <span class="text-[11px] font-black" :class="stateCls(podcastQueue.running.state)">{{ stateText(podcastQueue.running.state) }}</span>
+                        </div>
+                        <p class="text-[10px] text-gray-400 mt-1">{{ podcastQueue.running.step }}</p>
+                    </div>
+                </div>
+                <div v-if="podcastQueue.queued.length">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-1">Đang chờ ({{ podcastQueue.queued.length }})</p>
+                    <div v-for="(j, i) in podcastQueue.queued" :key="j.id" class="bg-gray-950/40 border border-gray-800 rounded-xl p-2.5 flex items-center gap-2 mb-1">
+                        <span class="text-[10px] font-black text-gray-600 w-5">{{ i + 1 }}.</span>
+                        <span class="text-[12px] font-mono text-gray-300 flex-1 truncate">{{ j.projectId }}</span>
+                        <button @click="cancelPodcastJob(j)" class="text-[9px] font-black uppercase px-2 py-1 rounded bg-red-900/50 hover:bg-red-600 text-red-300 hover:text-white">Bỏ</button>
+                    </div>
+                </div>
+                <div v-if="podcastQueue.history.length">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-1">Đã xong</p>
+                    <div v-for="j in podcastQueue.history" :key="j.id" class="bg-gray-950/40 border border-gray-800 rounded-xl p-2.5 mb-1">
+                        <div class="flex items-center gap-2">
+                            <span>{{ stateIcon(j.state) }}</span>
+                            <span class="text-[12px] font-mono text-gray-300 flex-1 truncate">{{ j.projectId }}</span>
+                            <span v-if="j.audioFail" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-900/60 text-orange-300" :title="'Thiếu tiếng ' + j.audioFail + '/' + j.totalUnits + ' câu'">⚠ thiếu {{ j.audioFail }} câu</span>
+                            <span class="text-[10px] font-mono text-gray-600">{{ j.endedAt && j.startedAt ? Math.round((j.endedAt - j.startedAt) / 60000) + ' phút' : '' }}</span>
+                        </div>
+                        <p class="text-[10px] mt-0.5" :class="j.state === 'error' ? 'text-red-400' : 'text-gray-500'">{{ j.step }}</p>
+                    </div>
+                </div>
+                <p v-if="!podcastQueue.running && !podcastQueue.queued.length && !podcastQueue.history.length"
+                   class="text-[12px] text-gray-600 text-center py-10 uppercase tracking-widest font-bold">Chưa có dự án nào trong hàng đợi</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 📂 FILE ĐÃ XUẤT -->
+    <div v-if="podcastExports.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-6" @click.self="podcastExports.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-full max-w-3xl max-h-[85vh] flex flex-col gap-3">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h3 class="text-lg font-black text-white">📂 File đã xuất</h3>
+                    <p class="text-[10px] text-gray-500 font-mono">{{ podcastExports.dir || '…' }}</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="text-[11px] font-bold text-gray-400">{{ podcastExports.items.length }} file · {{ podcastExportsTotal }}</span>
+                    <button @click="loadPodcastExports" class="text-[11px] font-black uppercase px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300">🔄 Nạp lại</button>
+                    <button @click="podcastExports.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto">
+                <p v-if="podcastExports.loading" class="text-[12px] text-gray-500 text-center py-10">Đang tải danh sách...</p>
+                <p v-else-if="!podcastExports.items.length" class="text-[12px] text-gray-600 text-center py-10 uppercase tracking-widest font-bold">Chưa có file nào — xuất xong sẽ nằm ở đây</p>
+                <div v-for="f in podcastExports.items" :key="f.name" class="bg-gray-950/60 border border-gray-800 rounded-xl p-3 flex items-center gap-3 mb-1.5">
+                    <span class="text-lg">{{ f.name.endsWith('.zip') ? '📦' : '📜' }}</span>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-[12px] text-gray-200 truncate font-mono" :title="f.name">{{ f.name }}</p>
+                        <p class="text-[10px] text-gray-600">{{ fmtSize(f.size) }} · {{ new Date(f.mtime).toLocaleString('vi-VN') }}</p>
+                    </div>
+                    <a :href="'/api/podcast-exports/download?name=' + encodeURIComponent(f.name)" :download="f.name"
+                       class="text-[10px] font-black uppercase px-3 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-600 text-white shrink-0">⬇️ Tải</a>
+                    <button @click="deletePodcastExport(f)" class="text-[10px] font-black uppercase px-3 py-1.5 rounded-lg bg-red-900/60 hover:bg-red-600 text-red-300 hover:text-white shrink-0">🗑️ Xoá</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- ⇄ THAY MEDIA ĐÃ CHỌN -->
     <div v-if="replaceModal.open" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50" @click.self="replaceModal.open = false">
         <div class="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-[560px] space-y-3">
@@ -2868,6 +3051,28 @@
 
     <!-- TOAST -->
     <div v-if="toast" class="fixed top-6 right-6 z-50 bg-blue-600 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-lg">{{ toast }}</div>
+
+    <!-- TIẾN ĐỘ EXPORT CAPCUT: dự án nặng chạy hàng chục phút, phải nhìn được đang làm gì tới đâu -->
+    <div v-if="exportProg.show" class="fixed bottom-6 right-6 z-50 w-[380px] bg-gray-900 border border-pink-600/50 rounded-2xl shadow-2xl p-4 space-y-2">
+        <div class="flex items-center justify-between">
+            <span class="text-[12px] font-black text-white">🎬 Xuất CapCut</span>
+            <span class="text-[11px] font-mono tabular-nums text-gray-400">{{ fmtElapsed(exportProg.elapsedSec) }}</span>
+        </div>
+        <div class="flex items-center justify-between text-[11px]">
+            <span class="font-bold text-pink-300">{{ exportPhaseLabel }}</span>
+            <span class="font-mono tabular-nums text-gray-300">
+                <template v-if="exportProg.phase === 'done'">{{ exportProg.mb }} MB</template>
+                <template v-else-if="exportProg.phase === 'zip'">{{ exportProg.pct }}%</template>
+                <template v-else-if="exportProg.total">{{ exportProg.done }}/{{ exportProg.total }} · {{ exportProg.pct }}%</template>
+            </span>
+        </div>
+        <div class="h-2 bg-gray-800 rounded-full overflow-hidden">
+            <!-- Khâu tải về không biết tổng bao nhiêu (server nén tới đâu gửi tới đó) -> chạy sọc động -->
+            <div v-if="exportProg.phase === 'done'" class="h-full w-1/3 bg-pink-500 animate-pulse rounded-full"></div>
+            <div v-else class="h-full bg-pink-500 transition-all duration-300 rounded-full" :style="{ width: exportProg.pct + '%' }"></div>
+        </div>
+        <p class="text-[10px] text-gray-500 leading-snug">{{ exportProg.label }}<span v-if="exportProg.phase === 'done'"> — đừng đóng tab, file đang về máy</span></p>
+    </div>
 </div>
 
 <script>
@@ -2877,6 +3082,28 @@ const { createApp, ref, computed, watch, onMounted, onUnmounted } = Vue;
 const lipsSyncIndex = ref({});
 
 // Thanh audio waveform custom: play/seek + thời gian m:ss.s chính xác
+// ===== TRẦN SỐ THẺ AUDIO SỐNG CÙNG LÚC =====
+// Chrome chỉ cho khoảng 75 WebMediaPlayer tồn tại đồng thời trong 1 tab; quá số đó là mọi thẻ media
+// mới đều bị chặn im lặng ("Blocked attempt to create a WebMediaPlayer", crbug.com/1144736).
+// Một bài podcast có 557 câu = 557 thanh audio, nên trước đây các thanh CUỐI bấm không kêu.
+// Cách chữa: thanh nào được đụng tới mới tạo thẻ Audio, và chỉ giữ tối đa ngần này thẻ — cái cũ nhất
+// bị thu hồi, lần sau bấm lại thì tạo mới (mất chưa tới một nhịp, người dùng không thấy khác).
+const LIVE_AUDIO_LIMIT = 24;
+const liveAudioBars = [];
+function keepAudioAlive(bar) {
+    const i = liveAudioBars.indexOf(bar);
+    if (i >= 0) liveAudioBars.splice(i, 1);
+    liveAudioBars.push(bar);
+    while (liveAudioBars.length > LIVE_AUDIO_LIMIT) {
+        const old = liveAudioBars.shift();
+        if (old !== bar) old.release();
+    }
+}
+function dropAudioBar(bar) {
+    const i = liveAudioBars.indexOf(bar);
+    if (i >= 0) liveAudioBars.splice(i, 1);
+}
+
 const AudioBar = {
   props: { src: { type: String, required: true }, text: { type: String, default: '' }, wt: { type: String, default: '' }, coverSec: { type: Number, default: null }, coverFull: { type: Boolean, default: false } },
   template: `
@@ -2909,20 +3136,46 @@ const AudioBar = {
       const sec = s - m * 60;
       return m + ':' + sec.toFixed(1).padStart(4, '0');
     };
+    // Thu hồi thẻ Audio để trả suất WebMediaPlayer lại cho trình duyệt. Giữ nguyên dur/cur đang hiển
+    // thị: bấm phát lại chỉ việc dựng thẻ mới rồi tua về đúng chỗ.
+    const self = {
+      release() {
+        if (!audio) return;
+        try { audio.pause(); audio.removeAttribute('src'); audio.load(); } catch (_) {}
+        audio = null;
+        playing.value = false;
+      },
+    };
     const ensure = () => {
-      if (audio) return audio;
+      if (audio) { keepAudioAlive(self); return audio; }
       audio = new Audio();
       audio.preload = 'metadata';
       audio.src = props.src;
-      audio.addEventListener('loadedmetadata', () => { dur.value = audio.duration || 0; });
+      audio.addEventListener('loadedmetadata', () => {
+        dur.value = audio.duration || 0;
+        // Thẻ vừa dựng lại sau khi bị thu hồi -> về đúng chỗ đang nghe dở.
+        if (cur.value > 0 && cur.value < audio.duration) { try { audio.currentTime = cur.value; } catch (_) {} }
+      });
       audio.addEventListener('timeupdate', () => { cur.value = audio.currentTime || 0; });
       audio.addEventListener('play', () => { playing.value = true; started.value = true; loop(); });
       audio.addEventListener('pause', () => { playing.value = false; });
       audio.addEventListener('ended', () => { playing.value = false; started.value = false; cur.value = 0; });
+      keepAudioAlive(self);
       return audio;
     };
     const loop = () => { if (audio && !audio.paused) { cur.value = audio.currentTime; raf = requestAnimationFrame(loop); } };
-    const toggle = () => { const a = ensure(); a.paused ? a.play() : a.pause(); };
+    // play() trả promise: bị chặn (hết suất media, chính sách autoplay...) thì phải báo ra, đừng để
+    // người dùng bấm mãi mà tưởng nút hỏng.
+    const toggle = () => {
+      const a = ensure();
+      if (!a.paused) return a.pause();
+      const pr = a.play();
+      if (pr?.catch) pr.catch(err => {
+        playing.value = false;
+        console.error('[audio-bar] không phát được:', err?.message || err);
+        if (window.__toast) window.__toast('❌ Không phát được audio: ' + (err?.message || err), 6000);
+      });
+    };
     const seek = (ev) => {
       const a = ensure(); const el = track.value; if (!el) return;
       const rect = el.getBoundingClientRect();
@@ -2987,7 +3240,9 @@ const AudioBar = {
     };
     onMounted(() => {
       drawFlat();
-      ensure();
+      // KHÔNG dựng thẻ Audio ở đây: bài podcast 557 câu là 557 thẻ, vượt xa trần WebMediaPlayer của
+      // Chrome nên các thanh cuối bị chặn, bấm không kêu. Độ dài lấy từ decode() khi thanh lọt vào
+      // tầm nhìn (chỉ fetch mp3, không tốn suất media), còn thẻ Audio để lúc bấm phát mới dựng.
       try {
         io = new IntersectionObserver((ents) => {
           ents.forEach(e => { if (e.isIntersecting) { decode(); if (io) { io.disconnect(); io = null; } } });
@@ -2995,7 +3250,7 @@ const AudioBar = {
         io.observe(cv.value);
       } catch (e) { decode(); }
     });
-    onUnmounted(() => { if (raf) cancelAnimationFrame(raf); if (io) io.disconnect(); if (audio) { audio.pause(); audio.src = ''; } });
+    onUnmounted(() => { if (raf) cancelAnimationFrame(raf); if (io) io.disconnect(); dropAudioBar(self); self.release(); });
     watch(() => props.src, (nv) => {
       peaks = null; decoded = false; cur.value = 0; dur.value = 0;
       if (audio) audio.src = nv;
@@ -3299,9 +3554,11 @@ createApp({
         }
 
         // ===== PODCAST: dự án chỉ có tiếng — nhập SRT, tuỳ chọn tạo voice, xuất lại SRT =====
-        const podcastModal = ref({ open: false, projectId: '', targetLang: 'vi', file: null, fileTarget: null, loading: false,
+        const podcastModal = ref({ open: false, projectId: '', targetLang: 'vi', files: [], filesTarget: [], loading: false, progress: '',
                                    voiceAuto: false, voiceContentType: 'content', speakerUuid: '', selectedDicts: [],
-                                   speakers: [], dictionaries: [], voiceLoading: false, voiceSpeed: 1 });
+                                   speakers: [], dictionaries: [], voiceLoading: false, voiceSpeed: 1,
+                                   // Dây chuyền tự động sau khi nhập SRT — bật sẵn để nạp xong là có file mang đi dựng
+                                   autoFill: true, fillMode: 'random', fillName: '', maxClip: 20, autoExport: true });
 
         function onPodcastVoiceToggle() {
             if (podcastModal.value.voiceAuto && !podcastModal.value.speakers.length) loadAutoVoiceOptions(podcastModal);
@@ -3311,54 +3568,193 @@ createApp({
             if (podcastModal.value.voiceAuto) { podcastModal.value.speakerUuid = ''; loadAutoVoiceOptions(podcastModal); }
         });
 
+        // Số thứ tự trong tên do trình duyệt đặt khi tải trùng tên: "vi.srt"=0, "vi (1).srt"=1, "vi (2).srt"=2.
+        // Sắp theo số này rồi mới theo tên, nên "vi" luôn đứng trước "vi (1)" — nếu sắp thuần chữ cái thì
+        // dấu cách < dấu chấm khiến "vi (1).srt" nhảy lên trước "vi.srt", ghép cặp lệch hết.
+        const srtCopyIndex = (name) => Number(name.match(/\((\d+)\)\s*\.srt$/i)?.[1] ?? 0);
+        const srtSort = (a, b) => srtCopyIndex(a.name) - srtCopyIndex(b.name)
+            || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+
+        // Gộp file mới vào danh sách, khử trùng theo tên (kéo thả nhiều lần vẫn không nhân đôi)
+        function addPodcastSrtFiles(fileList, which = 'src') {
+            const key = which === 'target' ? 'filesTarget' : 'files';
+            const arr = Array.from(fileList || []).filter(f => f.name.toLowerCase().endsWith('.srt'));
+            const map = new Map(podcastModal.value[key].map(f => [f.name, f]));
+            for (const f of arr) map.set(f.name, f);
+            podcastModal.value[key] = [...map.values()].sort(srtSort);
+        }
+
+        // Ghép gốc ↔ dịch THEO THỨ TỰ: vi→ko, vi (1)→ko (1), vi (2)→ko (2).
+        // Lệch số lượng thì vẫn ghép được bao nhiêu hay bấy nhiêu, phần thừa được nói rõ chứ không nuốt.
+        const srtPairs = computed(() => {
+            const src = podcastModal.value.files, tgt = podcastModal.value.filesTarget;
+            const pairs = src.map((f, i) => ({ src: f, tgt: tgt[i] || null }));
+            let warn = '';
+            if (tgt.length && tgt.length < src.length) warn = `${src.length - tgt.length} dự án cuối không có bản dịch`;
+            else if (tgt.length > src.length) warn = `thừa ${tgt.length - src.length} file dịch, sẽ bỏ qua`;
+            return { pairs, warn };
+        });
+
+        // Tên dự án từ tên file SRT: bỏ đuôi, thay ký tự lạ bằng '-' (project_id còn dùng làm TÊN THƯ MỤC
+        // trên đĩa nên không được chứa / \ : ...). Trùng tên thì thêm hậu tố.
+        function projectIdFromFileName(name, taken) {
+            const base = name.replace(/\.srt$/i, '')
+                .replace(/[^\p{L}\p{N}_-]+/gu, '-')
+                .replace(/-{2,}/g, '-')          // "Tap 1 - Mo dau" -> "Tap-1-Mo-dau", không phải "Tap-1---Mo-dau"
+                .replace(/^-+|-+$/g, '').slice(0, 60);
+            let id = 'podcast_' + (base || stampProjectId('').replace(/^_/, ''));
+            let i = 2;
+            while (taken.has(id)) id = `podcast_${base}_${i++}`;
+            taken.add(id);
+            return id;
+        }
+
         async function submitPodcast() {
-            const { file, fileTarget, targetLang, voiceAuto, voiceContentType, speakerUuid, selectedDicts, voiceSpeed } = podcastModal.value;
-            if (!file) return;
+            const { files, targetLang, voiceAuto, voiceContentType, speakerUuid, selectedDicts, voiceSpeed,
+                    autoFill, fillMode, fillName, maxClip, autoExport } = podcastModal.value;
+            if (!files.length) return;
+            if (autoFill && fillMode === 'single' && !fillName) { alert('❌ Đã chọn "1 ảnh/video xuyên suốt" nhưng chưa chọn file trong kho'); return; }
+            if (autoExport && !voiceAuto) {
+                if (!confirm('Chưa bật tạo voice mà đã bật tự xuất CapCut.\n\nBài xuất ra sẽ KHÔNG CÓ TIẾNG. Vẫn tiếp tục?')) return;
+            }
             if (voiceAuto && !speakerUuid) { alert('❌ Đã bật Tạo voice nhưng chưa chọn giọng mẫu'); return; }
-            const projectId = podcastModal.value.projectId.trim() || stampProjectId('podcast_');
             podcastModal.value.loading = true;
+            // Mỗi file = 1 dự án riêng, gửi lần lượt để server xếp hàng đúng thứ tự bạn chọn.
+            const taken = new Set((posts.value || []).map(p => p.project_id));
+            const typed = podcastModal.value.projectId.trim();
+            const ok = [], failed = [];
             try {
-                const form = new FormData();
-                form.append('srt', file);
-                if (fileTarget) form.append('srtTarget', fileTarget);
-                form.append('projectId', projectId);
-                form.append('targetLang', targetLang);
-                // Tên file SRT (bỏ đuôi) làm tiêu đề dự án cho dễ nhận ra trên sidebar
-                form.append('title', file.name.replace(/\.srt$/i, ''));
-                if (voiceAuto) {
-                    form.append('voiceAuto', 'true');
-                    form.append('voiceContentType', voiceContentType);
-                    form.append('speakerUuid', speakerUuid);
-                    form.append('dictionaryUuids', JSON.stringify(selectedDicts || []));
-                    form.append('voiceSpeed', String(Math.min(2, Math.max(0.5, Number(voiceSpeed) || 1))));
+                for (const [i, { src: file, tgt }] of srtPairs.value.pairs.entries()) {
+                    podcastModal.value.progress = `Đang gửi ${i + 1}/${files.length}: ${file.name}`;
+                    const projectId = (files.length === 1 && typed) ? typed : projectIdFromFileName(file.name, taken);
+                    const form = new FormData();
+                    form.append('srt', file);
+                    if (tgt) form.append('srtTarget', tgt);
+                    form.append('projectId', projectId);
+                    form.append('targetLang', targetLang);
+                    // Tên file SRT (bỏ đuôi) làm tiêu đề dự án cho dễ nhận ra trên sidebar
+                    form.append('title', file.name.replace(/\.srt$/i, ''));
+                    if (voiceAuto) {
+                        form.append('voiceAuto', 'true');
+                        form.append('voiceContentType', voiceContentType);
+                        form.append('speakerUuid', speakerUuid);
+                        form.append('dictionaryUuids', JSON.stringify(selectedDicts || []));
+                        form.append('voiceSpeed', String(Math.min(2, Math.max(0.5, Number(voiceSpeed) || 1))));
+                    }
+                    form.append('autoFill', autoFill ? 'true' : 'false');
+                    form.append('fillMode', fillMode);
+                    if (fillMode === 'single') form.append('fillName', fillName);
+                    form.append('maxClip', String(maxClip || 20));
+                    form.append('autoExport', autoExport ? 'true' : 'false');
+                    try {
+                        const res = await fetch('/api/create-podcast', { method: 'POST', body: form });
+                        if (!res.ok) { const t = await res.text(); throw new Error(`HTTP ${res.status}: ${t.slice(0, 80)}`); }
+                        const r = await res.json();
+                        if (!r.success) throw new Error(r.error || 'Lỗi');
+                        ok.push(projectId);
+                    } catch (e) {
+                        // Một file hỏng thì bỏ qua file đó, vẫn nạp nốt các file còn lại
+                        failed.push(`${file.name}: ${e.message}`);
+                    }
                 }
-                const res = await fetch('/api/create-podcast', { method: 'POST', body: form });
-                if (!res.ok) { const t = await res.text(); throw new Error(`HTTP ${res.status}: ${t.slice(0, 120)}`); }
-                const r = await res.json();
-                if (r.success) {
+                if (ok.length) {
                     podcastModal.value.open = false;
-                    podcastModal.value.file = null;
-                    podcastModal.value.fileTarget = null;
+                    podcastModal.value.files = [];
+                    podcastModal.value.filesTarget = [];
                     podcastModal.value.projectId = '';
-                    podcastModal.value.voiceAuto = false;
-                    podcastModal.value.speakerUuid = '';
-                    podcastModal.value.selectedDicts = [];
+                    // GIỮ nguyên lựa chọn voice/lấp nền/xuất: nạp nhiều đợt SRT là chuyện thường,
+                    // bắt chọn lại giọng cho từng đợt thì phiền.
                     activeGenre.value = 'podcast';   // nhảy sang menu 🎙️ để thấy dự án vừa tạo
-                    showToast(voiceAuto ? '✅ Đã nhập SRT, đang tạo voice...' : '✅ Đã nhập SRT xong!');
+                    showToast(`✅ Đã xếp ${ok.length} dự án vào hàng đợi — chúng sẽ tự chạy lần lượt`
+                        + (failed.length ? ` · ${failed.length} file lỗi` : ''), 7000);
+                    loadPodcastQueue();
                     await loadPosts();
-                } else { alert('❌ ' + (r.error || 'Lỗi')); }
+                }
+                if (failed.length) alert('❌ Không nạp được:\n' + failed.join('\n'));
             } catch (e) { alert('❌ ' + e.message); }
+            podcastModal.value.progress = '';
             podcastModal.value.loading = false;
+        }
+
+        // ===== HÀNG ĐỢI PODCAST =====
+        // Nạp bao nhiêu SRT cũng được, server chạy lần lượt từng dự án qua trọn dây chuyền
+        // (nhập → voice → lấp nền → xuất CapCut). Bảng này cho biết đang tới dự án nào, khâu nào.
+        const podcastQueue = ref({ open: false, running: null, queued: [], history: [] });
+        const PODCAST_STATES = {
+            queued: ['⏳', 'Đang chờ', 'text-gray-400'],
+            import: ['📄', 'Nhập kịch bản', 'text-blue-400'],
+            voice: ['🎙️', 'Tạo giọng đọc', 'text-purple-400'],
+            fill: ['🎬', 'Lấp nền từ kho', 'text-amber-400'],
+            export: ['📦', 'Xuất CapCut', 'text-pink-400'],
+            done: ['✅', 'Xong', 'text-green-400'],
+            error: ['❌', 'Lỗi', 'text-red-400'],
+            cancelled: ['🚫', 'Đã huỷ', 'text-gray-500'],
+        };
+        const stateIcon = (s) => (PODCAST_STATES[s] || ['•', s, 'text-gray-400'])[0];
+        const stateText = (s) => (PODCAST_STATES[s] || ['•', s, 'text-gray-400'])[1];
+        const stateCls = (s) => (PODCAST_STATES[s] || ['•', s, 'text-gray-400'])[2];
+        const queueBusy = computed(() => !!podcastQueue.value.running || podcastQueue.value.queued.length > 0);
+
+        async function loadPodcastQueue() {
+            try {
+                const r = await (await fetch('/api/podcast-queue')).json();
+                podcastQueue.value.running = r.running || null;
+                podcastQueue.value.queued = r.queued || [];
+                podcastQueue.value.history = r.history || [];
+            } catch (_) { /* mạng chớp nháy -> vòng sau */ }
+        }
+        async function cancelPodcastJob(job) {
+            if (!confirm(`Bỏ "${job.projectId}" khỏi hàng chờ?`)) return;
+            try {
+                const r = await (await fetch('/api/podcast-queue/cancel', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: job.id }),
+                })).json();
+                if (r.error) throw new Error(r.error);
+                showToast('🚫 Đã bỏ khỏi hàng chờ');
+                loadPodcastQueue();
+            } catch (e) { showToast('❌ ' + e.message); }
+        }
+        // Hỏi trạng thái đều đặn khi còn việc; rảnh thì thưa lại cho đỡ ồn.
+        setInterval(() => { if (podcastQueue.value.open || queueBusy.value) loadPodcastQueue(); }, 3000);
+
+        // ===== THƯ MỤC FILE ĐÃ XUẤT =====
+        const podcastExports = ref({ open: false, items: [], dir: '', loading: false });
+        const podcastExportsTotal = computed(() => fmtSize(podcastExports.value.items.reduce((n, f) => n + (f.size || 0), 0)));
+
+        async function loadPodcastExports() {
+            podcastExports.value.loading = true;
+            try {
+                const r = await (await fetch('/api/podcast-exports')).json();
+                if (r.error) throw new Error(r.error);
+                podcastExports.value.items = r.items || [];
+                podcastExports.value.dir = r.dir || '';
+            } catch (e) { showToast('❌ ' + e.message); }
+            podcastExports.value.loading = false;
+        }
+        function openPodcastExports() { podcastExports.value.open = true; loadPodcastExports(); }
+        async function deletePodcastExport(f) {
+            if (!confirm(`Xoá "${f.name}"?\n\nFile bị xoá hẳn khỏi ổ đĩa.`)) return;
+            try {
+                const r = await (await fetch('/api/podcast-exports?name=' + encodeURIComponent(f.name), { method: 'DELETE' })).json();
+                if (r.error) throw new Error(r.error);
+                podcastExports.value.items = podcastExports.value.items.filter(x => x.name !== f.name);
+                showToast('🗑️ Đã xoá ' + f.name);
+            } catch (e) { showToast('❌ ' + e.message); }
         }
 
         // ===== KHO VIDEO PODCAST =====
         // Podcast chỉ có tiếng nên pipeline không cào hình; kho này là nơi người dùng tự nạp video
         // để về sau chọn gán cho từng cảnh. Thư mục dùng chung mọi dự án: <MEDIA_DIR>/_podcast_videos.
-        const podcastLib = ref({ open: false, items: [], dir: '', loading: false, uploading: false, progress: 0, dragging: false, playing: '' });
+        // pickFor = postId khi mở kho từ TRONG một dự án podcast: lúc đó mỗi ô có thêm nút "dùng xuyên
+        // suốt", và trên đầu có nút bốc clip ngẫu nhiên. Mở từ sidebar (pickFor = null) thì chỉ xem/nạp/xoá.
+        const podcastLib = ref({ open: false, items: [], dir: '', loading: false, uploading: false, progress: 0, dragging: false, playing: '', pickFor: null, maxClip: 20, filling: false });
 
         const fmtSize = (b) => (b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : b >= 1e6 ? (b / 1e6).toFixed(1) + ' MB' : Math.round(b / 1e3) + ' KB');
         const fmtDur = (s) => { const n = Math.round(s); return Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0'); };
         const podcastLibTotalSize = computed(() => fmtSize(podcastLib.value.items.reduce((n, v) => n + (v.size || 0), 0)));
+        // Đã có mp3 giọng đọc chưa — quyết định độ dài cảnh đo được chính xác hay chỉ theo SRT gốc.
+        const podcastHasVoice = computed(() => (activePost.value?.paragraphs || [])
+            .some(p => (p.details || []).some(d => d.content_audio || d.content_vi_audio)));
 
         async function loadPodcastLib() {
             podcastLib.value.loading = true;
@@ -3370,10 +3766,54 @@ createApp({
             } catch (e) { showToast('❌ ' + e.message); }
             podcastLib.value.loading = false;
         }
-        function openPodcastLib() {
+        function openPodcastLib(pickFor = null) {
             podcastLib.value.open = true;
             podcastLib.value.playing = '';
+            podcastLib.value.pickFor = pickFor;
             loadPodcastLib();
+        }
+
+        // Lấp nền hình cho dự án podcast. mode='random' bốc clip ngẫu nhiên nối nhau (mỗi clip tối đa
+        // maxClip giây); mode='single' lấy đúng 1 ảnh/video cho chạy xuyên suốt.
+        async function runPodcastFill(mode, item = null) {
+            const postId = podcastLib.value.pickFor || activePostId.value;
+            if (!postId || podcastLib.value.filling) return;
+            const what = mode === 'single' ? `"${item.name}" xuyên suốt cả video` : `clip ngẫu nhiên, mỗi clip tối đa ${podcastLib.value.maxClip}s`;
+            if (!confirm(`Lấp nền bằng ${what}?\n\nNền cũ do máy lấp sẽ bị thay; cảnh bạn tự chọn media giữ nguyên.`)) return;
+            podcastLib.value.filling = true;
+            showToast('🎬 Đang lấp nền...', 8000);
+            try {
+                const res = await fetch('/api/podcast-fill', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ postId, mode, name: item?.name, maxClip: podcastLib.value.maxClip }),
+                });
+                if (!res.ok) throw new Error(res.status === 404
+                    ? 'Server chưa có /api/podcast-fill — cần restart server'
+                    : `Máy chủ trả lỗi ${res.status}`);
+                await new Promise((resolve, reject) => {
+                    let fails = 0;
+                    const poll = setInterval(async () => {
+                        try {
+                            const r = await fetch(`/api/podcast-fill/status/${postId}`);
+                            if (!r.ok) throw new Error(`status ${r.status}`);
+                            const st = await r.json();
+                            fails = 0;
+                            if (st.running) return;
+                            clearInterval(poll);
+                            if (st.error) showToast('❌ Lấp nền lỗi: ' + st.error, 12000);
+                            else showToast(`✅ Đã lấp ${st.clips} clip nền`, 6000);
+                            resolve();
+                        } catch (e) {
+                            if (++fails < 5) return;
+                            clearInterval(poll);
+                            reject(new Error('mất liên lạc với server: ' + e.message));
+                        }
+                    }, 2500);
+                });
+                podcastLib.value.open = false;
+                if (activePostId.value === postId) await selectPost({ id: postId });
+            } catch (e) { showToast('❌ ' + e.message, 12000); }
+            podcastLib.value.filling = false;
         }
         async function uploadPodcastVideos(fileList) {
             const files = [...(fileList || [])];
@@ -3821,6 +4261,9 @@ createApp({
             toast.value = msg;
             setTimeout(() => toast.value = '', ms);
         }
+        // audio-bar là component khai báo NGOÀI setup này nên không gọi thẳng showToast được —
+        // treo ra window để nó báo lỗi phát audio cho người dùng thấy thay vì chỉ log ra console.
+        window.__toast = showToast;
 
         // Nhãn trạng thái dự án đang xử lý (hiện ngay để người dùng biết vì sao "lâu", không tưởng treo).
         // Status có thể kèm tiến độ dạng "scripting:3/8" (bài dài viết nhiều phần) → tách ra để hiện "phần 3/8".
@@ -3969,12 +4412,19 @@ createApp({
         }
 
         // Load duration (giây) của 1 file audio qua metadata
+        // Đọc xong PHẢI thu hồi thẻ: mỗi thẻ media chiếm một suất WebMediaPlayer (Chrome ~75 suất/tab),
+        // mà thanh coverage của bài podcast gọi hàm này cho cả trăm câu — không thả ra là hết suất,
+        // mọi thẻ audio dựng sau đó đều bị chặn im lặng.
         function loadAudioDuration(url) {
             return new Promise((resolve) => {
                 const a = new Audio();
+                const done = (v) => {
+                    try { a.removeAttribute('src'); a.load(); } catch (_) {}
+                    resolve(v);
+                };
                 a.preload = 'metadata';
-                a.addEventListener('loadedmetadata', () => resolve(Number(a.duration) || 0), { once: true });
-                a.addEventListener('error', () => resolve(0), { once: true });
+                a.addEventListener('loadedmetadata', () => done(Number(a.duration) || 0), { once: true });
+                a.addEventListener('error', () => done(0), { once: true });
                 a.src = url;
             });
         }
@@ -3983,9 +4433,13 @@ createApp({
         function loadVideoDuration(url) {
             return new Promise((resolve) => {
                 const v = document.createElement('video');
+                const done = (val) => {
+                    try { v.removeAttribute('src'); v.load(); } catch (_) {}   // thả suất WebMediaPlayer
+                    resolve(val);
+                };
                 v.preload = 'metadata';
-                v.addEventListener('loadedmetadata', () => resolve(Number(v.duration) || 0), { once: true });
-                v.addEventListener('error', () => resolve(0), { once: true });
+                v.addEventListener('loadedmetadata', () => done(Number(v.duration) || 0), { once: true });
+                v.addEventListener('error', () => done(0), { once: true });
                 v.src = url;
             });
         }
@@ -4607,23 +5061,70 @@ createApp({
             } catch (e) { showToast('❌ ' + e.message); }
         }
 
+        // Bảng tiến độ export: dự án nặng chạy hàng chục phút, phải thấy đang ở khâu nào, bao nhiêu %,
+        // đã bao lâu — chứ nút quay tròn thì không phân biệt được "đang chạy" với "đã treo".
+        const exportProg = ref({ show: false, phase: '', pct: 0, done: 0, total: 0, label: '', elapsedSec: 0, mb: 0 });
+        const EXPORT_PHASES = {
+            start: '⏳ Chuẩn bị',
+            audio: '🎙️ Tải giọng đọc',
+            media: '🖼️ Chép ảnh/video',
+            freeze: '🎞️ Căn clip khớp lời',
+            zip: '📦 Nén draft',
+            done: '⬇️ Đang tải về máy',
+        };
+        const exportPhaseLabel = computed(() => EXPORT_PHASES[exportProg.value.phase] || exportProg.value.label || 'Đang xử lý');
+        const fmtElapsed = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+
         async function exportCapcut() {
             if (!activePostId.value) return;
             capcutExporting.value = true;
+            const postId = activePostId.value;
             const langLabel = capcutLang.value === 'content_vi' ? '🇻🇳 VI' : capcutLang.value === 'content' ? 'Target' : capcutLang.value === 'both' ? '🌍+🇻🇳 Cả 2' : 'Auto';
-            showToast(`🎬 Đang xuất CapCut draft (${langLabel})...`, 10000);
+            showToast(`🎬 Đang xuất CapCut draft (${langLabel})...`, 6000);
+            exportProg.value = { show: true, phase: 'start', pct: 0, done: 0, total: 0, label: 'Đang chuẩn bị', elapsedSec: 0, mb: 0 };
+            // Hỏi tiến độ song song với request export (request đó giữ kết nối cho tới khi tải xong zip).
+            const poll = setInterval(async () => {
+                try {
+                    const st = await (await fetch(`/api/export-capcut/status/${postId}`)).json();
+                    if (!st || st.running === false && exportProg.value.phase === 'done') return;
+                    if (st.phase) Object.assign(exportProg.value, {
+                        phase: st.phase, pct: st.pct || 0, done: st.done || 0, total: st.total || 0,
+                        label: st.label || '', elapsedSec: st.elapsedSec || 0,
+                    });
+                } catch (_) { /* chớp nháy -> vòng sau hỏi lại */ }
+            }, 1000);
             try {
-                const body = { postId: activePostId.value };
+                const body = { postId };
                 if (capcutLang.value) body.contentType = capcutLang.value;
                 const res = await fetch('/api/export-capcut', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                 if (!res.ok) { const e = await res.json(); return showToast('❌ ' + (e.error || 'Export thất bại')); }
-                const blob = await res.blob();
+                // Nén xong là bước tải file mấy GB về máy — đọc theo luồng để còn đếm MB, khỏi đứng im.
+                exportProg.value.phase = 'done';
+                const chunks = [];
+                const reader = res.body.getReader();
+                let got = 0;
+                for (;;) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value); got += value.length;
+                    exportProg.value.mb = Math.round(got / 1048576);
+                }
+                const blob = new Blob(chunks, { type: 'application/zip' });
                 const cd = res.headers.get('Content-Disposition') || '';
                 const fname = cd.match(/filename="([^"]+)"/)?.[1] || 'capcut_bundle.zip';
                 const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fname; a.click();
-                showToast('✅ Export xong! Kiểm tra file tải về.');
-            } catch(e) { showToast('❌ ' + e.message); }
-            finally { capcutExporting.value = false; }
+                // Câu nào tải audio hụt thì bài xuất ra THIẾU HẲN tiếng câu đó — trong CapCut chỉ thấy
+                // số câu nhảy cóc (vd 44 → 54). Báo ngay ở đây để còn xuất lại, đừng để dựng xong mới biết.
+                const fail = Number(res.headers.get('X-Audio-Fail') || 0);
+                const totalUnits = Number(res.headers.get('X-Audio-Total') || 0);
+                if (fail) showToast(`⚠️ Export xong NHƯNG THIẾU TIẾNG ${fail}/${totalUnits} câu — nên xuất lại (xem Log tiến độ để biết câu nào)`, 20000);
+                else showToast(`✅ Export xong đủ ${totalUnits} câu! Kiểm tra file tải về.`, 6000);
+            } catch(e) { showToast('❌ ' + e.message, 12000); }
+            finally {
+                clearInterval(poll);
+                capcutExporting.value = false;
+                exportProg.value.show = false;
+            }
         }
 
         async function renderCapcut() {
@@ -4634,7 +5135,8 @@ createApp({
                 const res = await fetch('/api/render-capcut', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: activePostId.value }) });
                 const data = await res.json();
                 if (!res.ok) return showToast('❌ ' + (data.error || 'Render thất bại'));
-                showToast('✅ ' + (data.message || 'Render started!'));
+                if (data.audioFail) showToast(`⚠️ Đã gửi render NHƯNG THIẾU TIẾNG ${data.audioFail}/${data.totalUnits} câu — nên làm lại`, 20000);
+                else showToast('✅ ' + (data.message || 'Render started!'));
             } catch(e) { showToast('❌ ' + e.message); }
             finally { capcutRendering.value = false; }
         }
@@ -6450,6 +6952,7 @@ createApp({
             startPollingVoice,
             crawling, thumbLoading, createThumbnail, selectThumbnail, capcutExporting, capcutRendering, capcutLang, showCapcutMenu, showVoiceMenu, showMediaMenu, matteLips, matteState,
             triggerCrawlAll, triggerAutoSelect, autoSelecting, autoCls, exportCapcut, renderCapcut,
+            exportProg, exportPhaseLabel, fmtElapsed,
             replaceModal, openReplaceModal, doReplace,
             refetchMedia,
             aiGenerate,
@@ -6491,8 +6994,10 @@ createApp({
             nazeModal,
             genreChooser,
             sportsModal, submitSports, sportsRetry,
-            podcastModal, submitPodcast, onPodcastVoiceToggle,
-            podcastLib, podcastLibTotalSize, openPodcastLib, loadPodcastLib, uploadPodcastVideos, deletePodcastVideo, fmtSize, fmtDur,
+            podcastModal, submitPodcast, onPodcastVoiceToggle, addPodcastSrtFiles, srtPairs,
+            podcastLib, podcastLibTotalSize, podcastHasVoice, openPodcastLib, loadPodcastLib, uploadPodcastVideos, deletePodcastVideo, runPodcastFill, fmtSize, fmtDur,
+            podcastQueue, loadPodcastQueue, cancelPodcastJob, queueBusy, stateIcon, stateText, stateCls,
+            podcastExports, podcastExportsTotal, openPodcastExports, loadPodcastExports, deletePodcastExport,
             pageChooser,
             geoSheet, openGeoSheet, loadGeoSheet, runGeoRow,
             scoreModal, openScoreDetail, shownEval, evalLabel,

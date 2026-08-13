@@ -111,16 +111,16 @@ async function remoteAudioDuration(url) {
     finally { try { fs.unlinkSync(tmp); } catch (_) {} }
 }
 
-// Điền số giây lời đọc cho mọi cảnh: mốc SRT > đo mp3 thật (song song) > ước lượng theo số ký tự.
+// Điền số giây lời đọc cho mọi cảnh.
+// Thứ tự tin cậy: ĐO MP3 THẬT > mốc SRT gốc > ước lượng theo số ký tự.
+// Giọng đọc đứng trước mốc SRT vì export CapCut dựng timeline theo độ dài mp3: TTS đọc nhanh/chậm
+// khác bản SRT gốc là hình lấp theo SRT sẽ hụt hoặc thừa so với tiếng.
+// CHỈ CACHE giá trị đo từ mp3 — link ttsmin hết hạn nhanh nên phải nhớ; còn mốc SRT/ước lượng thì
+// tính lại tức thì, mà nhớ chúng lại hoá dở: lấp trước khi có voice là kẹt luôn số cũ về sau.
 async function fillNeeds(scenes, spans, cache) {
     const toProbe = new Map();
     for (const s of scenes) {
         if (cache[s.key] > 0) { s.need = cache[s.key]; continue; }
-        if (spans && s.srtScene != null && spans.has(s.srtScene)) {
-            const [a, b] = spans.get(s.srtScene);
-            s.need = cache[s.key] = Math.max(0, b - a);
-            continue;
-        }
         for (const u of s.units) { const url = u.audio || u.audioAlt; if (url) toProbe.set(url, 0); }
     }
     if (toProbe.size) {
@@ -137,9 +137,14 @@ async function fillNeeds(scenes, spans, cache) {
             if (d > 0) { total += d; probed++; }
         }
         if (probed) { s.need = cache[s.key] = total; continue; }
+        if (spans && s.srtScene != null && spans.has(s.srtScene)) {
+            const [a, b] = spans.get(s.srtScene);
+            s.need = Math.max(0, b - a);
+            continue;
+        }
         // Chưa tạo voice / link mp3 hết hạn: ước lượng thô theo số ký tự, chỉ để có cái mà chia nhịp.
         const chars = sum(s.units.map(u => String(u.text || u.textAlt || '').length));
-        s.need = cache[s.key] = chars ? chars / EST_CHARS_PER_SEC : 0;
+        s.need = chars ? chars / EST_CHARS_PER_SEC : 0;
     }
 }
 
