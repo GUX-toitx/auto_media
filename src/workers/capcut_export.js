@@ -21,6 +21,16 @@ const getDb = () => open({ filename: DB_PATH, driver: sqlite3.Database });
 // UUIDv4 với dấu gạch ngang, in hoa — đúng format CapCut
 const uuid = () => crypto.randomUUID().toUpperCase();
 
+// intro_path/outro_path: NHIỀU clip lưu dạng mảng JSON, MỘT clip vẫn là chuỗi đường dẫn như cũ.
+// Giữ cả hai kiểu để dự án tạo trước khi có tính năng nhiều clip vẫn chạy y nguyên.
+export function parseBoundaryPaths(v) {
+    if (!v) return [];
+    const s = String(v).trim();
+    if (!s) return [];
+    if (s.startsWith('[')) { try { return JSON.parse(s).filter(Boolean); } catch (_) { return []; } }
+    return [s];
+}
+
 // ===== BÁO TIẾN ĐỘ =====
 // Bài podcast 557 câu + vài GB clip: export chạy hàng chục phút mà trước đây im thin thít, người dùng
 // không biết đang ở khâu nào hay đã treo. In ra stdout dạng máy đọc được để server bóc rồi đẩy lên UI.
@@ -548,8 +558,9 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
         return dur;
     }
 
-    // INTRO: chèn ở đầu (start = 0), đẩy toàn bộ đoạn ra sau.
-    if (post.intro_path) totalDuration += addBoundaryVideo(path.join(MEDIA_DIR, post.intro_path), totalDuration, 'intro');
+    // INTRO: chèn ở đầu (start = 0), đẩy toàn bộ đoạn ra sau. Nhiều clip thì nối tiếp nhau theo thứ tự.
+    for (const [i, rel] of parseBoundaryPaths(post.intro_path).entries())
+        totalDuration += addBoundaryVideo(path.join(MEDIA_DIR, rel), totalDuration, `intro${i + 1}`);
 
     // ===== DỰNG TIMELINE THEO TỪNG CÂU (audio + lips + b-roll khớp nhau) =====
     // Mỗi câu (unit trong getAllAudioUrls) = 1 audio segment + 1 clip lips, đặt CÙNG mốc thời gian,
@@ -822,8 +833,9 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
 
     await db.close();
 
-    // OUTRO: chèn ở cuối (sau toàn bộ câu).
-    if (post.outro_path) totalDuration += addBoundaryVideo(path.join(MEDIA_DIR, post.outro_path), totalDuration, 'outro');
+    // OUTRO: chèn ở cuối (sau toàn bộ câu). Nhiều clip thì nối tiếp nhau theo thứ tự.
+    for (const [i, rel] of parseBoundaryPaths(post.outro_path).entries())
+        totalDuration += addBoundaryVideo(path.join(MEDIA_DIR, rel), totalDuration, `outro${i + 1}`);
     console.log(`[CapCut] Timeline theo câu: ${lipsIdx} câu, lips đặt ${placedLips} clip, silence ${(silenceUs/1e6).toFixed(2)}s/câu, tổng ${(totalDuration/1e6).toFixed(1)}s${audioFail ? `, ⚠ ${audioFail} câu TẢI AUDIO HỤT (đã bù slot theo lips)` : ''}`);
 
     content.duration = totalDuration;
@@ -986,7 +998,7 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     // Tạo .bat cùng thư mục với zip
     const zipFileName = path.basename(zipPath);
     const batPath = zipPath.replace(/\.zip$/, '.bat');
-    fs.writeFileSync(batPath, generateBat(zipFileName, post.project_id));
+    fs.writeFileSync(batPath, generateBat(zipFileName, post.project_id, draftId));
     console.log(`[CapCut] Bat: ${batPath}`);
 
     // audioFail/totalUnits đi kèm kết quả để server còn cảnh báo lên UI — trước đây con số này chỉ nằm
@@ -997,16 +1009,62 @@ export async function exportCapcut(postId, outputDir, contentType = null) {
     return { zipPath, batPath, draftDir, draftId, projectName: post.project_id, audioFail, totalUnits: lipsIdx };
 }
 
-const INSTALL_SCRIPT = 'C:\\Users\\trinh\\workspace\\install_capcut.py';
+// ===== FILE .BAT CÀI DRAFT VÀO CAPCUT =====
+// TỰ CHẠY ĐƯỢC TRÊN MỌI MÁY: chỉ dùng thứ Windows có sẵn (tar/PowerShell), KHÔNG gọi python và KHÔNG
+// nhắc tới đường dẫn của máy nào. Bản cũ gọi "python C:\Users\trinh\workspace\install_capcut.py" nên
+// máy khác bấm vào là báo "No such file or directory" rồi FAILED.
+//
+// Thư mục draft lấy từ %LOCALAPPDATA% của CHÍNH máy đang chạy. Giải nén bằng tar (có sẵn từ Win10
+// 1803, nhanh hơn hẳn với zip vài GB), thiếu tar mới lùi về Expand-Archive của PowerShell.
+export function generateBat(zipFileName, projectName, draftId) {
+    const name = String(projectName || '').replace(/["'`%!^&|<>]/g, '').trim() || 'project';
+    // Cập nhật root_meta_info.json để CapCut thấy dự án trong danh sách. Mọi đường dẫn đều dựng từ
+    // %DR% (biến môi trường của máy đang chạy), không hằng số cứng.
+    const ps = [
+        '$dr=$env:DR',
+        '$id=$env:DRAFT_ID',
+        '$n=$env:PROJ_NAME',
+        '$f=(Join-Path $dr $id) -replace \'\\\\\',\'/\'',
+        '$rp=$dr -replace \'\\\\\',\'/\'',
+        '$r=Join-Path $dr \'root_meta_info.json\'',
+        '$t=[long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())*1000',
+        'if(Test-Path $r){$j=Get-Content $r -Raw|ConvertFrom-Json}else{$j=[PSCustomObject]@{all_draft_store=@();draft_ids=0;root_path=$rp}}',
+        'if($null -eq $j.all_draft_store){$j|Add-Member -NotePropertyName all_draft_store -NotePropertyValue @() -Force}',
+        '$ne=[PSCustomObject]@{draft_fold_path=$f;draft_id=$id;draft_name=$n;draft_root_path=$rp;draft_json_file=($f+\'/draft_content.json\');tm_draft_create=$t;tm_draft_modified=$t;tm_draft_removed=0;tm_duration=300000000;draft_timeline_materials_size=2000000;streaming_edit_draft_ready=$true;cloud_draft_cover=$false;cloud_draft_sync=$false;draft_is_invisible=$false}',
+        '$j.all_draft_store=@($ne)+(@($j.all_draft_store)|Where-Object{$_.draft_id -ne $id})',
+        'ConvertTo-Json $j -Depth 10 -Compress|Set-Content $r -Encoding UTF8',
+    ].join(';');
 
-export function generateBat(zipFileName, projectName) {
     return [
         '@echo off',
-        `echo Installing: ${projectName}`,
-        `set ZIP=%~dp0${zipFileName}`,
-        `python "${INSTALL_SCRIPT}" "%ZIP%"`,
-        'if %ERRORLEVEL% NEQ 0 ( echo FAILED & pause & exit /b 1 )',
-        'echo Done!',
+        'chcp 65001 >nul',
+        'title CapCut Installer',
+        'setlocal',
+        `echo === Cai dat: ${name} ===`,
+        'echo.',
+        // CapCut đổi chỗ để draft qua các bản; thử lần lượt.
+        'set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\Projects\\com.lveditor.draft"',
+        'if not exist "%DR%" set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\com.lveditor.draft"',
+        'if not exist "%DR%" set "DR=%LOCALAPPDATA%\\CapCut Drafts"',
+        'if not exist "%DR%" md "%DR%"',
+        `set "ZIP=%~dp0${zipFileName}"`,
+        'if not exist "%ZIP%" ( echo KHONG THAY FILE ZIP: %ZIP% & echo Dat file .bat CUNG THU MUC voi file .zip roi chay lai. & pause & exit /b 1 )',
+        'echo [1/2] Dang giai nen vao: %DR%',
+        `if exist "%DR%\\${draftId}" rd /s /q "%DR%\\${draftId}"`,
+        // tar có sẵn Win10 1803+; máy cũ hơn thì dùng PowerShell.
+        'where tar >nul 2>&1',
+        'if %ERRORLEVEL% EQU 0 ( tar -xf "%ZIP%" -C "%DR%" ) else ( powershell -NoProfile -Command "Expand-Archive -LiteralPath \'%ZIP%\' -DestinationPath \'%DR%\' -Force" )',
+        'if %ERRORLEVEL% NEQ 0 ( echo GIAI NEN THAT BAI & pause & exit /b 1 )',
+        `if not exist "%DR%\\${draftId}" ( echo GIAI NEN XONG NHUNG KHONG THAY THU MUC DRAFT & pause & exit /b 1 )`,
+        'echo [2/2] Dang cap nhat danh sach du an...',
+        `set "DRAFT_ID=${draftId}"`,
+        `set "PROJ_NAME=${name}"`,
+        `powershell -NoProfile -ExecutionPolicy Bypass -Command "${ps}"`,
+        'if %ERRORLEVEL% NEQ 0 ( echo CAP NHAT DANH SACH THAT BAI - mo CapCut roi bam Import draft thu cong & pause & exit /b 1 )',
+        'echo.',
+        'echo === XONG! Mo CapCut len se thay du an ===',
+        'echo.',
+        'pause',
     ].join('\r\n');
 }
 

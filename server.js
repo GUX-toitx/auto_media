@@ -14,13 +14,17 @@ import multer from 'multer';
 import { getLanguages, getReferenceSpeakers, getDictionary, getMe, sendToQueue, getSentenceStatus, updateSentence, generateAudios, updateBatchStatus, getBatchAudios, checkAndSaveVoice, getIndividualAudio, getMergedAudio, getAllAudioUrls } from './handle_voice/audio_service.js';
 import { alignPost } from './handle_voice/align_service.js';
 import { processAll } from './src/services/video_service.js';
-import { generateFlowImage } from './src/services/browser.js';
+import { generateFlowImage, FLOW_DAILY_LIMIT } from './src/services/browser.js';
 import { crawlX } from './src/x/x_crawler.js';
 import { generateSeoTitle } from './src/services/seoTitle.js';
 import { translateTitle } from './src/services/translateTitle.js';
 import archiver from 'archiver';
 import { downloadWithYtDlp } from './src/services/ytDlpDownloader.js'; // Nhúng con Bot vừa viết
 import { ensureThumb } from './src/services/thumbs.js';
+// Bộ nhớ nội dung podcast do AI viết (đề tài + nhân vật đã dùng) — dùng chung với src/workers/podcast_ai.js
+import { listEntries as listPodcastMemory, deleteEntry as deletePodcastMemory, clearMemory as clearPodcastMemory, MEMORY_FILE as PODCAST_MEMORY_FILE } from './src/lib/podcastMemory.js';
+// Tách khối prompt ảnh AI (nhân vật + cảnh) người dùng dán vào lúc tạo dự án podcast
+import { parseScenePrompts } from './src/lib/scenePrompts.js';
 import { proxyPathFor, proxyReady, ensureProxy, warmProxies, hasNvenc, needsProxy } from './src/lib/proxies.js';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -35,6 +39,24 @@ async function ffprobeDuration(file) {
         return parseFloat(String(stdout).trim()) || 0;
     } catch { return 0; }
 }
+// Độ dài 1 file audio ở xa (link ttsmin): tải về tạm rồi ffprobe — ĐÚNG cách export CapCut đo, nên
+// số hiện trên UI khớp với cái sẽ xuất ra. Đo thẳng qua URL hay đứt giữa chừng nên vẫn tải về trước.
+async function remoteAudioSeconds(url) {
+    if (!url) return 0;
+    const base = process.env.BUNNYCDN_BASE_URL || '', key = process.env.BUNNYCDN_ACCESS_KEY || '';
+    const full = url.startsWith('http') ? url : `${base}/${url}`;
+    const tmp = path.join(os.tmpdir(), `narr_${process.pid}_${Math.random().toString(36).slice(2)}.mp3`);
+    try {
+        await execFileP('curl', ['-sL', '--retry', '2', '--max-time', '30', '-H', `AccessKey: ${key}`, full, '-o', tmp],
+            { timeout: 45000 });
+        if (!(fs.existsSync(tmp) && fs.statSync(tmp).size > 1000)) return 0;
+        return await ffprobeDuration(tmp);
+    } catch { return 0; }
+    finally { try { fs.unlinkSync(tmp); } catch (_) {} }
+}
+import pLimit from 'p-limit';
+import { generateBat, parseBoundaryPaths } from './src/workers/capcut_export.js';
+
 // Tên codec của luồng hình đầu tiên ('mjpeg', 'png', 'h264'...). '' nếu đọc không được.
 async function ffprobeVideoCodec(file) {
     try {
@@ -111,8 +133,11 @@ app.get('/api/posts', async (req, res) => {
 app.get('/api/posts/:postId', async (req, res) => {
     try {
         const db = await getDb();
-        const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, summary, summary_vi, summary_audio, summary_vi_audio, summary_target, summary_target_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio, intro_path, outro_path, seo_title, content_score, content_score_reason, content_score_detail, content_score_history, silence_duration, voice_content_type, genre FROM Post WHERE id = ?', [req.params.postId]);
+        const post = await db.get('SELECT id, project_id, title, hook, hook_vi, hook_audio, hook_vi_audio, summary, summary_vi, summary_audio, summary_vi_audio, summary_target, summary_target_audio, conclusion_vi, conclusion_vi_audio, conclusion_target, conclusion_target_audio, intro_path, outro_path, seo_title, content_score, content_score_reason, content_score_detail, content_score_history, silence_duration, voice_content_type, genre, target_lang FROM Post WHERE id = ?', [req.params.postId]);
         if (!post) return res.status(404).json({ error: 'Post not found' });
+        // Danh sách intro/outro theo ĐÚNG THỨ TỰ sẽ ghép (1 clip vẫn là chuỗi như cũ, nhiều clip là mảng JSON)
+        post.intro_paths = parseBoundaryPaths(post.intro_path);
+        post.outro_paths = parseBoundaryPaths(post.outro_path);
 
         // HookDetail
         post.hook_details = await db.all(
@@ -1738,8 +1763,8 @@ const podcastHistory = [];          // job đã xong/lỗi, mới nhất trướ
 let podcastJobSeq = 0;
 
 const jobView = (j) => j && ({
-    id: j.id, projectId: j.projectId, state: j.state, step: j.step, error: j.error,
-    zipName: j.zipName, audioFail: j.audioFail, totalUnits: j.totalUnits,
+    id: j.id, projectId: j.projectId, mode: j.mode || 'srt', state: j.state, step: j.step, error: j.error,
+    zipName: j.zipName, zipMB: j.zipMB, audioFail: j.audioFail, totalUnits: j.totalUnits,
     addedAt: j.addedAt, startedAt: j.startedAt, endedAt: j.endedAt,
 });
 
@@ -1768,17 +1793,21 @@ async function voiceProgress(postId) {
     return { total: r.total || 0, done: r.done || 0 };
 }
 
-// Chờ giọng đọc thực sự nằm trong DB. Không đặt hạn giờ cứng: bài 600 câu lâu hơn bài 100 câu rất
-// nhiều. Chỉ bỏ cuộc khi ĐỨNG YÊN quá lâu (không thêm câu nào) — cách này đúng với mọi cỡ bài.
-const VOICE_STALL_MS = Number(process.env.PODCAST_VOICE_STALL_MS || 15 * 60 * 1000);
+// Kiểm tra giọng đọc đã nằm trong DB chưa, SAU KHI orchestrateAutoVoice đã chờ xong.
+//
+// KHÔNG dò theo số câu tăng dần: checkAndSaveVoice chỉ ghi audio khi CẢ BATCH đạt status OK, nên số
+// câu đứng im ở 0 suốt cả tiếng rồi nhảy một phát lên đủ. Dò kiểu "đứng yên quá lâu thì bỏ" sẽ giết
+// nhầm job đang chạy ngon. Phần chờ lâu là việc của waitBatchDone (AUTO_VOICE_TIMEOUT_MS, 90 phút);
+// ở đây chỉ ngó thêm một lát phòng khi batch vừa kịp xong.
+const VOICE_GRACE_MS = Number(process.env.PODCAST_VOICE_GRACE_MS || 5 * 60 * 1000);
 async function waitVoiceLanded(postId, job) {
-    let last = -1, lastChangeAt = Date.now();
+    const until = Date.now() + VOICE_GRACE_MS;
     for (;;) {
         const p = await voiceProgress(postId);
-        if (p.total && p.done >= p.total) return { ok: true, ...p };
-        if (p.done !== last) { last = p.done; lastChangeAt = Date.now(); }
-        if (job) job.step = `Đang chờ giọng đọc: ${p.done}/${p.total} câu`;
-        if (Date.now() - lastChangeAt > VOICE_STALL_MS) return { ok: false, ...p };
+        if (!p.total) return { ok: false, ...p };            // không có câu nào -> chờ mãi cũng vô nghĩa
+        if (p.done >= p.total) return { ok: true, ...p };
+        if (Date.now() > until) return { ok: false, ...p };
+        if (job) job.step = `Đang đợi giọng đọc vào DB (${p.done}/${p.total} câu)`;
         await new Promise(r => setTimeout(r, 15000));
     }
 }
@@ -1790,46 +1819,176 @@ async function findPodcastPost(projectId) {
     return post;
 }
 
+// Đếm câu trong kịch bản đã nhập
+async function scriptStats(postId) {
+    const db = await getDb();
+    const r = await db.get(`SELECT COUNT(*) details FROM ParagraphDetail
+        WHERE paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?)`, [postId]);
+    const p = await db.get('SELECT COUNT(*) paras FROM Paragraph WHERE post_id = ?', [postId]);
+    await db.close();
+    return { details: r.details || 0, paras: p.paras || 0 };
+}
+
+// Đếm clip nền đã chọn (thứ export sẽ đem đi dựng)
+async function selectedMediaCount(postId) {
+    const db = await getDb();
+    const r = await db.get(`SELECT COUNT(*) c FROM Asset WHERE selected = 1
+        AND paragraph_id IN (SELECT id FROM Paragraph WHERE post_id = ?)`, [postId]);
+    await db.close();
+    return r.c || 0;
+}
+
+// ---------------------------------------------------------------------------
+// Dây chuyền 4 khâu. Mỗi khâu phải TỰ CHỨNG MINH đã xong bằng số liệu trong DB rồi mới sang khâu sau —
+// không tin vào "tiến trình con thoát mã 0". Bài học: orchestrateAutoVoice hết giờ chờ vẫn trả về êm,
+// dây chuyền chạy tiếp và xuất ra file zip 46KB rỗng mà vẫn báo "done".
+// ---------------------------------------------------------------------------
 async function runPodcastJob(job) {
     job.startedAt = Date.now();
+    let post;
 
-    job.state = 'import'; job.step = 'Đang nhập kịch bản từ SRT';
-    const args = ['src/workers/podcast_srt.js', job.srtPath, job.projectId, job.srtTargetPath, job.targetLang || 'vi'];
-    if (job.title) args.push('--title', job.title);
-    await runNodeWorker(args, `podcast:${job.projectId}`);
+    // --- 1. NHẬP KỊCH BẢN --- (bỏ qua khi CHẠY TIẾP một dự án đã có)
+    if (job.resume) {
+        post = await findPodcastPost(job.projectId);
+        if (!post) throw new Error('không thấy dự án để chạy tiếp');
+        job.postId = post.id;
+        const sc = await scriptStats(post.id);
+        if (!sc.details) throw new Error('dự án chưa có câu nào — phải nhập lại SRT');
+        console.log(`[podcast-queue] ${job.projectId}: chạy tiếp (${sc.details} câu / ${sc.paras} cảnh)`);
+    } else if (job.mode === 'ai') {
+        // Kịch bản do AI viết. CHẠY TRONG HÀNG ĐỢI chứ không song song, và đó là điều kiện
+        // để chống trùng hoạt động: mỗi bài chỉ bắt đầu sau khi bài trước đã ghi thẻ nhớ
+        // (nhân vật + đề tài) vào _podcast_ai/memory.json.
+        job.state = 'import'; job.step = 'AI đang viết kịch bản';
+        const args = ['src/workers/podcast_ai.js', '--projectId', job.projectId,
+            '--prompt', job.prompt, '--lang', job.targetLang || 'vi', '--minutes', String(job.minutes || 10)];
+        if (job.style) args.push('--style', job.style);
+        if (job.webSearch) args.push('--web');
+        if (job.title) args.push('--title', job.title);
+        await runNodeWorker(args, `podcast-ai:${job.projectId}`);
 
-    if (job.wantVoice) {
-        job.state = 'voice'; job.step = 'Đang tạo giọng đọc';
-        await orchestrateAutoVoice(job.projectId);
+        post = await findPodcastPost(job.projectId);
+        if (!post) throw new Error('AI viết xong nhưng không thấy dự án trong DB');
+        job.postId = post.id;
+        const sc = await scriptStats(post.id);
+        if (!sc.details) throw new Error('AI không sinh ra câu nào — xem Log dự án để biết lỗi gọi AI');
+        job.step = `AI viết xong ${sc.details} câu / ${sc.paras} cảnh`;
+        console.log(`[podcast-queue] ${job.projectId}: AI viết xong ${sc.details} câu / ${sc.paras} cảnh`);
+    } else {
+        job.state = 'import'; job.step = 'Đang nhập kịch bản từ SRT';
+        const args = ['src/workers/podcast_srt.js', job.srtPath, job.projectId, job.srtTargetPath, job.targetLang || 'vi'];
+        if (job.title) args.push('--title', job.title);
+        await runNodeWorker(args, `podcast:${job.projectId}`);
+
+        post = await findPodcastPost(job.projectId);
+        if (!post) throw new Error('nhập SRT xong nhưng không thấy dự án trong DB');
+        job.postId = post.id;
+        // Cổng 1: có cảnh và có câu thì mới coi là nhập được. SRT sai định dạng vẫn cho worker thoát 0.
+        const sc = await scriptStats(post.id);
+        if (!sc.details) throw new Error(`nhập SRT không ra câu nào (${sc.paras} cảnh, 0 câu) — file .srt có đúng định dạng không?`);
+        job.step = `Đã nhập ${sc.details} câu / ${sc.paras} cảnh`;
+        console.log(`[podcast-queue] ${job.projectId}: nhập xong ${sc.details} câu / ${sc.paras} cảnh`);
     }
 
-    const post = await findPodcastPost(job.projectId);
-    if (!post) throw new Error('không tìm thấy post sau khi nhập');
-    job.postId = post.id;
-
-    // CHỐT CHẶN: phải có giọng đọc TRONG DB rồi mới đi tiếp.
-    // orchestrateAutoVoice không ném lỗi khi hết giờ chờ — nó chỉ ghi log rồi trả về êm ru. Trước đây
-    // dây chuyền cứ thế chạy tiếp: export không có audio thì KHÔNG dựng nổi timeline, ra file zip 46KB
-    // rỗng mà job vẫn báo "done". Thà dừng và nói rõ còn hơn giao cho người dùng cái vỏ rỗng.
-    if (job.wantVoice) {
-        job.step = 'Đang chờ giọng đọc lưu vào DB';
+    // --- 2. GIỌNG ĐỌC --- (chạy tiếp: đã đủ voice rồi thì bỏ qua, khỏi gen lại tốn tiền)
+    const already = await voiceProgress(post.id);
+    if (job.wantVoice && already.total && already.done >= already.total) {
+        console.log(`[podcast-queue] ${job.projectId}: voice đã đủ ${already.done}/${already.total}, bỏ qua khâu tạo voice`);
+        job.step = `Voice sẵn có ${already.done}/${already.total} câu`;
+    } else if (job.wantVoice) {
+        job.state = 'voice';
+        // THU HOẠCH BATCH CŨ TRƯỚC. autoGenVoiceForPost bỏ qua post đã có audio_uuid ("đã có voice"),
+        // nên lần gửi trước hết giờ chờ là kẹt vĩnh viễn: batch đã gen xong bên ttsmin nhưng URL không
+        // bao giờ được ghi vào DB, mà gọi lại cũng không gen mới. Ở đây poll lại đúng batch đó rồi lưu —
+        // vừa cứu được dữ liệu đã trả tiền, vừa khỏi gen trùng.
+        const db0 = await getDb();
+        const cur = await db0.get('SELECT audio_uuid, voice_content_type FROM Post WHERE id = ?', [post.id]);
+        await db0.close();
+        if (cur?.audio_uuid) {
+            job.step = 'Đang thu hoạch batch giọng đọc đã gửi trước đó';
+            console.log(`[podcast-queue] ${job.projectId}: đã có batch ${cur.audio_uuid.slice(0, 8)}, poll lại thay vì gen mới`);
+            await waitBatchDone(cur.audio_uuid, post.id, cur.voice_content_type || 'content');
+        }
+        const after = await voiceProgress(post.id);
+        if (!(after.total && after.done >= after.total)) {
+            job.step = 'Đang tạo giọng đọc';
+            await orchestrateAutoVoice(job.projectId);
+        }
+        // Cổng 2: đủ URL audio trong DB mới đi tiếp. Export dựng timeline theo ĐỘ DÀI MP3, không có
+        // audio là không có cảnh nào -> draft rỗng.
         const got = await waitVoiceLanded(post.id, job);
-        if (!got.ok) {
-            throw new Error(`giọng đọc chưa về (${got.done}/${got.total} câu) — dừng trước khi lấp nền/xuất, `
-                + `bấm 🎙️ Voice trên dự án để chạy lại rồi xuất tay`);
+        if (!got.ok) throw new Error(`giọng đọc chưa về (${got.done}/${got.total} câu) — dừng trước khi lấp nền/xuất; `
+            + `bấm 🎙️ Voice trên dự án để chạy lại, xong rồi lấp nền + xuất tay`);
+        job.step = `Giọng đọc xong ${got.done}/${got.total} câu`;
+        console.log(`[podcast-queue] ${job.projectId}: giọng đọc đủ ${got.done}/${got.total} câu`);
+    }
+
+    // --- 2b. SINH ẢNH AI THEO CẢNH (Google Flow) ---
+    // Chạy khi dự án có <project>/ai_images/prompts.txt (người dùng dán khối prompt lúc tạo dự án).
+    // PHẢI đứng TRƯỚC khâu lấp nền: podcast_fill chừa những cảnh đã có media chọn tay, nên cảnh nào
+    // có ảnh AI thì nó tự bỏ qua, cảnh nào thiếu mới lấy clip trong kho bù vào.
+    //
+    // Cả bài chạy trong MỘT project Flow (worker giữ URL project trong ai_images/state.json) — đó là
+    // điều kiện để nhân vật giống nhau qua mấy chục tấm. Bài 40 cảnh chạy cả tiếng và Flow hay chết
+    // giữa chừng, nên gọi worker nhiều lượt: mỗi lượt làm nốt phần còn thiếu, hết tiến triển thì thôi.
+    if (fs.existsSync(podcastImagePromptFile(job.projectId))) {
+        job.state = 'images'; job.step = 'Đang sinh ảnh AI cho từng cảnh (Google Flow)';
+        let last = null;
+        for (let round = 1; round <= 3; round++) {
+            const out = await runNodeWorker(
+                ['src/workers/podcast_images.js', '--projectId', job.projectId, '--postId', String(post.id)],
+                `images:${job.projectId}`);
+            let r = null;
+            for (const line of out.trim().split('\n').reverse()) { try { r = JSON.parse(line); break; } catch (_) {} }
+            if (!r) throw new Error('worker sinh ảnh không trả về kết quả');
+            job.step = `Ảnh AI ${r.done}/${r.total} cảnh`;
+            job.aiImagesDone = r.done; job.aiImagesTotal = r.total;
+            if (!r.pending) { console.log(`[podcast-queue] ${job.projectId}: ảnh AI đủ ${r.done}/${r.total}`); break; }
+            // Hết hạn mức Flow (mọi tài khoản đã cạn ~50 ảnh/ngày) — chạy thêm mẻ nữa cũng vô ích.
+            // KHÔNG coi là lỗi: bài vẫn đi tiếp (lấp nền + xuất), mai chạy tiếp là bù nốt ảnh còn thiếu.
+            if (r.noQuota) {
+                job.step = `Ảnh AI ${r.done}/${r.total} — hết hạn mức Flow hôm nay`;
+                console.warn(`[podcast-queue] ⏳ ${job.projectId}: hết hạn mức Flow, còn thiếu ${r.pending} ảnh. `
+                    + 'Mai bấm 🎨 Ảnh AI theo cảnh (hoặc chạy tiếp dự án) để làm nốt.');
+                break;
+            }
+            // Lượt này không thêm được tấm nào = Flow đang hỏng (hết quota / mất đăng nhập / đổi UI).
+            // Thử lại lượt nữa cũng vậy, mà mỗi lượt tốn cả chục phút.
+            if (last !== null && r.done <= last) {
+                console.warn(`[podcast-queue] ⚠ ${job.projectId}: ảnh AI dừng ở ${r.done}/${r.total}, `
+                    + 'chạy tiếp dự án sau khi Flow rảnh sẽ làm nốt (giữ nguyên project Flow cũ)');
+                break;
+            }
+            last = r.done;
+            console.log(`[podcast-queue] ${job.projectId}: ảnh AI ${r.done}/${r.total}, còn thiếu ${r.pending} → chạy mẻ tiếp`);
         }
     }
 
+    // --- 3. LẤP NỀN HÌNH ---
+    // LUÔN lấp lại, kể cả khi chạy tiếp và đã có clip: độ dài mỗi cảnh đo theo mp3 giọng đọc, mà lần
+    // lấp trước (chạy khi voice chưa về) phải lấy tạm mốc SRT gốc — đo thực tế lệch tới +55%, thừa cả
+    // chục giây mỗi cảnh. Lấp lại rẻ (chỉ hardlink + ghi DB), và podcast_fill chỉ thay nền do MÁY tạo,
+    // cảnh nào người dùng tự chọn media thì nó chừa ra.
     if (job.autoFill) {
         job.state = 'fill'; job.step = 'Đang lấp nền hình từ kho';
         const fa = ['src/workers/podcast_fill.js', '--postId', String(post.id), '--mode', job.fillMode];
         if (job.fillMode === 'single' && job.fillName) fa.push('--name', job.fillName);
         if (job.maxClip > 0) fa.push('--maxClip', String(job.maxClip));
         await runNodeWorker(fa, `fill:${job.projectId}`);
+        // Cổng 3: phải có clip được chọn. Kho trống / tên file sai thì worker vẫn thoát 0 nhưng chẳng
+        // chọn được gì, export sau đó ra bài chỉ có tiếng, không hình.
+        const clips = await selectedMediaCount(post.id);
+        if (!clips) throw new Error('lấp nền không chọn được clip nào — kho hình trống hay tên file sai?');
+        job.step = `Đã lấp ${clips} clip nền`;
+        console.log(`[podcast-queue] ${job.projectId}: lấp nền ${clips} clip`);
     }
 
+    // --- 4. XUẤT CAPCUT ---
     if (job.autoExport) {
         job.state = 'export'; job.step = 'Đang xuất CapCut';
+        // Không có hình thì bài xuất ra chỉ là tiếng trên nền đen — báo trước, đừng để tưởng bình thường.
+        const clips = await selectedMediaCount(post.id);
+        if (!clips) console.warn(`[podcast-queue] ⚠ ${job.projectId}: xuất khi chưa có clip nền nào (bài sẽ không có hình)`);
         fs.mkdirSync(PODCAST_EXPORT_DIR, { recursive: true });
         const out = await runNodeWorker(
             ['src/workers/capcut_export.js', String(post.id), PODCAST_EXPORT_DIR], `export:${job.projectId}`);
@@ -1837,14 +1996,21 @@ async function runPodcastJob(job) {
         let result = null;
         for (const line of out.trim().split('\n').reverse()) { try { result = JSON.parse(line); break; } catch (_) {} }
         if (!result?.zipPath) throw new Error('export không trả về file zip');
+        // Cổng 4: file có thật, có nội dung, và timeline có câu. totalUnits = 0 nghĩa là draft rỗng —
+        // đúng triệu chứng file 46KB.
+        if (!fs.existsSync(result.zipPath)) throw new Error(`export báo xong nhưng không thấy file ${result.zipPath}`);
+        const zipMB = fs.statSync(result.zipPath).size / 1048576;
+        if (!result.totalUnits) throw new Error(`draft rỗng (0 câu trên timeline, zip ${zipMB.toFixed(1)}MB) — giọng đọc chưa vào DB lúc xuất`);
         job.zipName = path.basename(result.zipPath);
+        job.zipMB = Math.round(zipMB);
         job.audioFail = result.audioFail || 0;
         job.totalUnits = result.totalUnits || 0;
         if (job.audioFail) console.error(`[podcast-queue] ⚠ ${job.projectId}: thiếu tiếng ${job.audioFail}/${job.totalUnits} câu`);
+        console.log(`[podcast-queue] ${job.projectId}: xuất xong ${job.zipName} (${job.zipMB}MB, ${job.totalUnits} câu)`);
     }
 
     job.state = 'done';
-    job.step = job.zipName ? `Xong — ${job.zipName}` : 'Xong';
+    job.step = job.zipName ? `Xong — ${job.zipName} (${job.zipMB}MB, ${job.totalUnits} câu)` : 'Xong';
 }
 
 async function pumpPodcastQueue() {
@@ -1871,6 +2037,83 @@ app.get('/api/podcast-queue', (req, res) => {
         queued: podcastQueue.map(jobView),
         history: podcastHistory.slice(0, 20).map(jobView),
     });
+});
+
+// ===== ĐỘ DÀI LỜI ĐỌC ĐO BẰNG FFPROBE =====
+// Trình duyệt và ffprobe đọc độ dài mp3 KHÁC NHAU: trình duyệt trả độ dài đã giải mã (bỏ phần đệm của
+// bộ mã hoá), ffprobe trả độ dài theo container. Chênh ~0.05s mỗi câu, cộng 15 câu là lệch ~0.8s mỗi
+// cảnh — đúng con số "thừa 0.8s" trên thanh coverage.
+// Export CapCut dựng timeline bằng ffprobe, nên ffprobe MỚI LÀ THƯỚC ĐÚNG. Endpoint này trả số đo đó
+// cho UI hiển thị, để thanh coverage khớp đúng cái sẽ xuất ra.
+// Đo 600 mp3 mất cả phút -> cache ra <project>/narration.json, khoá theo đúng bộ URL audio hiện có.
+app.get('/api/narration/:postId', async (req, res) => {
+    let db;
+    try {
+        db = await getDb();
+        const post = await db.get('SELECT id, project_id, voice_content_type FROM Post WHERE id = ?', [req.params.postId]);
+        if (!post) { await db.close(); return res.status(404).json({ error: 'Post not found' }); }
+        const isVi = (post.voice_content_type || 'content_vi') === 'content_vi';
+        const af = isVi ? 'content_vi_audio' : 'content_audio';
+        const paras = await db.all('SELECT id FROM Paragraph WHERE post_id = ? ORDER BY "order", id', [post.id]);
+        const scenes = [];
+        for (const p of paras) {
+            const rows = await db.all(`SELECT ${af} AS au FROM ParagraphDetail WHERE paragraph_id = ? ORDER BY "order"`, [p.id]);
+            scenes.push({ paragraphId: p.id, urls: rows.map(r => r.au).filter(Boolean) });
+        }
+        await db.close(); db = null;
+
+        const all = scenes.flatMap(s => s.urls);
+        const fingerprint = crypto.createHash('md5').update(all.join('|')).digest('hex');
+        const cacheFile = path.join(MEDIA_DIR, post.project_id, 'narration.json');
+        try {
+            const c = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+            if (c.fingerprint === fingerprint) return res.json({ cached: true, ...c });
+        } catch (_) {}
+
+        const limit = pLimit(8);
+        const dur = new Map();
+        await Promise.all([...new Set(all)].map(u => limit(async () => dur.set(u, await remoteAudioSeconds(u)))));
+        const out = {
+            fingerprint,
+            scenes: Object.fromEntries(scenes.map(s => [s.paragraphId, Number(s.urls.reduce((n, u) => n + (dur.get(u) || 0), 0).toFixed(2))])),
+        };
+        out.total = Number(Object.values(out.scenes).reduce((a, b) => a + b, 0).toFixed(2));
+        try { fs.writeFileSync(cacheFile, JSON.stringify(out)); } catch (_) {}
+        res.json({ cached: false, ...out });
+    } catch (e) {
+        if (db) await db.close().catch(() => {});
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// CHẠY TIẾP một dự án đã có: bỏ qua khâu nhập SRT, và tự bỏ qua luôn khâu nào đã xong
+// (đủ voice / đã có clip nền). Dùng khi job trước chết giữa chừng — khỏi phải nạp lại SRT từ đầu.
+app.post('/api/podcast-queue/resume', async (req, res) => {
+    const { projectId, postId, autoFill = true, autoExport = true, fillMode, fillName, maxClip } = req.body || {};
+    try {
+        const db = await getDb();
+        const post = postId
+            ? await db.get('SELECT id, project_id FROM Post WHERE id = ?', [postId])
+            : await db.get('SELECT id, project_id FROM Post WHERE project_id = ?', [projectId]);
+        await db.close();
+        if (!post) return res.status(404).json({ error: 'Không tìm thấy dự án' });
+        if (podcastRunning?.projectId === post.project_id || podcastQueue.some(j => j.projectId === post.project_id))
+            return res.status(409).json({ error: 'Dự án này đã ở trong hàng đợi' });
+
+        const job = {
+            id: ++podcastJobSeq, projectId: post.project_id, postId: post.id, resume: true,
+            wantVoice: true,                       // đủ voice rồi thì bước 2 tự bỏ qua
+            autoFill: autoFill !== false, autoExport: autoExport !== false,
+            fillMode: fillMode === 'single' ? 'single' : 'random',
+            fillName: safeMediaName(fillName) || '',
+            maxClip: Number(maxClip) > 0 ? Number(maxClip) : 20,
+            state: 'queued', step: 'Đang chờ tới lượt (chạy tiếp)', error: null, zipName: null,
+            addedAt: Date.now(), startedAt: null, endedAt: null,
+        };
+        podcastQueue.push(job);
+        setImmediate(pumpPodcastQueue);
+        res.json({ success: true, jobId: job.id, projectId: post.project_id, position: podcastQueue.length });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Bỏ 1 dự án còn nằm trong hàng chờ (đang chạy thì không rút được — để nó chạy nốt cho sạch trạng thái)
@@ -1919,12 +2162,97 @@ app.delete('/api/podcast-exports', (req, res) => {
     res.json({ success: true });
 });
 
+// TÊN DỰ ÁN PHẢI DUY NHẤT — do SERVER chốt, không tin phía client.
+// Client tránh trùng dựa trên danh sách dự án nó đang giữ; nạp 2 đợt liên tiếp thì danh sách
+// chưa kịp làm mới nên hai đợt cùng chọn một tên, đợt sau NHẬP ĐÈ lên dự án đợt trước.
+// Đã gặp thật: 3 file SRT cùng tên "vi" chỉ ra 2 dự án, một dự án bị chạy 2 lần.
+async function uniquePodcastProjectId(wanted) {
+    const db0 = await getDb();
+    let projectId = wanted;
+    for (let i = 2; i < 1000; i++) {
+        const hit = await db0.get('SELECT id FROM Post WHERE project_id = ?', [projectId]);
+        if (!hit && !fs.existsSync(path.join(MEDIA_DIR, projectId))) break;
+        projectId = `${wanted}_${i}`;
+    }
+    await db0.close();
+    if (projectId !== wanted) console.log(`[podcast] "${wanted}" đã tồn tại → dùng "${projectId}"`);
+    return projectId;
+}
+
+// Dấu thời gian đặt tên dự án: "2026-08-14_09-30-00" (khớp quy ước bên client).
+function stampNow() {
+    const d = new Date(), p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;
+}
+
+// Các tuỳ chọn "làm tiếp sau khi có kịch bản" dùng CHUNG cho cả 2 đường vào (SRT / AI).
+// multipart -> mọi field là chuỗi; JSON -> đúng kiểu. isYes nuốt được cả hai.
+const isYesField = (v) => v === true || v === 'true' || v === '1' || v === 'on';
+function podcastPipelineOptions(body) {
+    const { autoFill, fillMode, fillName, maxClip, autoExport } = body;
+    return {
+        // Mặc định BẬT cả lấp nền lẫn xuất CapCut — có kịch bản là ra luôn file mang đi dựng.
+        autoFill: autoFill === undefined ? true : isYesField(autoFill),
+        fillMode: fillMode === 'single' ? 'single' : 'random',
+        fillName: safeMediaName(fillName) || '',
+        maxClip: Number(maxClip) > 0 ? Number(maxClip) : 20,
+        autoExport: autoExport === undefined ? true : isYesField(autoExport),
+    };
+}
+
+// ===== ẢNH AI CHO PODCAST: ghi khối prompt người dùng dán vào lúc tạo dự án =====
+// Prompt do người dùng TỰ VIẾT (nhân vật + từng cảnh), cất trong <project>/ai_images/prompts.txt.
+// Chính SỰ TỒN TẠI của file này là công tắc bật khâu sinh ảnh trong dây chuyền — nhờ vậy "chạy tiếp"
+// một dự án cũ cũng tự làm nốt phần ảnh còn thiếu mà không phải nhớ lại tuỳ chọn lúc tạo.
+const AI_IMAGE_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4'];
+const podcastImagePromptFile = (projectId) => path.join(MEDIA_DIR, projectId, 'ai_images', 'prompts.txt');
+
+function podcastImagesSetup(projectId, body) {
+    const text = String(body.aiImagePrompts || '').trim();
+    if (!isYesField(body.aiImages) || !text) return null;
+    const parsed = parseScenePrompts(text);
+    if (!parsed.characters.length && !parsed.scenes.length) {
+        console.warn(`[podcast] ${projectId}: khối prompt ảnh không tách được mục nào (mỗi mục phải mở đầu bằng "01." / "1)") → bỏ qua khâu sinh ảnh`);
+        return null;
+    }
+    const dir = path.join(MEDIA_DIR, projectId, 'ai_images');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(podcastImagePromptFile(projectId), text);
+    fs.writeFileSync(path.join(dir, 'options.json'), JSON.stringify({
+        ratio: AI_IMAGE_RATIOS.includes(body.aiImageRatio) ? body.aiImageRatio : '16:9',
+        createdAt: Date.now(),
+    }, null, 2));
+    console.log(`[podcast] ${projectId}: nhận ${parsed.characters.length} prompt nhân vật + ${parsed.scenes.length} prompt cảnh`);
+    return { characters: parsed.characters.length, scenes: parsed.scenes.length };
+}
+
+// Ghi voice_auto.json nếu người dùng bật "tạo voice ngay". Trả về có tạo voice hay không.
+function podcastVoiceSetup(projectId, body) {
+    const { voiceAuto, voiceContentType, speakerUuid, dictionaryUuids, voiceSpeed } = body;
+    let dicts = [];
+    try { dicts = typeof dictionaryUuids === 'string' ? JSON.parse(dictionaryUuids || '[]') : (dictionaryUuids || []); } catch { dicts = []; }
+    const wantVoice = isYesField(voiceAuto) && !!speakerUuid;
+    if (wantVoice) {
+        // Podcast không có hình -> không lips sync, chỉ giọng đọc.
+        writeVoiceAutoConfig(projectId, {
+            speakerUuid, contentType: voiceContentType || 'content', dictionaryUuids: dicts,
+            lips: null, speed: voiceSpeed,
+        });
+    }
+    return wantVoice;
+}
+
 app.post('/api/create-podcast', upload.fields([{ name: 'srt', maxCount: 1 }, { name: 'srtTarget', maxCount: 1 }]), async (req, res) => {
-    const { projectId, targetLang, title,
-        voiceAuto, voiceContentType, speakerUuid, dictionaryUuids, voiceSpeed } = req.body;
+    const { targetLang, title } = req.body;
     const srtFile = req.files?.srt?.[0];
-    if (!srtFile || !projectId?.trim()) return res.status(400).json({ error: 'Thiếu file SRT hoặc projectId' });
+    if (!srtFile || !req.body.projectId?.trim()) return res.status(400).json({ error: 'Thiếu file SRT hoặc projectId' });
     try {
+        // TÊN DỰ ÁN PHẢI DUY NHẤT — do SERVER chốt, không tin phía client.
+        // Client tránh trùng dựa trên danh sách dự án nó đang giữ; nạp 2 đợt liên tiếp thì danh sách
+        // chưa kịp làm mới nên hai đợt cùng chọn một tên, đợt sau NHẬP ĐÈ lên dự án đợt trước.
+        // Đã gặp thật: 3 file SRT cùng tên "vi" chỉ ra 2 dự án, một dự án bị chạy 2 lần.
+        const projectId = await uniquePodcastProjectId(req.body.projectId.trim());
+
         const targetDir = path.join(MEDIA_DIR, projectId);
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
         const srtPath = path.join(targetDir, 'input.srt');
@@ -1934,44 +2262,199 @@ app.post('/api/create-podcast', upload.fields([{ name: 'srt', maxCount: 1 }, { n
             srtTargetPath = path.join(targetDir, 'input_target.srt');
             fs.renameSync(req.files.srtTarget[0].path, srtTargetPath);
         }
-        // multipart -> mọi field là chuỗi; dictionaryUuids gửi dạng JSON
-        const isYes = (v) => v === true || v === 'true' || v === '1' || v === 'on';
-        let dicts = [];
-        try { dicts = dictionaryUuids ? JSON.parse(dictionaryUuids) : []; } catch { dicts = []; }
-        const wantVoice = isYes(voiceAuto) && speakerUuid;
-        if (wantVoice) {
-            // Podcast không có hình -> không lips sync, chỉ giọng đọc.
-            writeVoiceAutoConfig(projectId, {
-                speakerUuid, contentType: voiceContentType || 'content', dictionaryUuids: dicts,
-                lips: null, speed: voiceSpeed,
-            });
-        }
+        const wantVoice = podcastVoiceSetup(projectId, req.body);
+        const aiImages = podcastImagesSetup(projectId, req.body);
         // Xếp hàng thay vì chạy ngay: nạp bao nhiêu dự án cũng được, chúng tự chờ nhau.
         // podcast_srt.js đọc tham số THEO VỊ TRÍ: [srt, projectId, srtĐích, targetLang]; --title đứng cuối.
         // Không có bản dịch vẫn phải giữ chỗ args[2] bằng '' kẻo targetLang tụt xuống ô đó -> parseSrt('vi') -> ENOENT.
-        const { autoFill, fillMode, fillName, maxClip, autoExport } = req.body;
         const job = {
             id: ++podcastJobSeq,
             projectId: projectId.trim(),
+            mode: 'srt',
             srtPath, srtTargetPath,
             targetLang: targetLang || 'vi',
             title: (title || '').trim(),
             wantVoice,
-            // Mặc định BẬT cả lấp nền lẫn xuất CapCut — nạp SRT xong là có file mang đi dựng.
-            autoFill: autoFill === undefined ? true : isYes(autoFill),
-            fillMode: fillMode === 'single' ? 'single' : 'random',
-            fillName: safeMediaName(fillName) || '',
-            maxClip: Number(maxClip) > 0 ? Number(maxClip) : 20,
-            autoExport: autoExport === undefined ? true : isYes(autoExport),
+            ...podcastPipelineOptions(req.body),
             state: 'queued', step: 'Đang chờ tới lượt', error: null, zipName: null,
             addedAt: Date.now(), startedAt: null, endedAt: null,
         };
         podcastQueue.push(job);
         setImmediate(pumpPodcastQueue);
         res.json({
-            success: true, projectId, jobId: job.id,
+            success: true, projectId, jobId: job.id, aiImages,
             position: podcastQueue.length, running: !!podcastRunning,
         });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== PODCAST: NỘI DUNG DO AI VIẾT =====
+// Đường vào thứ hai của podcast (bên cạnh nạp .srt): người dùng gõ chủ đề, worker
+// src/workers/podcast_ai.js lên dàn ý rồi viết kịch bản, sau đó chạy tiếp đúng dây
+// chuyền cũ (voice → lấp nền → xuất CapCut).
+//
+// "episodes" > 1 -> xếp bấy nhiêu dự án vào hàng đợi. CHÚNG CHẠY LẦN LƯỢT, nên tập
+// sau đọc được thẻ nhớ (nhân vật + đề tài) mà tập trước vừa ghi -> không trùng nhau.
+// Chạy song song là hỏng đúng tính năng này: cả loạt cùng đọc bộ nhớ cũ.
+app.post('/api/create-podcast-ai', express.json({ limit: '1mb' }), async (req, res) => {
+    const { prompt, targetLang, minutes, style, webSearch, title, episodes } = req.body;
+    if (!prompt?.trim()) return res.status(400).json({ error: 'Thiếu chủ đề / yêu cầu nội dung' });
+    try {
+        const n = Math.min(20, Math.max(1, parseInt(episodes, 10) || 1));
+        const mins = Math.min(120, Math.max(1, parseInt(minutes, 10) || 10));
+        const base = String(req.body.projectId || '').trim() || `podcast_ai_${stampNow()}`;
+        const created = [];
+        for (let i = 0; i < n; i++) {
+            // Tên do server chốt (uniquePodcastProjectId), kể cả khi client gửi 1 tên cho cả loạt.
+            const projectId = await uniquePodcastProjectId(n > 1 && i > 0 ? `${base}_tap${i + 1}` : base);
+            fs.mkdirSync(path.join(MEDIA_DIR, projectId), { recursive: true });
+            // Khối prompt ảnh tả nhân vật + từng cảnh của MỘT câu chuyện, nên chỉ áp cho tập đầu.
+            // Dùng lại cho tập 2, 3 là các tập khác nhau lại ra y hệt một bộ ảnh.
+            const aiImages = i === 0 ? podcastImagesSetup(projectId, req.body) : null;
+            if (i === 1 && aiImages === null && isYesField(req.body.aiImages)) {
+                console.warn('[podcast] Sinh ảnh AI chỉ áp cho tập 1 — các tập sau tự dán prompt riêng.');
+            }
+            const job = {
+                id: ++podcastJobSeq,
+                projectId,
+                mode: 'ai',
+                prompt: prompt.trim(),
+                style: String(style || '').trim(),
+                minutes: mins,
+                webSearch: isYesField(webSearch),
+                targetLang: targetLang || 'vi',
+                // Để trống -> worker lấy tiêu đề do AI đặt (title_vi) làm tên bài.
+                title: (title || '').trim(),
+                wantVoice: podcastVoiceSetup(projectId, req.body),
+                ...podcastPipelineOptions(req.body),
+                state: 'queued', step: 'Đang chờ tới lượt', error: null, zipName: null,
+                addedAt: Date.now(), startedAt: null, endedAt: null,
+            };
+            podcastQueue.push(job);
+            created.push({ projectId, jobId: job.id, aiImages });
+        }
+        setImmediate(pumpPodcastQueue);
+        res.json({ success: true, created, position: podcastQueue.length, running: !!podcastRunning });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Ngày của bộ đếm hạn mức Flow — phải khớp todayKey() trong src/services/browser.js (giờ máy).
+function flowDayKey() {
+    const d = new Date(), p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+// ===== ẢNH AI THEO CẢNH: xem tiến độ / sửa prompt / chạy nốt phần còn thiếu =====
+// Bài mấy chục cảnh chạy cả tiếng và Flow hay chết giữa chừng, nên phải có đường chạy lại RIÊNG:
+// gọi thẳng worker chứ không đẩy qua hàng đợi podcast (khỏi kéo theo cả voice lẫn xuất CapCut).
+const podcastImagesRuns = new Map();     // projectId -> { startedAt, child }
+
+function podcastImagesStatus(projectId) {
+    const dir = path.join(MEDIA_DIR, projectId, 'ai_images');
+    const readJson = (f) => { try { return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch { return null; } };
+    const prompts = fs.existsSync(path.join(dir, 'prompts.txt')) ? fs.readFileSync(path.join(dir, 'prompts.txt'), 'utf8') : '';
+    const parsed = parseScenePrompts(prompts);
+    const state = readJson('state.json') || { items: {} };
+    const items = Object.entries(state.items || {}).map(([key, v]) => ({ key, ...v }));
+    return {
+        projectId, prompts,
+        // options.json là cái worker thật sự đọc -> ưu tiên nó, state.json chỉ ghi lại lượt chạy gần nhất.
+        ratio: readJson('options.json')?.ratio || state.ratio || '16:9',
+        characters: parsed.characters.length, scenes: parsed.scenes.length,
+        total: parsed.characters.length + parsed.scenes.length,
+        done: items.filter(i => i.status === 'done').length,
+        failed: items.filter(i => i.status === 'error').length,
+        flowProjectUrl: state.flowProjectUrl || '',
+        // Mỗi tài khoản Flow một project riêng — bài dài phải đổi tài khoản vì hạn mức ngày.
+        profiles: Object.keys(state.flowProjects || {}).length,
+        running: podcastImagesRuns.has(projectId),
+        items,
+    };
+}
+
+app.get('/api/podcast-images/:postId', async (req, res) => {
+    try {
+        const db = await getDb();
+        const post = await db.get('SELECT id, project_id FROM Post WHERE id = ?', [req.params.postId]);
+        const n = post ? await db.get('SELECT COUNT(*) c FROM Paragraph WHERE post_id = ?', [post.id]) : null;
+        await db.close();
+        if (!post) return res.status(404).json({ error: 'Không tìm thấy dự án' });
+        res.json({ success: true, projectScenes: n?.c || 0, quota: await flowQuotaSummary(), ...podcastImagesStatus(post.project_id) });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/podcast-images/run', express.json({ limit: '2mb' }), async (req, res) => {
+    const { postId, prompts, ratio, force } = req.body || {};
+    try {
+        const db = await getDb();
+        const post = await db.get('SELECT id, project_id FROM Post WHERE id = ?', [postId]);
+        await db.close();
+        if (!post) return res.status(404).json({ error: 'Không tìm thấy dự án' });
+        if (podcastImagesRuns.has(post.project_id)) return res.status(409).json({ error: 'Dự án này đang sinh ảnh' });
+        // Hàng đợi đang ở khâu sinh ảnh -> để nó chạy nốt, đừng mở thêm một trình duyệt Flow nữa.
+        if (podcastRunning?.state === 'images') return res.status(409).json({ error: `Hàng đợi đang sinh ảnh cho "${podcastRunning.projectId}" — chờ xong rồi bấm lại` });
+
+        // Prompt gửi kèm -> ghi đè file cũ (sửa prompt cảnh nào thì đúng cảnh đó gen lại, nhờ vân tay prompt).
+        if (String(prompts || '').trim()) {
+            const saved = podcastImagesSetup(post.project_id, { aiImages: true, aiImagePrompts: prompts, aiImageRatio: ratio });
+            if (!saved) return res.status(400).json({ error: 'Khối prompt không tách được mục nào — mỗi mục phải mở đầu bằng "01." / "1)"' });
+        } else if (!fs.existsSync(podcastImagePromptFile(post.project_id))) {
+            return res.status(400).json({ error: 'Dự án chưa có khối prompt ảnh — dán vào rồi bấm lại' });
+        }
+
+        const args = ['src/workers/podcast_images.js', '--projectId', post.project_id, '--postId', String(post.id)];
+        if (ratio) args.push('--ratio', ratio);
+        if (force) args.push('--force');
+        const child = spawn(process.execPath, args, { cwd: __dirname, env: process.env });
+        podcastImagesRuns.set(post.project_id, { startedAt: Date.now(), child });
+        const tag = `images:${post.project_id}`;
+        child.stdout.on('data', d => process.stdout.write(`[${tag}] ${d}`));
+        child.stderr.on('data', d => process.stderr.write(`[${tag}] ${d}`));
+        child.on('close', code => {
+            podcastImagesRuns.delete(post.project_id);
+            console.log(`[${tag}] kết thúc (mã ${code})`);
+        });
+        child.on('error', () => podcastImagesRuns.delete(post.project_id));
+        res.json({ success: true, projectId: post.project_id, ...podcastImagesStatus(post.project_id) });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Ép cột tiếng Việt về đúng tiếng Việt cho dự án ĐÃ CÓ.
+// Bài song ngữ hay bị model để lọt chữ ngôn ngữ đích vào cột tiếng Việt (địa danh, lời thoại
+// trong ngoặc kép, có khi cả câu) — nút này dịch nốt những ô đó.
+app.post('/api/podcast-fix-vi', express.json(), async (req, res) => {
+    const postId = parseInt(req.body?.postId, 10);
+    if (!postId) return res.status(400).json({ error: 'Thiếu postId' });
+    try {
+        const out = await runNodeWorker(['src/workers/podcast_ai.js', '--fixVi', '--postId', String(postId)], `fix-vi:${postId}`);
+        // Dòng JSON cuối cùng là kết quả; các dòng trước là log tiến độ.
+        let result = null;
+        for (const line of out.trim().split('\n').reverse()) { try { result = JSON.parse(line); break; } catch (_) {} }
+        if (!result) throw new Error('worker không trả về kết quả');
+        res.json({ success: true, ...result });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Bộ nhớ nội dung: xem những gì đã viết (đề tài + nhân vật) và xoá thẻ không muốn giữ.
+// Xoá một thẻ = "thả" lại tên nhân vật/đề tài đó cho các bài sau được dùng.
+app.get('/api/podcast-ai-memory', (req, res) => {
+    try {
+        const entries = listPodcastMemory();
+        res.json({
+            file: PODCAST_MEMORY_FILE,
+            total: entries.length,
+            characters: [...new Set(entries.flatMap(e => (e.characters || []).map(c => c.name)).filter(Boolean))],
+            entries,
+        });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/podcast-ai-memory', express.json(), (req, res) => {
+    try {
+        const projectId = String(req.query.projectId || req.body?.projectId || '').trim();
+        if (projectId) return res.json({ success: true, removed: deletePodcastMemory(projectId) });
+        if (String(req.query.all || req.body?.all) === 'true') return res.json({ success: true, removed: clearPodcastMemory() });
+        res.status(400).json({ error: 'Cần projectId, hoặc all=true để xoá sạch' });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2335,43 +2818,87 @@ app.post('/api/upload', upload.array('files'), async (req, res) => {
 });
 
 // Upload intro/outro video — chèn vào đầu/cuối khi export CapCut, KHÔNG ảnh hưởng các đoạn
-app.post('/api/upload-intro-outro', upload.single('file'), async (req, res) => {
+// Nạp intro/outro — NHẬN NHIỀU FILE, nối vào cuối danh sách hiện có, export ghép theo đúng thứ tự này.
+// Nhận cả field 'file' (1 file, kiểu cũ) lẫn 'files' (nhiều file) để bản UI cũ vẫn chạy.
+app.post('/api/upload-intro-outro', upload.fields([{ name: 'file', maxCount: 20 }, { name: 'files', maxCount: 20 }]), async (req, res) => {
+    const incoming = [...(req.files?.file || []), ...(req.files?.files || [])];
     try {
         const { postId, kind } = req.body; // kind: 'intro' | 'outro'
-        if (!req.file) return res.status(400).json({ error: 'No file' });
+        if (!incoming.length) return res.status(400).json({ error: 'No file' });
         if (!['intro', 'outro'].includes(kind)) return res.status(400).json({ error: 'kind phải là intro hoặc outro' });
         const db = await getDb();
         const post = await db.get('SELECT id, project_id, intro_path, outro_path FROM Post WHERE id = ?', [postId]);
-        if (!post) { await db.close(); try { fs.unlinkSync(req.file.path); } catch(_) {} return res.status(404).json({ error: 'Post not found' }); }
-        const projectId = post.project_id.replace(/_[a-z]{2}$/, '');
+        if (!post) {
+            await db.close();
+            for (const f of incoming) { try { fs.unlinkSync(f.path); } catch (_) {} }
+            return res.status(404).json({ error: 'Post not found' });
+        }
+        // Thư mục ĐÚNG TÊN DỰ ÁN được ưu tiên; chỉ khi không có mới cắt đuôi _xx (quy ước hậu tố ngôn
+        // ngữ của các thể loại khác). Dự án tên "podcast_vi" từng bị cắt thành "podcast" nên file intro
+        // rơi vào một thư mục không thuộc dự án nào.
+        const projectId = fs.existsSync(path.join(MEDIA_DIR, post.project_id))
+            ? post.project_id : post.project_id.replace(/_[a-z]{2}$/, '');
         const dir = path.join(MEDIA_DIR, projectId, 'intro_outro');
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        const ext = (path.extname(req.file.originalname) || '.mp4').toLowerCase();
-        const destPath = path.join(dir, `${kind}${ext}`);
-        // Xoá file cũ (kể cả khác đuôi) trước khi ghi mới
-        const oldRel = kind === 'intro' ? post.intro_path : post.outro_path;
-        if (oldRel) { try { fs.unlinkSync(path.join(MEDIA_DIR, oldRel)); } catch(_) {} }
-        fs.renameSync(req.file.path, destPath);
-        const relPath = path.relative(MEDIA_DIR, destPath);
+
+        const list = parseBoundaryPaths(kind === 'intro' ? post.intro_path : post.outro_path);
+        // Đặt tên theo SỐ THỨ TỰ để nhìn thư mục là biết ghép theo trình tự nào; số chạy tiếp, không đè
+        // file cũ (trước đây mọi lần nạp đều ghi đè đúng một tên "intro.mp4").
+        let seq = list.length;
+        for (const f of incoming) {
+            const ext = (path.extname(f.originalname) || '.mp4').toLowerCase();
+            let dest, rel;
+            do { dest = path.join(dir, `${kind}_${++seq}${ext}`); rel = path.relative(MEDIA_DIR, dest); }
+            while (fs.existsSync(dest) || list.includes(rel));
+            try { fs.renameSync(f.path, dest); }
+            catch { fs.copyFileSync(f.path, dest); try { fs.unlinkSync(f.path); } catch (_) {} }
+            list.push(rel);
+        }
         const col = kind === 'intro' ? 'intro_path' : 'outro_path';
-        await db.run(`UPDATE Post SET ${col} = ? WHERE id = ?`, [relPath, postId]);
+        await db.run(`UPDATE Post SET ${col} = ? WHERE id = ?`, [JSON.stringify(list), postId]);
         await db.close();
-        res.json({ success: true, kind, path: relPath });
+        res.json({ success: true, kind, paths: list, path: list[list.length - 1] });
+    } catch (e) {
+        for (const f of incoming) { try { fs.unlinkSync(f.path); } catch (_) {} }
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Sắp xếp lại thứ tự ghép (kéo lên / kéo xuống trên UI)
+app.post('/api/reorder-intro-outro', async (req, res) => {
+    try {
+        const { postId, kind, paths } = req.body || {};
+        if (!['intro', 'outro'].includes(kind)) return res.status(400).json({ error: 'kind không hợp lệ' });
+        if (!Array.isArray(paths)) return res.status(400).json({ error: 'Thiếu danh sách paths' });
+        const db = await getDb();
+        const post = await db.get('SELECT intro_path, outro_path FROM Post WHERE id = ?', [postId]);
+        if (!post) { await db.close(); return res.status(404).json({ error: 'Post not found' }); }
+        // Chỉ nhận đúng bộ đường dẫn đang có, đảo thứ tự — chặn client gửi bừa đường dẫn lạ.
+        const cur = parseBoundaryPaths(kind === 'intro' ? post.intro_path : post.outro_path);
+        const next = paths.filter(p => cur.includes(p));
+        if (next.length !== cur.length) { await db.close(); return res.status(400).json({ error: 'Danh sách không khớp' }); }
+        const col = kind === 'intro' ? 'intro_path' : 'outro_path';
+        await db.run(`UPDATE Post SET ${col} = ? WHERE id = ?`, [JSON.stringify(next), postId]);
+        await db.close();
+        res.json({ success: true, paths: next });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Xoá intro/outro
+// Xoá 1 clip (truyền `path`) hoặc xoá SẠCH cả danh sách (không truyền `path`)
 app.post('/api/remove-intro-outro', async (req, res) => {
     try {
-        const { postId, kind } = req.body;
+        const { postId, kind, path: onePath } = req.body;
         if (!['intro', 'outro'].includes(kind)) return res.status(400).json({ error: 'kind không hợp lệ' });
         const db = await getDb();
         const post = await db.get('SELECT intro_path, outro_path FROM Post WHERE id = ?', [postId]);
         if (post) {
-            const rel = kind === 'intro' ? post.intro_path : post.outro_path;
-            if (rel) { try { fs.unlinkSync(path.join(MEDIA_DIR, rel)); } catch(_) {} }
+            const list = parseBoundaryPaths(kind === 'intro' ? post.intro_path : post.outro_path);
+            const drop = onePath ? list.filter(p => p === onePath) : list;
+            for (const rel of drop) { try { fs.unlinkSync(path.join(MEDIA_DIR, rel)); } catch (_) {} }
+            const left = list.filter(p => !drop.includes(p));
             const col = kind === 'intro' ? 'intro_path' : 'outro_path';
-            await db.run(`UPDATE Post SET ${col} = NULL WHERE id = ?`, [postId]);
+            await db.run(`UPDATE Post SET ${col} = ? WHERE id = ?`, [left.length ? JSON.stringify(left) : null, postId]);
         }
         await db.close();
         res.json({ success: true });
@@ -2692,11 +3219,31 @@ app.get('/api/proxies', (req, res) => {
 app.get('/api/chrome-profiles', async (req, res) => {
     try {
         const db = await getDb();
-        const profiles = await db.all('SELECT id, profile_dir, email, updated_at FROM ChromeProfile ORDER BY updated_at DESC');
+        const profiles = await db.all(
+            `SELECT id, profile_dir, email, updated_at, flow_date,
+                    CASE WHEN flow_date = ? THEN flow_count ELSE 0 END AS flowToday
+             FROM ChromeProfile ORDER BY updated_at DESC`, [flowDayKey()]);
         await db.close();
-        res.json(profiles);
+        res.json(profiles.map(p => ({ ...p, flowLimit: FLOW_DAILY_LIMIT, flowLeft: Math.max(0, FLOW_DAILY_LIMIT - (p.flowToday || 0)) })));
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// Hạn mức Flow còn lại của TẤT CẢ tài khoản — dùng để nói trước "bài này có đủ lượt chạy hôm nay không".
+async function flowQuotaSummary() {
+    const db = await getDb();
+    const rows = await db.all(
+        `SELECT id, email, CASE WHEN flow_date = ? THEN flow_count ELSE 0 END AS used FROM ChromeProfile
+         WHERE profile_dir IS NOT NULL AND profile_dir != '' AND (logged_out IS NULL OR logged_out = 0)`,
+        [flowDayKey()]).catch(() => []);
+    await db.close();
+    const usable = rows.map(r => ({ ...r, left: Math.max(0, FLOW_DAILY_LIMIT - (r.used || 0)) }));
+    return {
+        limit: FLOW_DAILY_LIMIT,
+        profiles: usable.length,
+        profilesLeft: usable.filter(p => p.left > 0).length,
+        imagesLeft: usable.reduce((n, p) => n + p.left, 0),
+    };
+}
 
 app.post('/api/chrome-profiles', async (req, res) => {
     const { email, password } = req.body;
@@ -2850,43 +3397,12 @@ app.get('/api/capcut-zip/:filename', (req, res) => {
     setTimeout(() => { try { fs.unlinkSync(filePath); } catch(_) {} }, 10 * 60 * 1000);
 });
 
+// Bundle tải qua trình duyệt: draft nằm trong project.zip cạnh file .bat.
+// Dùng CHUNG bộ sinh bat với capcut_export.js — bản cũ ở đây nhét cứng
+// 'C:/Users/trinh/AppData/Local/...' vào root_meta_info.json nên máy khác cài xong CapCut vẫn không
+// thấy dự án (đường dẫn trỏ vào thư mục không tồn tại).
 function buildLocalBatScript(draftId, projectName) {
-    const CRLF = '\r\n';
-    const safeName = projectName.replace(/'/g, '').replace(/"/g, '').trim();
-    const bat = [];
-    bat.push('@echo off');
-    bat.push('chcp 65001 >nul');
-    bat.push('title CapCut Installer');
-    bat.push('echo.');
-    bat.push('echo === Installing project ===');
-    bat.push('echo.');
-    bat.push('set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\Projects\\com.lveditor.draft"');
-    bat.push('if not exist "%DR%" set "DR=%LOCALAPPDATA%\\CapCut\\User Data\\com.lveditor.draft"');
-    bat.push('if not exist "%DR%" md "%DR%"');
-    bat.push('echo [1/2] Extracting...');
-    bat.push('if exist "%DR%\\' + draftId + '" rd /s /q "%DR%\\' + draftId + '"');
-    bat.push('powershell -NoProfile -Command "Expand-Archive -LiteralPath \'%~dp0project.zip\' -DestinationPath \'%DR%\' -Force"');
-    bat.push('echo [2/2] Updating index...');
-    bat.push('set "PROJ_NAME=' + safeName + '"');
-    const ps = [
-        '$f=\'C:/Users/trinh/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft/' + draftId + '\'',
-        '$r=Join-Path (Split-Path -Parent $f) \'root_meta_info.json\'',
-        '$id=\'' + draftId + '\'',
-        '$n=$env:PROJ_NAME',
-        '$t=[long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())*1000',
-        '$rp=Split-Path -Parent $f',
-        'if(Test-Path $r){$j=Get-Content $r -Raw|ConvertFrom-Json}else{$j=[PSCustomObject]@{all_draft_store=@();draft_ids=0;root_path=$rp}}',
-        '$ne=[PSCustomObject]@{draft_fold_path=($f-replace\'\\\\\',\'/\');draft_id=$id;draft_name=$n;draft_root_path=$rp;draft_json_file=(($f-replace\'\\\\\',\'/\')+\'/draft_content.json\');tm_draft_create=$t;tm_draft_modified=$t;tm_draft_removed=0;tm_duration=300000000;draft_timeline_materials_size=2000000;streaming_edit_draft_ready=$true;cloud_draft_cover=$false;cloud_draft_sync=$false;draft_is_invisible=$false}',
-        '$j.all_draft_store=@($ne)+($j.all_draft_store|Where-Object{$_.draft_id -ne $id})',
-        'ConvertTo-Json $j -Depth 10 -Compress|Set-Content $r -Encoding UTF8',
-        'Write-Host \'OK\'',
-    ].join(';');
-    bat.push('powershell -NoProfile -ExecutionPolicy Bypass -Command "' + ps + '"');
-    bat.push('echo.');
-    bat.push('echo === Done! Open CapCut to see your project ===');
-    bat.push('echo.');
-    bat.push('pause');
-    return bat.join(CRLF);
+    return generateBat('project.zip', projectName, draftId);
 }
 
 app.post('/api/render-capcut', (req, res) => {

@@ -143,6 +143,12 @@ export async function initDB() {
     // một rổ chung section='x', máy gán vào cảnh nào là mất dấu rổ cũ — có cột này thì bỏ chọn/chạy lại
     // trả được asset về đúng rổ, không kẹt lại ở cảnh mà lần trước lỡ gán.
     await db.run('ALTER TABLE Asset ADD COLUMN auto_home TEXT DEFAULT NULL').catch(() => {});
+    // Hạn mức ảnh/ngày của Google Flow (~50 ảnh cho một tài khoản). Một bài podcast 40 cảnh + 15 nhân vật
+    // đã 55 lượt gen, nên phải đếm theo NGÀY cho từng profile để tự đổi tài khoản khi cạn.
+    //   flow_date  → ngày (YYYY-MM-DD, giờ máy) của bộ đếm; khác ngày là coi như 0
+    //   flow_count → số ảnh đã gen trong ngày đó
+    await db.run('ALTER TABLE ChromeProfile ADD COLUMN flow_date TEXT DEFAULT NULL').catch(() => {});
+    await db.run('ALTER TABLE ChromeProfile ADD COLUMN flow_count INTEGER NOT NULL DEFAULT 0').catch(() => {});
     await db.run(`CREATE TABLE IF NOT EXISTS SentenceDetail (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sentence_id INTEGER NOT NULL,

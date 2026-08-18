@@ -18,7 +18,7 @@
     </style>
 </head>
 <body class="bg-gray-950 text-gray-100 font-sans h-screen flex overflow-hidden">
-<div id="app" class="flex w-full h-full overflow-hidden" @click="showCapcutMenu = false; showVoiceMenu = false; showMediaMenu = false">
+<div id="app" class="flex w-full h-full overflow-hidden" @click="showCapcutMenu = false; showVoiceMenu = false; showMediaMenu = false; showBuildMenu = false; showToolsMenu = false">
     <!-- SIDEBAR -->
     <aside class="w-64 bg-gray-900 border-r border-gray-800 flex flex-col h-full shrink-0">
         <div class="p-3 border-b border-gray-800 flex gap-2 flex-col">
@@ -118,7 +118,7 @@
 
                     <!-- 🎙️ Voice ▾ (gồm cả Tải về) -->
                     <div class="relative">
-                        <button @click.stop="showVoiceMenu = !showVoiceMenu; showMediaMenu = false; showCapcutMenu = false" class="bg-purple-600 hover:bg-purple-500 px-5 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Voice ▾</button>
+                        <button @click.stop="showVoiceMenu = !showVoiceMenu; showMediaMenu = false; showBuildMenu = false; showToolsMenu = false; showCapcutMenu = false" class="bg-purple-600 hover:bg-purple-500 px-5 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎙️ Voice ▾</button>
                         <div v-show="showVoiceMenu" class="absolute top-full right-0 mt-1 flex flex-col gap-1 z-50 min-w-[240px] bg-gray-900 border border-gray-700 rounded-xl p-1.5 shadow-xl">
                             <button @click="createVoice" class="bg-purple-700 hover:bg-purple-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🎙️ Tạo Voice</button>
                             <button @click="retryDownloadVoice" class="bg-indigo-700 hover:bg-indigo-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🔄 Refresh</button>
@@ -129,29 +129,57 @@
                         </div>
                     </div>
 
-                    <!-- 🎨 Media ▾ -->
+                    <!-- 🎨 Hình ảnh ▾ — nguồn hình cho từng cảnh -->
+                    <!-- Trước đây cả 14 nút nhét chung một menu "Media", tìm nút nào cũng phải dò cả danh sách.
+                         Giờ tách theo VIỆC: lấy hình → dựng bài → tiện ích. Nút nào thể loại đó không dùng được
+                         thì ẩn hẳn (podcast không cào được hình nên không có Crawl / Tự chọn). -->
                     <div class="relative">
-                        <button @click.stop="showMediaMenu = !showMediaMenu; showVoiceMenu = false; showCapcutMenu = false" class="bg-teal-600 hover:bg-teal-500 px-5 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎨 Media ▾<span v-if="activePost.intro_path || activePost.outro_path" class="ml-1 inline-block w-2 h-2 rounded-full bg-green-400 align-middle"></span></button>
+                        <button @click.stop="showMediaMenu = !showMediaMenu; showVoiceMenu = false; showBuildMenu = false; showToolsMenu = false; showCapcutMenu = false" class="bg-teal-600 hover:bg-teal-500 px-5 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎨 Hình ảnh ▾</button>
                         <div v-show="showMediaMenu" class="absolute top-full right-0 mt-1 flex flex-col gap-1 z-50 min-w-[240px] bg-gray-900 border border-gray-700 rounded-xl p-1.5 shadow-xl">
-                            <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-700 hover:bg-orange-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}</button>
-                            <button @click="triggerAutoSelect(false)" :disabled="autoSelecting" class="bg-amber-600 hover:bg-amber-500 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Máy chấm điểm ảnh/video theo nội dung từng cảnh rồi chọn đủ lấp thời lượng lời đọc. Cảnh đã chọn tay được giữ nguyên."><span v-if="autoSelecting" class="animate-spin inline-block mr-1">⏳</span>{{ autoSelecting ? 'Đang chọn...' : '🤖 Tự chọn ảnh/video' }}</button>
-                            <button @click="triggerAutoSelect(true)" :disabled="autoSelecting" class="bg-amber-800 hover:bg-amber-700 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Chọn lại TẤT CẢ các cảnh, ghi đè cả lựa chọn tay">🤖 Tự chọn lại tất cả</button>
-                            <button v-if="activePost?.genre === 'podcast'" @click="openPodcastLib(activePostId)" class="bg-purple-700 hover:bg-purple-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Lấp nền hình từ kho: random clip nối nhau, hoặc 1 ảnh/video chạy xuyên suốt">🎬 Lấp nền từ kho</button>
-                            <button v-if="activePost?.genre === 'sport'" @click="sportsRetry" class="bg-yellow-600 hover:bg-yellow-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Cào bù các câu chưa có keyword nào (GPT lỗi/timeout lúc chạy pipeline)">🔁 Retry câu thiếu</button>
-                            <button @click="openProcessLog" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Log tiến độ pipeline của dự án (bài dài: đang viết phần mấy, điểm từng phần)">📜 Log tiến độ</button>
-                            <button @click="openXBrowseLog" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Xem MỌI bài X đã lướt qua khi crawl (kèm link)">🐦 Log X đã lướt</button>
-                            <button @click="createThumbnail" :disabled="thumbLoading" class="bg-teal-700 hover:bg-teal-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="thumbLoading" class="animate-spin inline-block mr-1">⏳</span>🖼️ Tạo Thumbnail</button>
-                            <button @click="generateTitleSeo" :disabled="titleModal.loading" class="bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="titleModal.loading" class="animate-spin inline-block mr-1">⏳</span>📝 Title SEO</button>
+                            <template v-if="activePost?.genre !== 'podcast'">
+                                <button @click="triggerCrawlAll" :disabled="crawling" class="bg-orange-700 hover:bg-orange-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="crawling" class="animate-spin inline-block mr-1">⏳</span>{{ crawling ? 'Crawling...' : '🔄 Crawl Media' }}</button>
+                                <button @click="triggerAutoSelect(false)" :disabled="autoSelecting" class="bg-amber-600 hover:bg-amber-500 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Máy chấm điểm ảnh/video theo nội dung từng cảnh rồi chọn đủ lấp thời lượng lời đọc. Cảnh đã chọn tay được giữ nguyên."><span v-if="autoSelecting" class="animate-spin inline-block mr-1">⏳</span>{{ autoSelecting ? 'Đang chọn...' : '🤖 Tự chọn ảnh/video' }}</button>
+                                <button @click="triggerAutoSelect(true)" :disabled="autoSelecting" class="bg-amber-800 hover:bg-amber-700 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Chọn lại TẤT CẢ các cảnh, ghi đè cả lựa chọn tay">🤖 Tự chọn lại tất cả</button>
+                            </template>
+                            <template v-if="activePost?.genre === 'podcast'">
+                                <button @click="openPodcastLib(activePostId)" class="bg-purple-700 hover:bg-purple-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Lấp nền hình từ kho: random clip nối nhau, hoặc 1 ảnh/video chạy xuyên suốt">🎬 Lấp nền từ kho</button>
+                                <button @click="openPodcastImages()" class="bg-fuchsia-700 hover:bg-fuchsia-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Sinh ảnh AI cho từng cảnh bằng Google Flow — cả bài chung một project Flow để nhân vật giống nhau. Chạy lại chỉ làm phần còn thiếu.">🎨 Ảnh AI theo cảnh</button>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- 🎞️ Dựng ▾ — thứ đắp thêm vào bài trước khi xuất -->
+                    <div class="relative">
+                        <button @click.stop="showBuildMenu = !showBuildMenu; showVoiceMenu = false; showMediaMenu = false; showToolsMenu = false; showCapcutMenu = false" class="bg-cyan-700 hover:bg-cyan-600 px-5 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🎞️ Dựng ▾<span v-if="activePost.intro_path || activePost.outro_path" class="ml-1 inline-block w-2 h-2 rounded-full bg-green-400 align-middle"></span></button>
+                        <div v-show="showBuildMenu" class="absolute top-full right-0 mt-1 flex flex-col gap-1 z-50 min-w-[240px] bg-gray-900 border border-gray-700 rounded-xl p-1.5 shadow-xl">
+                            <button @click="createThumbnail" :disabled="thumbLoading" class="bg-teal-700 hover:bg-teal-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="thumbLoading" class="animate-spin inline-block mr-1">⏳</span>{{ thumbLoading ? 'Đang tạo...' : '🖼️ Tạo Thumbnail' }}</button>
+                            <button @click="generateTitleSeo" :disabled="titleModal.loading" class="bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"><span v-if="titleModal.loading" class="animate-spin inline-block mr-1">⏳</span>✨ Tiêu đề SEO</button>
                             <button @click="openIntroOutroModal" class="bg-teal-800 hover:bg-teal-700 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🎞️ Intro/Outro<span v-if="activePost.intro_path || activePost.outro_path" class="ml-1 inline-block w-2 h-2 rounded-full bg-green-400 align-middle"></span></button>
                             <button @click="openLipsSyncModal" class="bg-fuchsia-700 hover:bg-fuchsia-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">👄 Lips Sync</button>
-                            <button @click="freeVram" :disabled="lipsSyncModal.freeingVram" class="bg-violet-700 hover:bg-violet-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Kill worker GPU (WhisperX align / matte) nhường VRAM + tự bật lại server lips nếu đang down. Không đụng app khác."><span v-if="lipsSyncModal.freeingVram" class="animate-spin inline-block mr-1">⏳</span>🧹 Giải phóng VRAM<span v-if="lipsSyncModal.vramInfo" class="ml-1 text-violet-300 font-mono normal-case">({{ lipsSyncModal.vramInfo.free }}/{{ lipsSyncModal.vramInfo.total }})</span></button>
-                            <button @click="downloadSrt" class="bg-indigo-700 hover:bg-indigo-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Tải phụ đề .srt khớp với audio (dùng khoảng nghỉ giống CapCut)">📄 Tải SRT</button>
+                            <div class="h-px bg-gray-700 my-0.5"></div>
+                            <button @click="downloadSrt" class="bg-indigo-700 hover:bg-indigo-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Tải phụ đề .srt khớp với giọng đọc">⬇️ Tải SRT</button>
+                        </div>
+                    </div>
+
+                    <!-- 🛠️ Tiện ích ▾ — log, vá dữ liệu, dọn máy -->
+                    <div class="relative">
+                        <button @click.stop="showToolsMenu = !showToolsMenu; showVoiceMenu = false; showMediaMenu = false; showBuildMenu = false; showCapcutMenu = false" class="bg-slate-600 hover:bg-slate-500 px-5 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95">🛠️ Tiện ích ▾</button>
+                        <div v-show="showToolsMenu" class="absolute top-full right-0 mt-1 flex flex-col gap-1 z-50 min-w-[240px] bg-gray-900 border border-gray-700 rounded-xl p-1.5 shadow-xl">
+                            <button @click="openProcessLog" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Log tiến độ pipeline của dự án (bài dài: đang viết phần mấy, điểm từng phần)">📜 Log tiến độ</button>
+                            <button v-if="['drama', 'geo'].includes(activePost?.genre)" @click="openXBrowseLog" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Xem MỌI bài X đã lướt qua khi crawl (theo cảnh), kèm link">🔎 Log X</button>
+                            <button v-if="activePost?.genre === 'podcast' && activePost?.target_lang && activePost.target_lang !== 'vi'" @click="fixPodcastVi" :disabled="fixViLoading"
+                                class="bg-purple-800 hover:bg-purple-700 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white"
+                                title="Cột tiếng Việt còn lẫn chữ ngôn ngữ đích (địa danh, lời thoại trong ngoặc kép, cả câu) → dịch nốt sang tiếng Việt">
+                                <span v-if="fixViLoading" class="animate-spin inline-block mr-1">⏳</span>🇻🇳 Ép cột tiếng Việt</button>
+                            <button v-if="activePost?.genre === 'sport'" @click="sportsRetry" class="bg-yellow-600 hover:bg-yellow-500 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Cào bù các câu chưa có keyword nào (GPT lỗi/timeout lúc chạy pipeline)">🔁 Retry câu thiếu</button>
+                            <div class="h-px bg-gray-700 my-0.5"></div>
+                            <button @click="freeVram" :disabled="lipsSyncModal.freeingVram" class="bg-violet-700 hover:bg-violet-600 disabled:opacity-40 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white" title="Tắt tiến trình lips sync/whisperx đang giữ VRAM"><span v-if="lipsSyncModal.freeingVram" class="animate-spin inline-block mr-1">⏳</span>🧹 Giải phóng VRAM</button>
                         </div>
                     </div>
 
                     <!-- 🎬 CapCut ▾ -->
                     <div class="relative">
-                        <button @click.stop="showCapcutMenu = !showCapcutMenu; showVoiceMenu = false; showMediaMenu = false" :disabled="capcutExporting || capcutRendering" class="bg-pink-600 hover:bg-pink-500 disabled:opacity-40 px-5 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95"><span v-if="capcutExporting || capcutRendering" class="animate-spin inline-block mr-1">⏳</span>{{ capcutExporting ? 'Exporting...' : capcutRendering ? 'Rendering...' : '🎬 CapCut ▾' }}</button>
+                        <button @click.stop="showCapcutMenu = !showCapcutMenu; showVoiceMenu = false; showMediaMenu = false; showBuildMenu = false; showToolsMenu = false" :disabled="capcutExporting || capcutRendering" class="bg-pink-600 hover:bg-pink-500 disabled:opacity-40 px-5 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95"><span v-if="capcutExporting || capcutRendering" class="animate-spin inline-block mr-1">⏳</span>{{ capcutExporting ? 'Exporting...' : capcutRendering ? 'Rendering...' : '🎬 CapCut ▾' }}</button>
                         <div v-show="showCapcutMenu" class="absolute top-full right-0 mt-1 flex flex-col gap-1 z-50 min-w-[200px] bg-gray-900 border border-gray-700 rounded-xl p-1.5 shadow-xl">
                             <button @click.stop="capcutLang=''; showCapcutMenu=false; exportCapcut()" class="bg-pink-700 hover:bg-pink-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🎬 Export Auto</button>
                             <button @click.stop="capcutLang='content_vi'; showCapcutMenu=false; exportCapcut()" class="bg-pink-700 hover:bg-pink-600 px-4 py-2 rounded-lg font-black text-[11px] uppercase tracking-widest text-left text-white">🇻🇳 Export Tiếng Việt</button>
@@ -1495,26 +1523,32 @@
 
             <!-- Intro -->
             <div class="space-y-2">
-                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Intro (đầu video)</label>
-                <div v-if="activePost.intro_path" class="flex items-center gap-2 bg-gray-800 rounded-lg px-3 py-2">
-                    <span class="text-green-400">✅</span>
-                    <span class="text-[11px] text-gray-300 truncate flex-1">{{ activePost.intro_path.split('/').pop() }}</span>
-                    <button @click="removeIntroOutro('intro')" class="text-red-400 hover:text-red-300 text-[10px] font-bold uppercase tracking-widest">Xoá</button>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Intro (đầu video) <span class="text-gray-600 normal-case font-normal">— nạp nhiều clip, ghép theo thứ tự dưới đây</span></label>
+                <div v-for="(p, i) in (activePost.intro_paths || [])" :key="p" class="flex items-center gap-2 bg-gray-800 rounded-lg px-2 py-1.5">
+                    <span class="text-[10px] font-black text-teal-400 w-5 text-center">{{ i + 1 }}</span>
+                    <span class="text-[11px] text-gray-300 truncate flex-1" :title="p">{{ p.split('/').pop() }}</span>
+                    <button @click="moveIntroOutro('intro', i, -1)" :disabled="i === 0" class="text-gray-400 hover:text-white disabled:opacity-20 text-[11px] px-1" title="Lên trước">▲</button>
+                    <button @click="moveIntroOutro('intro', i, 1)" :disabled="i === (activePost.intro_paths || []).length - 1" class="text-gray-400 hover:text-white disabled:opacity-20 text-[11px] px-1" title="Xuống sau">▼</button>
+                    <button @click="previewIntroOutro = previewIntroOutro === p ? '' : p" class="text-teal-400 hover:text-teal-300 text-[11px] px-1" title="Xem thử">▶</button>
+                    <button @click="removeIntroOutro('intro', p)" class="text-red-400 hover:text-red-300 text-[10px] font-bold uppercase">Xoá</button>
                 </div>
-                <video v-if="activePost.intro_path" :src="'/' + activePost.intro_path + '?t=' + introOutroModal.cacheBust" controls preload="metadata" class="w-full rounded-lg bg-black max-h-48"></video>
-                <input type="file" accept="video/*" @change="uploadIntroOutro('intro', $event)" :disabled="introOutroModal.uploading" class="block w-full text-[11px] text-gray-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-teal-600 file:text-white file:font-bold file:cursor-pointer hover:file:bg-teal-500 disabled:opacity-40">
+                <video v-if="previewIntroOutro && (activePost.intro_paths || []).includes(previewIntroOutro)" :src="'/' + previewIntroOutro + '?t=' + introOutroModal.cacheBust" controls autoplay preload="metadata" class="w-full rounded-lg bg-black max-h-48"></video>
+                <input type="file" accept="video/*" multiple @change="uploadIntroOutro('intro', $event)" :disabled="introOutroModal.uploading" class="block w-full text-[11px] text-gray-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-teal-600 file:text-white file:font-bold file:cursor-pointer hover:file:bg-teal-500 disabled:opacity-40">
             </div>
 
             <!-- Outro -->
             <div class="space-y-2">
-                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Outro (cuối video)</label>
-                <div v-if="activePost.outro_path" class="flex items-center gap-2 bg-gray-800 rounded-lg px-3 py-2">
-                    <span class="text-green-400">✅</span>
-                    <span class="text-[11px] text-gray-300 truncate flex-1">{{ activePost.outro_path.split('/').pop() }}</span>
-                    <button @click="removeIntroOutro('outro')" class="text-red-400 hover:text-red-300 text-[10px] font-bold uppercase tracking-widest">Xoá</button>
+                <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Outro (cuối video) <span class="text-gray-600 normal-case font-normal">— nạp nhiều clip, ghép theo thứ tự dưới đây</span></label>
+                <div v-for="(p, i) in (activePost.outro_paths || [])" :key="p" class="flex items-center gap-2 bg-gray-800 rounded-lg px-2 py-1.5">
+                    <span class="text-[10px] font-black text-teal-400 w-5 text-center">{{ i + 1 }}</span>
+                    <span class="text-[11px] text-gray-300 truncate flex-1" :title="p">{{ p.split('/').pop() }}</span>
+                    <button @click="moveIntroOutro('outro', i, -1)" :disabled="i === 0" class="text-gray-400 hover:text-white disabled:opacity-20 text-[11px] px-1" title="Lên trước">▲</button>
+                    <button @click="moveIntroOutro('outro', i, 1)" :disabled="i === (activePost.outro_paths || []).length - 1" class="text-gray-400 hover:text-white disabled:opacity-20 text-[11px] px-1" title="Xuống sau">▼</button>
+                    <button @click="previewIntroOutro = previewIntroOutro === p ? '' : p" class="text-teal-400 hover:text-teal-300 text-[11px] px-1" title="Xem thử">▶</button>
+                    <button @click="removeIntroOutro('outro', p)" class="text-red-400 hover:text-red-300 text-[10px] font-bold uppercase">Xoá</button>
                 </div>
-                <video v-if="activePost.outro_path" :src="'/' + activePost.outro_path + '?t=' + introOutroModal.cacheBust" controls preload="metadata" class="w-full rounded-lg bg-black max-h-48"></video>
-                <input type="file" accept="video/*" @change="uploadIntroOutro('outro', $event)" :disabled="introOutroModal.uploading" class="block w-full text-[11px] text-gray-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-teal-600 file:text-white file:font-bold file:cursor-pointer hover:file:bg-teal-500 disabled:opacity-40">
+                <video v-if="previewIntroOutro && (activePost.outro_paths || []).includes(previewIntroOutro)" :src="'/' + previewIntroOutro + '?t=' + introOutroModal.cacheBust" controls autoplay preload="metadata" class="w-full rounded-lg bg-black max-h-48"></video>
+                <input type="file" accept="video/*" multiple @change="uploadIntroOutro('outro', $event)" :disabled="introOutroModal.uploading" class="block w-full text-[11px] text-gray-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-teal-600 file:text-white file:font-bold file:cursor-pointer hover:file:bg-teal-500 disabled:opacity-40">
             </div>
 
             <div v-if="introOutroModal.uploading" class="space-y-1">
@@ -1783,7 +1817,7 @@
         <div class="flex items-center justify-between">
             <div class="flex items-center gap-4">
                 <h2 class="text-2xl font-black text-white">🧑💻 Chrome Profiles</h2>
-                <span class="text-[11px] text-gray-500">Mỗi profile = 1 tài khoản Google, hệ thống tự xoay vòng theo lần dùng cuối</span>
+                <span class="text-[11px] text-gray-500">Mỗi profile = 1 tài khoản Google. Flow chặn ~50 ảnh/ngày mỗi tài khoản → hệ thống tự đổi sang profile còn hạn mức khi đang chạy.</span>
             </div>
             <button @click="profileModal.addOpen = true" class="px-4 py-2 rounded-lg text-[11px] font-bold uppercase bg-green-600 hover:bg-green-500 transition-all">➕ Tạo mới</button>
         </div>
@@ -1793,6 +1827,7 @@
                     <tr class="border-b border-gray-800 text-gray-500 uppercase tracking-widest text-[10px]">
                         <th class="text-left px-4 py-3">Profile</th>
                         <th class="text-left px-4 py-3">Email</th>
+                        <th class="text-left px-4 py-3">Ảnh Flow hôm nay</th>
                         <th class="text-left px-4 py-3">Dùng lần cuối</th>
                         <th class="px-4 py-3"></th>
                     </tr>
@@ -1804,6 +1839,10 @@
                     <tr v-for="p in profileModal.list" :key="p.id" class="border-b border-gray-800/50 hover:bg-gray-800/30">
                         <td class="px-4 py-3 font-mono text-green-400">{{ p.profile_dir }}</td>
                         <td class="px-4 py-3 text-gray-300">{{ p.email || '-' }}</td>
+                        <td class="px-4 py-3 font-mono" :class="p.flowLeft > 0 ? 'text-gray-300' : 'text-red-400'"
+                            :title="p.flowLeft > 0 ? 'Còn ' + p.flowLeft + ' ảnh trong hôm nay' : 'Đã cạn hạn mức hôm nay — mai mới dùng lại được'">
+                            {{ p.flowToday || 0 }}/{{ p.flowLimit || 50 }}<span v-if="!p.flowLeft"> · cạn</span>
+                        </td>
                         <td class="px-4 py-3 text-gray-500">{{ p.updated_at ? new Date(p.updated_at).toLocaleString('vi') : 'Chưa dùng' }}</td>
                         <td class="px-4 py-3 text-right">
                             <button @click="loginProfile(p)" :disabled="p._logging || !!p.profile_dir" class="bg-blue-600/80 hover:bg-blue-500 disabled:opacity-40 text-white text-[10px] px-2 py-1 rounded mr-1">{{ p._logging ? "Đang mở..." : "🔑 Đăng nhập" }}</button><button @click="openProfileCookie(p)" :disabled="p._opening" class="bg-emerald-600/80 hover:bg-emerald-500 disabled:opacity-40 text-white text-[10px] px-2 py-1 rounded mr-1" title="Mở lại trình duyệt profile để đăng nhập trang khác / lấy thêm cookie">{{ p._opening ? "Đang mở..." : "🍪 Lấy cookie" }}</button><button @click="deleteProfile(p)" class="bg-red-600/80 hover:bg-red-500 text-white text-[10px] px-2 py-1 rounded">Xóa</button>
@@ -2088,6 +2127,14 @@
             </div>
             <p class="text-[10px] text-gray-500 leading-relaxed">Dự án <b>chỉ có tiếng</b>: mỗi dòng phụ đề = 1 câu đọc, không cào ảnh/video. Mốc thời gian của file SRT được giữ lại để xuất phụ đề về sau.</p>
 
+            <!-- 2 đường vào: nạp SRT có sẵn, hoặc để AI viết nội dung (có bộ nhớ chống trùng) -->
+            <div class="flex gap-1 bg-gray-950 rounded-lg p-1">
+                <button @click="podcastModal.mode = 'srt'" class="flex-1 py-1.5 rounded text-[11px] font-black transition-colors"
+                    :class="podcastModal.mode === 'srt' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white'">📄 Nạp file SRT</button>
+                <button @click="podcastModal.mode = 'ai'; loadPodcastMemory()" class="flex-1 py-1.5 rounded text-[11px] font-black transition-colors"
+                    :class="podcastModal.mode === 'ai' ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white'">✨ AI viết nội dung</button>
+            </div>
+
             <!-- Ngôn ngữ đích -->
             <div>
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Ngôn ngữ đích</label>
@@ -2104,7 +2151,7 @@
             </div>
 
             <!-- 2 file SRT -->
-            <div class="grid grid-cols-2 gap-2">
+            <div v-if="podcastModal.mode === 'srt'" class="grid grid-cols-2 gap-2">
                 <div>
                     <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">SRT gốc <span class="text-red-400">*</span> <span class="text-gray-600 normal-case font-normal">— chọn được nhiều file</span></label>
                     <!-- Mỗi file = 1 dự án riêng, tất cả xếp vào hàng đợi chạy lần lượt -->
@@ -2123,6 +2170,8 @@
                              class="flex items-center gap-1.5 bg-gray-950/60 border border-gray-800 rounded px-2 py-1">
                             <span class="text-[9px] font-black text-gray-600 w-4">{{ i + 1 }}.</span>
                             <span class="text-[10px] font-mono text-gray-300 flex-1 truncate" :title="f.name">{{ f.name }}</span>
+                            <!-- Cỡ file: 3 tập cùng tên "vi.srt" thì đây là cách duy nhất phân biệt -->
+                            <span class="text-[9px] font-mono text-gray-600 shrink-0">{{ Math.round(f.size/1024) }}KB</span>
                             <button @click.stop="podcastModal.files.splice(i, 1)" class="text-red-500 hover:text-red-400 text-[11px] font-black shrink-0">×</button>
                         </div>
                     </div>
@@ -2151,7 +2200,7 @@
             </div>
 
             <!-- Ghép cặp gốc ↔ dịch: hiện rõ ra để soát, đừng để đoán mò cái nào đi với cái nào -->
-            <div v-if="podcastModal.filesTarget.length" class="border border-gray-800 rounded-lg p-2 bg-gray-950/40 space-y-1">
+            <div v-if="podcastModal.mode === 'srt' && podcastModal.filesTarget.length" class="border border-gray-800 rounded-lg p-2 bg-gray-950/40 space-y-1">
                 <p class="text-[10px] font-black uppercase tracking-widest" :class="srtPairs.warn ? 'text-orange-400' : 'text-gray-500'">
                     Ghép cặp {{ srtPairs.pairs.length }} dự án<span v-if="srtPairs.warn"> — {{ srtPairs.warn }}</span>
                 </p>
@@ -2164,13 +2213,61 @@
                     </div>
                 </div>
             </div>
-            <p class="text-[9px] text-gray-600">Ghép theo THỨ TỰ block trong từng cặp file. Không có SRT đã dịch → dùng luôn câu gốc cho cả 2 cột.</p>
+            <p v-if="podcastModal.mode === 'srt'" class="text-[9px] text-gray-600">Ghép theo THỨ TỰ block trong từng cặp file. Không có SRT đã dịch → dùng luôn câu gốc cho cả 2 cột.</p>
+
+            <!-- ===== AI VIẾT NỘI DUNG ===== -->
+            <template v-if="podcastModal.mode === 'ai'">
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Chủ đề / yêu cầu nội dung <span class="text-red-400">*</span></label>
+                    <textarea v-model="podcastModal.prompt" rows="4" placeholder="VD: Kể một câu chuyện có thật về người lao động Việt ở Nhật, giọng tâm sự, kết mở..."
+                        class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-purple-500 resize-y"></textarea>
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Thể loại / phong cách (tuỳ chọn)</label>
+                    <input v-model="podcastModal.style" type="text" placeholder="VD: truyện kể tâm lý, bản tin phân tích, hồi ký..."
+                        class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-purple-500">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Độ dài (phút đọc)</label>
+                        <input type="number" min="1" max="120" v-model.number="podcastModal.minutes"
+                            class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-purple-500">
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Số tập cần viết</label>
+                        <input type="number" min="1" max="20" v-model.number="podcastModal.episodes"
+                            class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-purple-500">
+                    </div>
+                </div>
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" v-model="podcastModal.webSearch" class="accent-purple-500 w-4 h-4">
+                    <span class="text-[12px] font-bold text-gray-200">🌐 Cho AI tra cứu web</span>
+                    <span class="text-[9px] text-gray-600">(bài thời sự/có số liệu nên bật; truyện hư cấu thì tắt)</span>
+                </label>
+
+                <!-- Bộ nhớ chống trùng: mỗi tập viết xong để lại đề tài + nhân vật, tập sau tránh ra -->
+                <div class="border border-purple-900/50 rounded-lg p-3 bg-purple-950/10 space-y-1.5">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-[11px] font-black text-purple-300">🧠 Bộ nhớ nội dung</span>
+                        <button @click="openPodcastMemory()" class="text-[10px] font-bold uppercase tracking-widest text-purple-400 hover:text-purple-300">Xem / xoá →</button>
+                    </div>
+                    <p class="text-[10px] text-gray-400">
+                        Đã nhớ <b class="text-purple-300">{{ podcastMemory.total }}</b> tập ·
+                        <b class="text-purple-300">{{ podcastMemory.characters.length }}</b> tên nhân vật đã dùng.
+                    </p>
+                    <p class="text-[9px] text-gray-600 leading-relaxed">
+                        AI nhận cả danh sách này làm <b>danh sách cấm</b>; dàn ý nào trùng nhân vật hoặc trùng đề tài sẽ bị bắt viết lại trước khi tốn tiền viết cả bài.
+                        Nhiều tập cùng lúc thì chạy lần lượt để tập sau tránh được tập trước.
+                    </p>
+                </div>
+            </template>
 
             <!-- Project ID -->
             <div>
                 <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Project ID (tùy chọn)</label>
-                <input v-model="podcastModal.projectId" type="text" :disabled="podcastModal.files.length > 1"
-                    :placeholder="podcastModal.files.length > 1 ? 'Nạp nhiều file → mỗi dự án tự đặt tên theo tên file SRT' : 'để trống → podcast_YYYY-MM-DD_HH-MM-SS'"
+                <input v-model="podcastModal.projectId" type="text" :disabled="podcastModal.mode === 'srt' && podcastModal.files.length > 1"
+                    :placeholder="podcastModal.mode === 'ai' ? (podcastModal.episodes > 1 ? 'để trống → podcast_ai_<thời điểm>, các tập thêm hậu tố _tap2, _tap3...' : 'để trống → podcast_ai_YYYY-MM-DD_HH-MM-SS')
+                                  : podcastModal.files.length > 1 ? 'Nạp nhiều file → mỗi dự án tự đặt tên theo tên file SRT' : 'để trống → podcast_YYYY-MM-DD_HH-MM-SS'"
                     class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-[12px] text-gray-200 outline-none focus:border-purple-500 disabled:opacity-50">
             </div>
 
@@ -2178,7 +2275,7 @@
             <div class="border border-gray-800 rounded-lg p-3 space-y-3 bg-gray-950/40">
                 <label class="flex items-center gap-2 cursor-pointer select-none">
                     <input type="checkbox" v-model="podcastModal.voiceAuto" @change="onPodcastVoiceToggle" class="accent-purple-500 w-4 h-4">
-                    <span class="text-[12px] font-black text-purple-300">🎙️ Tạo voice ngay sau khi nhập SRT</span>
+                    <span class="text-[12px] font-black text-purple-300">🎙️ Tạo voice ngay sau khi có kịch bản</span>
                 </label>
                 <p class="text-[9px] text-gray-600 leading-relaxed">Bỏ trống = chỉ nhập nội dung, tạo voice sau bằng nút <b>🎙️ Voice</b> trên dự án.</p>
                 <div v-if="podcastModal.voiceAuto" class="space-y-3 pt-1">
@@ -2243,6 +2340,43 @@
                         </select>
                     </div>
                 </div>
+                <!-- Ảnh AI theo cảnh: prompt do người dùng TỰ VIẾT, cả bài chung một project Flow -->
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" v-model="podcastModal.aiImages" class="accent-purple-500 w-4 h-4">
+                    <span class="text-[12px] font-bold text-gray-200">🎨 Sinh ảnh AI cho từng cảnh (Google Flow)</span>
+                </label>
+                <div v-if="podcastModal.aiImages" class="pl-6 space-y-2">
+                    <textarea v-model="podcastModal.aiImagePrompts" rows="6" spellcheck="false"
+                        placeholder="NHÂN VẬT&#10;&#10;01. KIM SUNG-HO — 61 tuổi&#10;Full-body character portrait of...&#10;&#10;02. LEE JUNG-SOOK — 59 tuổi&#10;Character portrait of...&#10;&#10;CẢNH&#10;&#10;01. S001&#10;Extreme close-up of an old smartphone screen...&#10;&#10;02. S002&#10;..."
+                        class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-[11px] text-gray-200 font-mono leading-relaxed outline-none focus:border-purple-500 resize-y"></textarea>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Khung hình</span>
+                        <button v-for="r in ['16:9','9:16','1:1']" :key="r" @click="podcastModal.aiImageRatio = r"
+                            class="px-3 py-1 rounded-lg text-[11px] font-black transition-colors"
+                            :class="podcastModal.aiImageRatio === r ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">{{ r }}</button>
+                        <span v-if="aiImageCounts.total" class="text-[11px] font-bold text-purple-300">
+                            {{ aiImageCounts.characters }} nhân vật · {{ aiImageCounts.scenes }} cảnh
+                        </span>
+                        <span v-else-if="podcastModal.aiImagePrompts.trim()" class="text-[11px] font-bold text-red-400">
+                            ⚠ chưa tách được mục nào — mỗi mục phải mở đầu bằng “01.” hoặc “1)”
+                        </span>
+                    </div>
+                    <p class="text-[10px] text-gray-600 leading-snug">
+                        Nhân vật chạy trước để Flow nhớ mặt, rồi mỗi cảnh 1 ảnh — <b class="text-gray-400">cả bài nằm trong CÙNG một project Flow</b> nên nhân vật giống nhau xuyên suốt.
+                        Cảnh thứ k trong khối gán vào cảnh thứ k của dự án; cảnh nào có ảnh AI thì khâu lấp nền tự chừa ra.
+                        Bài mấy chục cảnh chạy cả tiếng; đứt giữa chừng thì vào dự án bấm <span class="text-gray-400 font-bold">🎨 Ảnh AI theo cảnh</span> để làm nốt phần thiếu trong đúng project Flow cũ.
+                    </p>
+                    <p class="text-[10px] leading-snug" :class="aiImageCounts.total > 50 ? 'text-amber-500/90' : 'text-gray-600'">
+                        Flow chỉ cho <b>~50 ảnh/ngày mỗi tài khoản</b>. Hết lượt là hệ thống tự đổi sang profile khác (xem 🧑‍💻 Profiles) rồi chạy tiếp.
+                        <template v-if="aiImageCounts.total > 50">
+                            Khối này <b>{{ aiImageCounts.total }} prompt</b> nên chắc chắn phải đổi tài khoản, mà đổi tài khoản là Flow quên nhân vật —
+                            phải gen lại <b>{{ aiImageCounts.characters }} ảnh nhân vật</b> ở tài khoản mới (tốn tổng ~{{ aiImageCounts.total + aiImageCounts.characters }} lượt).
+                            Gom được tổng ≤ 50 prompt thì rẻ hơn hẳn.
+                        </template>
+                        <template v-else>Khối này {{ aiImageCounts.total }} prompt — vừa một tài khoản, không phải đổi giữa chừng.</template>
+                        <span v-if="podcastModal.mode === 'ai' && podcastModal.episodes > 1" class="text-amber-400 font-bold">Nhiều tập: khối prompt này chỉ áp cho tập 1.</span>
+                    </p>
+                </div>
                 <label class="flex items-center gap-2 cursor-pointer select-none">
                     <input type="checkbox" v-model="podcastModal.autoExport" class="accent-pink-500 w-4 h-4">
                     <span class="text-[12px] font-bold text-gray-200">📦 Xuất CapCut, lưu vào thư mục “File đã xuất”</span>
@@ -2252,11 +2386,122 @@
 
             <div class="flex gap-3 justify-end pt-1">
                 <button @click="podcastModal.open = false" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Huỷ</button>
-                <button @click="submitPodcast" :disabled="!podcastModal.files.length || podcastModal.loading"
+                <button @click="podcastModal.mode === 'ai' ? submitPodcastAI() : submitPodcast()"
+                    :disabled="podcastModal.loading || (podcastModal.mode === 'ai' ? !podcastModal.prompt.trim() : !podcastModal.files.length)"
                     class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-purple-600 hover:bg-purple-500 text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed">
                     {{ podcastModal.loading ? (podcastModal.progress || '⏳ Đang xử lý...')
+                       : podcastModal.mode === 'ai' ? (podcastModal.episodes > 1 ? `✨ Viết ${podcastModal.episodes} tập` : '✨ Viết nội dung')
                        : podcastModal.files.length > 1 ? `🚀 Xếp hàng ${podcastModal.files.length} dự án` : '🚀 Bắt đầu' }}
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ẢNH AI THEO CẢNH (dự án đã có): xem tiến độ, sửa prompt, chạy nốt phần còn thiếu -->
+    <div v-if="podcastImages.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-6" @click.self="closePodcastImages()">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl w-[820px] max-h-[88vh] flex flex-col">
+            <div class="shrink-0 flex justify-between items-start gap-3 p-5 border-b border-gray-800">
+                <div>
+                    <h3 class="text-lg font-black text-white">🎨 Ảnh AI theo cảnh</h3>
+                    <p class="text-[10px] text-gray-500 font-mono">{{ podcastImages.projectId }}</p>
+                </div>
+                <button @click="closePodcastImages()" class="text-gray-500 hover:text-white text-xl">×</button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-5 space-y-3">
+                <div class="flex items-center gap-3 flex-wrap text-[11px] font-bold">
+                    <span :class="podcastImages.running ? 'text-fuchsia-300' : 'text-gray-400'">
+                        {{ podcastImages.running ? '⏳ Đang sinh ảnh...' : '⏸️ Không chạy' }}
+                    </span>
+                    <span class="text-gray-400">Xong <b class="text-fuchsia-300">{{ podcastImages.done }}</b>/{{ podcastImages.total }} ảnh</span>
+                    <span v-if="podcastImages.failed" class="text-red-400">{{ podcastImages.failed }} lượt lỗi</span>
+                    <span class="text-gray-500">{{ podcastImages.characters }} nhân vật · {{ podcastImages.scenes }} cảnh trong khối / {{ podcastImages.projectScenes }} cảnh trong dự án</span>
+                    <a v-if="podcastImages.flowProjectUrl" :href="podcastImages.flowProjectUrl" target="_blank" class="text-blue-400 hover:text-blue-300 underline">↗ project Flow</a>
+                </div>
+                <p v-if="podcastImages.quota" class="text-[11px] font-bold"
+                   :class="podcastImages.quota.imagesLeft >= (podcastImages.total - podcastImages.done) ? 'text-gray-400' : 'text-amber-400'">
+                    Hạn mức Flow hôm nay: còn <b class="text-fuchsia-300">{{ podcastImages.quota.imagesLeft }}</b> ảnh
+                    trên {{ podcastImages.quota.profilesLeft }}/{{ podcastImages.quota.profiles }} tài khoản
+                    ({{ podcastImages.quota.limit }} ảnh/ngày/tài khoản)
+                    <span v-if="podcastImages.quota.imagesLeft < (podcastImages.total - podcastImages.done)">
+                        — thiếu cho {{ podcastImages.total - podcastImages.done }} ảnh còn lại; chạy được tới đâu hay tới đó, mai bấm lại là làm nốt.
+                    </span>
+                    <span v-if="podcastImages.profiles > 1" class="text-gray-500">· đã dùng {{ podcastImages.profiles }} tài khoản, mỗi tài khoản một project Flow riêng</span>
+                </p>
+                <p v-if="podcastImages.scenes && podcastImages.projectScenes && podcastImages.scenes !== podcastImages.projectScenes"
+                   class="text-[11px] font-bold text-amber-400">
+                    ⚠ Lệch số cảnh: {{ podcastImages.scenes > podcastImages.projectScenes ? 'phần thừa gen ra nhưng không gán vào cảnh nào' : 'mấy cảnh cuối không có ảnh AI (lấp nền từ kho sẽ lo)' }}.
+                </p>
+                <textarea v-model="podcastImages.prompts" rows="14" spellcheck="false"
+                    placeholder="NHÂN VẬT&#10;&#10;01. ...&#10;&#10;CẢNH&#10;&#10;01. S001&#10;..."
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-[11px] text-gray-200 font-mono leading-relaxed outline-none focus:border-fuchsia-500 resize-y"></textarea>
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Khung hình</span>
+                    <button v-for="r in ['16:9','9:16','1:1']" :key="r" @click="podcastImages.ratio = r"
+                        class="px-3 py-1 rounded-lg text-[11px] font-black transition-colors"
+                        :class="podcastImages.ratio === r ? 'bg-fuchsia-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'">{{ r }}</button>
+                </div>
+                <p class="text-[10px] text-gray-600 leading-snug">
+                    Sửa prompt cảnh nào thì <b class="text-gray-400">đúng cảnh đó gen lại</b> (đối chiếu vân tay prompt), cảnh khác giữ nguyên.
+                    Mọi lượt gen chạy trong <b class="text-gray-400">cùng một project Flow</b> của dự án; project cũ mất thì nhân vật được mồi lại trước rồi mới tới cảnh.
+                </p>
+                <div v-if="podcastImages.items.length" class="border border-gray-800 rounded-lg max-h-[180px] overflow-y-auto divide-y divide-gray-800/60">
+                    <div v-for="it in podcastImages.items" :key="it.key" class="flex items-center gap-2 px-3 py-1.5 text-[11px]">
+                        <span :class="it.status === 'done' ? 'text-green-400' : 'text-red-400'">{{ it.status === 'done' ? '✔' : '✖' }}</span>
+                        <span class="font-mono text-gray-500 w-[86px] shrink-0">{{ it.key }}</span>
+                        <span class="text-gray-300 truncate">{{ it.label }}</span>
+                        <span v-if="it.error" class="text-red-400 truncate">— {{ it.error }}</span>
+                    </div>
+                </div>
+            </div>
+            <div class="shrink-0 flex gap-3 justify-end p-5 border-t border-gray-800">
+                <button @click="runPodcastImages(true)" :disabled="podcastImages.running || podcastImages.busy"
+                    class="px-4 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-red-900/60 hover:bg-red-800 text-red-200 disabled:opacity-30"
+                    title="Xoá sạch ảnh cũ và gen lại từ đầu trong một project Flow MỚI">♻️ Gen lại từ đầu</button>
+                <button @click="closePodcastImages()" class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-gray-800 hover:bg-gray-700 text-gray-400">Đóng</button>
+                <button @click="runPodcastImages(false)" :disabled="podcastImages.running || podcastImages.busy || !podcastImages.prompts.trim()"
+                    class="px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase bg-fuchsia-600 hover:bg-fuchsia-500 text-white disabled:opacity-40">
+                    {{ podcastImages.running ? '⏳ Đang chạy...' : '🚀 Chạy phần còn thiếu' }}
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- BỘ NHỚ NỘI DUNG PODCAST: đề tài + nhân vật của các tập AI đã viết (<MEDIA_DIR>/_podcast_ai/memory.json) -->
+    <div v-if="podcastMemory.open" class="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-6" @click.self="podcastMemory.open = false">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl w-[760px] max-h-[85vh] flex flex-col">
+            <div class="shrink-0 flex justify-between items-center gap-3 p-5 border-b border-gray-800">
+                <div>
+                    <h3 class="text-lg font-black text-white">🧠 Bộ nhớ nội dung podcast</h3>
+                    <p class="text-[10px] text-gray-500 font-mono">{{ podcastMemory.file || '…' }}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button @click="clearPodcastMemory" :disabled="!podcastMemory.entries.length"
+                        class="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase bg-red-900/60 hover:bg-red-800 text-red-200 disabled:opacity-30">Xoá sạch</button>
+                    <button @click="podcastMemory.open = false" class="text-gray-500 hover:text-white text-xl">×</button>
+                </div>
+            </div>
+            <p class="shrink-0 px-5 pt-3 text-[10px] text-gray-500 leading-relaxed">
+                Mỗi tập do AI viết để lại một thẻ nhớ. Tập sau nhận cả danh sách này làm <b>danh sách cấm</b> — không lặp đề tài, không dùng lại tên nhân vật.
+                Xoá một thẻ nghĩa là <b>thả</b> lại đề tài/nhân vật đó cho các tập sau.
+            </p>
+            <div class="flex-1 overflow-y-auto p-5 pt-3 space-y-2">
+                <p v-if="podcastMemory.loading" class="text-[12px] text-gray-500 text-center py-10">Đang tải...</p>
+                <p v-else-if="!podcastMemory.entries.length" class="text-[12px] text-gray-600 text-center py-10 uppercase tracking-widest font-bold">Bộ nhớ trống — chưa có tập nào do AI viết</p>
+                <div v-for="e in podcastMemory.entries" :key="e.projectId" class="bg-gray-950/60 border border-gray-800 rounded-xl p-3 space-y-1.5">
+                    <div class="flex items-start gap-2">
+                        <div class="flex-1 min-w-0">
+                            <p class="text-[12px] font-black text-gray-100">{{ e.titleVi || e.title || e.projectId }}</p>
+                            <p class="text-[9px] font-mono text-gray-600">{{ e.projectId }} · {{ (e.createdAt || '').slice(0, 16).replace('T', ' ') }}{{ e.minutes ? ' · ~' + e.minutes + ' phút' : '' }}</p>
+                        </div>
+                        <button @click="deletePodcastMemory(e.projectId)" class="shrink-0 text-red-500 hover:text-red-400 text-[10px] font-bold uppercase">Xoá</button>
+                    </div>
+                    <p v-if="e.logline" class="text-[11px] text-gray-400 leading-snug">{{ e.logline }}</p>
+                    <div v-if="e.characters?.length" class="flex flex-wrap gap-1">
+                        <span v-for="c in e.characters" :key="c.name" class="px-2 py-0.5 rounded bg-purple-900/40 border border-purple-800/60 text-[10px] text-purple-200"
+                            :title="c.description">{{ c.name }}<span v-if="c.role" class="text-purple-400/70"> · {{ c.role }}</span></span>
+                    </div>
+                    <p v-if="e.keyPoints?.length" class="text-[10px] text-gray-600 leading-snug">Ý chính: {{ e.keyPoints.slice(0, 5).join(' | ') }}</p>
+                </div>
             </div>
         </div>
     </div>
@@ -2862,6 +3107,7 @@
                     <div class="bg-gray-950/60 border border-amber-600/50 rounded-xl p-3">
                         <div class="flex items-center gap-2">
                             <span class="text-lg">{{ stateIcon(podcastQueue.running.state) }}</span>
+                            <span v-if="podcastQueue.running.mode === 'ai'" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-purple-900/60 text-purple-300" title="Kịch bản do AI viết">✨ AI</span>
                             <span class="text-[12px] font-mono text-white flex-1 truncate">{{ podcastQueue.running.projectId }}</span>
                             <span class="text-[11px] font-black" :class="stateCls(podcastQueue.running.state)">{{ stateText(podcastQueue.running.state) }}</span>
                         </div>
@@ -2872,6 +3118,7 @@
                     <p class="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-1">Đang chờ ({{ podcastQueue.queued.length }})</p>
                     <div v-for="(j, i) in podcastQueue.queued" :key="j.id" class="bg-gray-950/40 border border-gray-800 rounded-xl p-2.5 flex items-center gap-2 mb-1">
                         <span class="text-[10px] font-black text-gray-600 w-5">{{ i + 1 }}.</span>
+                        <span v-if="j.mode === 'ai'" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-purple-900/60 text-purple-300" title="Kịch bản do AI viết">✨ AI</span>
                         <span class="text-[12px] font-mono text-gray-300 flex-1 truncate">{{ j.projectId }}</span>
                         <button @click="cancelPodcastJob(j)" class="text-[9px] font-black uppercase px-2 py-1 rounded bg-red-900/50 hover:bg-red-600 text-red-300 hover:text-white">Bỏ</button>
                     </div>
@@ -2881,11 +3128,15 @@
                     <div v-for="j in podcastQueue.history" :key="j.id" class="bg-gray-950/40 border border-gray-800 rounded-xl p-2.5 mb-1">
                         <div class="flex items-center gap-2">
                             <span>{{ stateIcon(j.state) }}</span>
+                            <span v-if="j.mode === 'ai'" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-purple-900/60 text-purple-300" title="Kịch bản do AI viết">✨ AI</span>
                             <span class="text-[12px] font-mono text-gray-300 flex-1 truncate">{{ j.projectId }}</span>
                             <span v-if="j.audioFail" class="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-900/60 text-orange-300" :title="'Thiếu tiếng ' + j.audioFail + '/' + j.totalUnits + ' câu'">⚠ thiếu {{ j.audioFail }} câu</span>
+                            <!-- Kích thước file: nhìn con số là biết ngay bài có nội dung hay chỉ là draft rỗng -->
+                            <span v-if="j.zipMB != null" class="text-[9px] font-black px-1.5 py-0.5 rounded"
+                                  :class="j.zipMB < 5 ? 'bg-red-900/60 text-red-300' : 'bg-green-900/60 text-green-300'">{{ j.zipMB }} MB</span>
                             <span class="text-[10px] font-mono text-gray-600">{{ j.endedAt && j.startedAt ? Math.round((j.endedAt - j.startedAt) / 60000) + ' phút' : '' }}</span>
                         </div>
-                        <p class="text-[10px] mt-0.5" :class="j.state === 'error' ? 'text-red-400' : 'text-gray-500'">{{ j.step }}</p>
+                        <p class="text-[10px] mt-0.5 break-words" :class="j.state === 'error' ? 'text-red-400' : 'text-gray-500'">{{ j.step }}</p>
                     </div>
                 </div>
                 <p v-if="!podcastQueue.running && !podcastQueue.queued.length && !podcastQueue.history.length"
@@ -2911,15 +3162,21 @@
             <div class="flex-1 overflow-y-auto">
                 <p v-if="podcastExports.loading" class="text-[12px] text-gray-500 text-center py-10">Đang tải danh sách...</p>
                 <p v-else-if="!podcastExports.items.length" class="text-[12px] text-gray-600 text-center py-10 uppercase tracking-widest font-bold">Chưa có file nào — xuất xong sẽ nằm ở đây</p>
-                <div v-for="f in podcastExports.items" :key="f.name" class="bg-gray-950/60 border border-gray-800 rounded-xl p-3 flex items-center gap-3 mb-1.5">
-                    <span class="text-lg">{{ f.name.endsWith('.zip') ? '📦' : '📜' }}</span>
+                <!-- Mỗi dòng = 1 bản xuất (zip + bat đi cùng nhau) -->
+                <div v-for="g in podcastExportGroups" :key="g.base" class="bg-gray-950/60 border border-gray-800 rounded-xl p-3 flex items-center gap-3 mb-1.5">
+                    <span class="text-lg">📦</span>
                     <div class="flex-1 min-w-0">
-                        <p class="text-[12px] text-gray-200 truncate font-mono" :title="f.name">{{ f.name }}</p>
-                        <p class="text-[10px] text-gray-600">{{ fmtSize(f.size) }} · {{ new Date(f.mtime).toLocaleString('vi-VN') }}</p>
+                        <p class="text-[12px] text-gray-200 truncate font-mono" :title="g.base">{{ g.base }}</p>
+                        <p class="text-[10px] text-gray-600">
+                            {{ g.zip ? fmtSize(g.zip.size) : '—' }} · {{ new Date(g.mtime).toLocaleString('vi-VN') }}
+                            <span v-if="g.zip && g.bat" class="text-gray-500"> · zip + bat</span>
+                            <span v-else class="text-orange-400 font-bold"> · THIẾU {{ g.zip ? 'file .bat' : 'file .zip' }}</span>
+                        </p>
                     </div>
-                    <a :href="'/api/podcast-exports/download?name=' + encodeURIComponent(f.name)" :download="f.name"
-                       class="text-[10px] font-black uppercase px-3 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-600 text-white shrink-0">⬇️ Tải</a>
-                    <button @click="deletePodcastExport(f)" class="text-[10px] font-black uppercase px-3 py-1.5 rounded-lg bg-red-900/60 hover:bg-red-600 text-red-300 hover:text-white shrink-0">🗑️ Xoá</button>
+                    <button @click="downloadExportPair(g)" :disabled="!g.zip && !g.bat"
+                        class="text-[10px] font-black uppercase px-3 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-600 disabled:opacity-40 text-white shrink-0"
+                        title="Tải cả file zip lẫn file bat — nhớ để chung một thư mục rồi bấm file .bat">⬇️ Tải cả 2</button>
+                    <button @click="deleteExportPair(g)" class="text-[10px] font-black uppercase px-3 py-1.5 rounded-lg bg-red-900/60 hover:bg-red-600 text-red-300 hover:text-white shrink-0">🗑️ Xoá</button>
                 </div>
             </div>
         </div>
@@ -3554,11 +3811,131 @@ createApp({
         }
 
         // ===== PODCAST: dự án chỉ có tiếng — nhập SRT, tuỳ chọn tạo voice, xuất lại SRT =====
-        const podcastModal = ref({ open: false, projectId: '', targetLang: 'vi', files: [], filesTarget: [], loading: false, progress: '',
+        const podcastModal = ref({ open: false, mode: 'srt', projectId: '', targetLang: 'vi', files: [], filesTarget: [], loading: false, progress: '',
+                                   // mode 'ai': AI tự viết kịch bản thay vì nạp .srt
+                                   prompt: '', style: '', minutes: 10, episodes: 1, webSearch: false,
                                    voiceAuto: false, voiceContentType: 'content', speakerUuid: '', selectedDicts: [],
                                    speakers: [], dictionaries: [], voiceLoading: false, voiceSpeed: 1,
                                    // Dây chuyền tự động sau khi nhập SRT — bật sẵn để nạp xong là có file mang đi dựng
-                                   autoFill: true, fillMode: 'random', fillName: '', maxClip: 20, autoExport: true });
+                                   autoFill: true, fillMode: 'random', fillName: '', maxClip: 20, autoExport: true,
+                                   // Ảnh AI theo cảnh (Google Flow): khối prompt nhân vật + cảnh do người dùng tự viết
+                                   aiImages: false, aiImagePrompts: '', aiImageRatio: '16:9' });
+
+        // Đếm sống số mục trong khối prompt để thấy ngay có tách đúng không (và có khớp số cảnh không).
+        // Cùng luật với src/lib/scenePrompts.js phía server: dòng mở mục là "01." / "1)", tiêu đề khối
+        // là NHÂN VẬT / CẢNH; không có tiêu đề nào thì coi tất cả là cảnh.
+        const aiImageCounts = computed(() => {
+            const text = podcastModal.value.aiImagePrompts || '';
+            let kind = /^(nhân vật|nhan vat|characters?|cast)\s*:?\s*$/im.test(text) ? null : 'scene';
+            let characters = 0, scenes = 0;
+            for (const raw of text.split(/\r?\n/)) {
+                const line = raw.trim();
+                if (!line) continue;
+                if (/^(nhân vật|nhan vat|nhân-vật|characters?|cast)\s*:?\s*$/i.test(line)) { kind = 'character'; continue; }
+                if (/^(cảnh|canh|scenes?|shots?)\s*:?\s*$/i.test(line)) { kind = 'scene'; continue; }
+                if (/^\s*\d{1,3}\s*[.)]\s*/.test(line)) { if ((kind || 'character') === 'character') characters++; else scenes++; }
+            }
+            return { characters, scenes, total: characters + scenes };
+        });
+
+        // Bài song ngữ hay bị lọt chữ ngôn ngữ đích vào cột tiếng Việt → dịch nốt những ô đó.
+        const fixViLoading = ref(false);
+        async function fixPodcastVi() {
+            if (!activePostId.value) return;
+            if (!confirm('Dịch nốt những ô tiếng Việt còn lẫn chữ ngôn ngữ đích?\n\nCâu nào đã có giọng đọc tiếng Việt thì phải tạo lại voice cho khớp chữ mới.')) return;
+            fixViLoading.value = true;
+            showToast('⏳ Đang rà cột tiếng Việt...', 120000);
+            try {
+                const r = await (await fetch('/api/podcast-fix-vi', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ postId: activePostId.value }),
+                })).json();
+                if (r.error) throw new Error(r.error);
+                if (!r.fixed && !r.left) showToast(`✅ Cột tiếng Việt sạch — không có ô nào lẫn chữ nước ngoài (${r.total} ô)`, 6000);
+                else showToast(`✅ Đã dịch lại ${r.fixed}/${r.total} ô` + (r.left ? ` · còn ${r.left} ô lẫn chữ nước ngoài` : '')
+                    + (r.needVoiceRedo ? ` · ${r.needVoiceRedo} câu cần tạo lại voice` : ''), 9000);
+                await selectPost({ id: activePostId.value });
+            } catch (e) { alert('❌ ' + e.message); }
+            fixViLoading.value = false;
+        }
+
+        // Bộ nhớ nội dung: đề tài + nhân vật của các tập AI đã viết, dùng để tập sau không trùng.
+        // Ảnh AI theo cảnh của dự án ĐÃ CÓ: xem tiến độ, sửa prompt, chạy nốt phần thiếu.
+        // Bài mấy chục cảnh chạy cả tiếng nên phải poll: worker chạy ngầm, modal tự cập nhật.
+        const podcastImages = ref({ open: false, busy: false, postId: null, projectId: '', prompts: '', ratio: '16:9',
+                                    characters: 0, scenes: 0, projectScenes: 0, total: 0, done: 0, failed: 0,
+                                    running: false, flowProjectUrl: '', items: [] });
+        let podcastImagesTimer = null;
+
+        async function loadPodcastImages(keepPrompts = false) {
+            if (!podcastImages.value.postId) return;
+            try {
+                const r = await (await fetch(`/api/podcast-images/${podcastImages.value.postId}`)).json();
+                if (r.error) throw new Error(r.error);
+                const typed = podcastImages.value.prompts;
+                Object.assign(podcastImages.value, r, { open: true, postId: podcastImages.value.postId });
+                // Đang gõ dở thì giữ nguyên chữ của người dùng, đừng để lượt poll ghi đè.
+                if (keepPrompts) podcastImages.value.prompts = typed;
+            } catch (e) { showToast('❌ ' + e.message); }
+        }
+
+        async function openPodcastImages() {
+            if (!activePostId.value) return;
+            podcastImages.value = { ...podcastImages.value, open: true, postId: activePostId.value, prompts: '', items: [] };
+            await loadPodcastImages();
+            clearInterval(podcastImagesTimer);
+            podcastImagesTimer = setInterval(() => { if (podcastImages.value.open) loadPodcastImages(true); }, 8000);
+        }
+
+        function closePodcastImages() {
+            podcastImages.value.open = false;
+            clearInterval(podcastImagesTimer);
+            podcastImagesTimer = null;
+            loadPosts();                          // ảnh vừa gen đã vào cảnh -> làm mới danh sách
+        }
+
+        async function runPodcastImages(force) {
+            const m = podcastImages.value;
+            if (!m.prompts.trim()) return showToast('❌ Chưa có khối prompt');
+            if (force && !confirm('Xoá sạch ảnh AI cũ của dự án và gen lại TỪ ĐẦU trong một project Flow mới?\n\nBài mấy chục cảnh có thể chạy cả tiếng.')) return;
+            m.busy = true;
+            try {
+                const r = await (await fetch('/api/podcast-images/run', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ postId: m.postId, prompts: m.prompts, ratio: m.ratio, force: !!force }),
+                })).json();
+                if (r.error) throw new Error(r.error);
+                showToast('🎨 Đang sinh ảnh ngầm — đóng cửa sổ này vẫn chạy tiếp', 6000);
+                await loadPodcastImages(true);
+            } catch (e) { alert('❌ ' + e.message); }
+            m.busy = false;
+        }
+
+        const podcastMemory = ref({ open: false, loading: false, total: 0, characters: [], entries: [], file: '' });
+
+        async function loadPodcastMemory() {
+            podcastMemory.value.loading = true;
+            try {
+                const r = await (await fetch('/api/podcast-ai-memory')).json();
+                podcastMemory.value.total = r.total || 0;
+                podcastMemory.value.characters = r.characters || [];
+                podcastMemory.value.entries = r.entries || [];
+                podcastMemory.value.file = r.file || '';
+            } catch (_) { /* bộ nhớ chỉ là thông tin phụ, hỏng cũng không chặn tạo dự án */ }
+            podcastMemory.value.loading = false;
+        }
+        function openPodcastMemory() { podcastMemory.value.open = true; loadPodcastMemory(); }
+
+        async function deletePodcastMemory(projectId) {
+            if (!confirm(`Xoá thẻ nhớ của "${projectId}"?\n\nĐề tài và tên nhân vật của tập này sẽ được dùng lại ở các tập sau.`)) return;
+            await fetch('/api/podcast-ai-memory?projectId=' + encodeURIComponent(projectId), { method: 'DELETE' });
+            await loadPodcastMemory();
+        }
+        async function clearPodcastMemory() {
+            if (!confirm(`Xoá SẠCH ${podcastMemory.value.total} thẻ nhớ?\n\nAI sẽ không còn biết những tập nào đã làm — các tập sau có thể trùng lại.`)) return;
+            await fetch('/api/podcast-ai-memory?all=true', { method: 'DELETE' });
+            await loadPodcastMemory();
+        }
 
         function onPodcastVoiceToggle() {
             if (podcastModal.value.voiceAuto && !podcastModal.value.speakers.length) loadAutoVoiceOptions(podcastModal);
@@ -3575,12 +3952,15 @@ createApp({
         const srtSort = (a, b) => srtCopyIndex(a.name) - srtCopyIndex(b.name)
             || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
 
-        // Gộp file mới vào danh sách, khử trùng theo tên (kéo thả nhiều lần vẫn không nhân đôi)
+        // Gộp file mới vào danh sách, khử trùng theo TÊN + CỠ + THỜI ĐIỂM SỬA.
+        // Khử theo mỗi tên là sai: 3 tập podcast tải về 3 thư mục khác nhau đều tên "vi.srt" — gộp theo
+        // tên thì 2 file bị nuốt mất, chỉ còn 1 dự án. Cùng tên mà khác nội dung vẫn phải giữ cả hai.
+        const fileKey = (f) => `${f.name}|${f.size}|${f.lastModified}`;
         function addPodcastSrtFiles(fileList, which = 'src') {
             const key = which === 'target' ? 'filesTarget' : 'files';
             const arr = Array.from(fileList || []).filter(f => f.name.toLowerCase().endsWith('.srt'));
-            const map = new Map(podcastModal.value[key].map(f => [f.name, f]));
-            for (const f of arr) map.set(f.name, f);
+            const map = new Map(podcastModal.value[key].map(f => [fileKey(f), f]));
+            for (const f of arr) map.set(fileKey(f), f);
             podcastModal.value[key] = [...map.values()].sort(srtSort);
         }
 
@@ -3611,9 +3991,13 @@ createApp({
 
         async function submitPodcast() {
             const { files, targetLang, voiceAuto, voiceContentType, speakerUuid, selectedDicts, voiceSpeed,
-                    autoFill, fillMode, fillName, maxClip, autoExport } = podcastModal.value;
+                    autoFill, fillMode, fillName, maxClip, autoExport, aiImages, aiImagePrompts, aiImageRatio } = podcastModal.value;
             if (!files.length) return;
             if (autoFill && fillMode === 'single' && !fillName) { alert('❌ Đã chọn "1 ảnh/video xuyên suốt" nhưng chưa chọn file trong kho'); return; }
+            if (aiImages && !aiImageCounts.value.total) { alert('❌ Đã bật sinh ảnh AI nhưng khối prompt trống / không tách được mục nào'); return; }
+            // Khối prompt tả nhân vật + cảnh của MỘT câu chuyện — dùng lại cho file SRT khác là sai truyện.
+            if (aiImages && files.length > 1
+                && !confirm(`Bạn nạp ${files.length} file SRT nhưng khối prompt ảnh chỉ tả một câu chuyện.\n\nẢnh AI sẽ chỉ sinh cho dự án ĐẦU TIÊN. Tiếp tục?`)) return;
             if (autoExport && !voiceAuto) {
                 if (!confirm('Chưa bật tạo voice mà đã bật tự xuất CapCut.\n\nBài xuất ra sẽ KHÔNG CÓ TIẾNG. Vẫn tiếp tục?')) return;
             }
@@ -3646,12 +4030,20 @@ createApp({
                     if (fillMode === 'single') form.append('fillName', fillName);
                     form.append('maxClip', String(maxClip || 20));
                     form.append('autoExport', autoExport ? 'true' : 'false');
+                    if (aiImages && i === 0) {
+                        form.append('aiImages', 'true');
+                        form.append('aiImagePrompts', aiImagePrompts);
+                        form.append('aiImageRatio', aiImageRatio);
+                    }
                     try {
                         const res = await fetch('/api/create-podcast', { method: 'POST', body: form });
                         if (!res.ok) { const t = await res.text(); throw new Error(`HTTP ${res.status}: ${t.slice(0, 80)}`); }
                         const r = await res.json();
                         if (!r.success) throw new Error(r.error || 'Lỗi');
-                        ok.push(projectId);
+                        // Server có thể đổi tên khi trùng -> ghi nhận tên THẬT nó dùng, và chặn luôn
+                        // cho lượt sau trong cùng đợt nạp.
+                        taken.add(r.projectId);
+                        ok.push(r.projectId || projectId);
                     } catch (e) {
                         // Một file hỏng thì bỏ qua file đó, vẫn nạp nốt các file còn lại
                         failed.push(`${file.name}: ${e.message}`);
@@ -3676,6 +4068,62 @@ createApp({
             podcastModal.value.loading = false;
         }
 
+        // AI viết kịch bản thay cho nạp SRT. Server xếp hàng và chạy LẦN LƯỢT — nhờ vậy tập sau
+        // đọc được thẻ nhớ (đề tài + nhân vật) mà tập trước vừa ghi nên không viết trùng.
+        async function submitPodcastAI() {
+            const m = podcastModal.value;
+            if (!m.prompt.trim()) return;
+            if (m.autoFill && m.fillMode === 'single' && !m.fillName) { alert('❌ Đã chọn "1 ảnh/video xuyên suốt" nhưng chưa chọn file trong kho'); return; }
+            if (m.voiceAuto && !m.speakerUuid) { alert('❌ Đã bật Tạo voice nhưng chưa chọn giọng mẫu'); return; }
+            if (m.aiImages && !aiImageCounts.value.total) { alert('❌ Đã bật sinh ảnh AI nhưng khối prompt trống / không tách được mục nào'); return; }
+            // AI viết bài xong mới biết bài ra bao nhiêu cảnh — nói trước để khỏi tưởng ảnh sẽ phủ hết bài.
+            if (m.aiImages && !confirm(`Khối prompt của bạn có ${aiImageCounts.value.scenes} cảnh.\n\n`
+                + 'AI viết xong mới biết bài ra bao nhiêu cảnh: dư thì phần thừa không gán vào đâu, thiếu thì mấy cảnh cuối do "lấp nền từ kho" lo.\n\nTiếp tục?')) return;
+            if (m.autoExport && !m.voiceAuto) {
+                if (!confirm('Chưa bật tạo voice mà đã bật tự xuất CapCut.\n\nBài xuất ra sẽ KHÔNG CÓ TIẾNG. Vẫn tiếp tục?')) return;
+            }
+            const episodes = Math.min(20, Math.max(1, Number(m.episodes) || 1));
+            m.loading = true;
+            m.progress = episodes > 1 ? `Đang xếp ${episodes} tập...` : 'Đang gửi yêu cầu...';
+            try {
+                const body = {
+                    prompt: m.prompt.trim(), style: m.style.trim(), targetLang: m.targetLang,
+                    minutes: Math.min(120, Math.max(1, Number(m.minutes) || 10)),
+                    episodes, webSearch: m.webSearch,
+                    projectId: m.projectId.trim(),
+                    autoFill: m.autoFill, fillMode: m.fillMode, maxClip: m.maxClip, autoExport: m.autoExport,
+                };
+                if (m.fillMode === 'single') body.fillName = m.fillName;
+                // Khối prompt tả một câu chuyện -> server chỉ áp cho tập 1 khi xếp nhiều tập.
+                if (m.aiImages) {
+                    body.aiImages = true;
+                    body.aiImagePrompts = m.aiImagePrompts;
+                    body.aiImageRatio = m.aiImageRatio;
+                }
+                if (m.voiceAuto) {
+                    body.voiceAuto = true;
+                    body.voiceContentType = m.voiceContentType;
+                    body.speakerUuid = m.speakerUuid;
+                    body.dictionaryUuids = m.selectedDicts || [];
+                    body.voiceSpeed = Math.min(2, Math.max(0.5, Number(m.voiceSpeed) || 1));
+                }
+                const res = await fetch('/api/create-podcast-ai', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+                });
+                const r = await res.json();
+                if (!res.ok || !r.success) throw new Error(r.error || `HTTP ${res.status}`);
+                m.open = false;
+                m.projectId = '';                 // giữ chủ đề/phong cách để viết tiếp tập nữa cho nhanh
+                activeGenre.value = 'podcast';
+                showToast(`✨ Đã xếp ${r.created.length} tập cho AI viết — chạy lần lượt để tập sau không trùng tập trước`, 7000);
+                loadPodcastQueue();
+                await loadPosts();
+                loadPodcastMemory();
+            } catch (e) { alert('❌ ' + e.message); }
+            m.progress = '';
+            m.loading = false;
+        }
+
         // ===== HÀNG ĐỢI PODCAST =====
         // Nạp bao nhiêu SRT cũng được, server chạy lần lượt từng dự án qua trọn dây chuyền
         // (nhập → voice → lấp nền → xuất CapCut). Bảng này cho biết đang tới dự án nào, khâu nào.
@@ -3684,6 +4132,7 @@ createApp({
             queued: ['⏳', 'Đang chờ', 'text-gray-400'],
             import: ['📄', 'Nhập kịch bản', 'text-blue-400'],
             voice: ['🎙️', 'Tạo giọng đọc', 'text-purple-400'],
+            images: ['🎨', 'Sinh ảnh AI', 'text-fuchsia-400'],
             fill: ['🎬', 'Lấp nền từ kho', 'text-amber-400'],
             export: ['📦', 'Xuất CapCut', 'text-pink-400'],
             done: ['✅', 'Xong', 'text-green-400'],
@@ -3720,6 +4169,47 @@ createApp({
         // ===== THƯ MỤC FILE ĐÃ XUẤT =====
         const podcastExports = ref({ open: false, items: [], dir: '', loading: false });
         const podcastExportsTotal = computed(() => fmtSize(podcastExports.value.items.reduce((n, f) => n + (f.size || 0), 0)));
+
+        // Gom .zip với .bat cùng tên thành MỘT dòng: hai file luôn đi cùng nhau (bat tìm zip theo vị trí
+        // của chính nó), tách rời ra chỉ tổ tải thiếu một cái rồi chạy không được.
+        const podcastExportGroups = computed(() => {
+            const map = new Map();
+            for (const f of podcastExports.value.items) {
+                const base = f.name.replace(/\.(zip|bat)$/i, '');
+                const g = map.get(base) || { base, zip: null, bat: null, mtime: 0 };
+                if (/\.zip$/i.test(f.name)) g.zip = f; else g.bat = f;
+                g.mtime = Math.max(g.mtime, f.mtime || 0);
+                map.set(base, g);
+            }
+            return [...map.values()].sort((a, b) => b.mtime - a.mtime);
+        });
+
+        const exportUrl = (name) => '/api/podcast-exports/download?name=' + encodeURIComponent(name);
+
+        // Tải cả cặp bằng 1 lần bấm. Trình duyệt có thể hỏi "cho phép tải nhiều file?" — đồng ý 1 lần
+        // là xong, và 2 file rơi vào cùng thư mục Downloads, đúng thứ file .bat cần.
+        async function downloadExportPair(g) {
+            for (const f of [g.zip, g.bat].filter(Boolean)) {
+                const a = document.createElement('a');
+                a.href = exportUrl(f.name); a.download = f.name;
+                document.body.appendChild(a); a.click(); a.remove();
+                await new Promise(r => setTimeout(r, 800));   // giãn ra cho trình duyệt kịp xếp hàng
+            }
+            showToast('⬇️ Đang tải zip + bat — để CÙNG một thư mục rồi bấm file .bat', 8000);
+        }
+
+        async function deleteExportPair(g) {
+            const names = [g.zip, g.bat].filter(Boolean).map(f => f.name);
+            if (!confirm(`Xoá ${names.length} file của "${g.base}"?\n\nFile bị xoá hẳn khỏi ổ đĩa.`)) return;
+            for (const n of names) {
+                try {
+                    const r = await (await fetch('/api/podcast-exports?name=' + encodeURIComponent(n), { method: 'DELETE' })).json();
+                    if (r.error) throw new Error(r.error);
+                } catch (e) { showToast('❌ ' + e.message); return; }
+            }
+            podcastExports.value.items = podcastExports.value.items.filter(f => !names.includes(f.name));
+            showToast('🗑️ Đã xoá ' + g.base);
+        }
 
         async function loadPodcastExports() {
             podcastExports.value.loading = true;
@@ -3864,7 +4354,7 @@ createApp({
             logModal.value.loading = false;
         }
         function openProcessLog() {
-            showMediaMenu.value = false;
+            showToolsMenu.value = false;
             if (!activeProjectId.value) return showToast('⚠️ Chưa chọn dự án');
             logModal.value = { open: true, projectId: activeProjectId.value, text: '', loading: true, auto: true };
             loadProcessLog();
@@ -3952,8 +4442,8 @@ createApp({
             if (genre === 'geo') { newProjectModal.value.open = true; return; }
             // Sport dùng pipeline sports_srt.js riêng (SRT hoặc prompt GPT-5)
             if (genre === 'sport') { sportsModal.value.open = true; return; }
-            // Podcast dùng pipeline podcast_srt.js riêng (chỉ tiếng, nhập SRT)
-            if (genre === 'podcast') { podcastModal.value.open = true; return; }
+            // Podcast dùng pipeline riêng (chỉ tiếng): nhập SRT (podcast_srt.js) hoặc để AI viết (podcast_ai.js)
+            if (genre === 'podcast') { podcastModal.value.open = true; loadPodcastMemory(); return; }
             nazeModal.value.genre = genre;
             nazeModal.value.mode = 'text';
             nazeModal.value.open = true;
@@ -4401,6 +4891,8 @@ createApp({
             }
             // Tính độ dài giọng đọc từng cảnh (cho thanh coverage) — chạy nền, không chặn UI.
             // Dùng activePost.value.paragraphs (proxy reactive) để khi gán _narrationViSec/_narrationTargetSec thì UI tự cập nhật.
+            // Lấy số ffprobe của server TRƯỚC (thước chuẩn, khớp export), rồi mới tính để nó đè lên.
+            await loadNarrationFromServer(post.id);
             activePost.value.paragraphs.forEach(p => computeNarration(p));
             ['hook', 'summary', 'conclusion'].forEach(k => computeSectionNarration(k));
             loadLipsSyncIndex(post.id); // nạp lips_sync video theo từng câu (nút 👄 trên audio-bar)
@@ -4457,6 +4949,17 @@ createApp({
 
         // Tổng độ dài giọng đọc của 1 cảnh theo từng ngôn ngữ (ghép audio như capcut_export)
         // -> para._narrationViSec (tiếng Việt) và para._narrationTargetSec (ngôn ngữ đích)
+        // Độ dài lời đọc từng cảnh do SERVER đo bằng ffprobe — cùng thước với export CapCut.
+        // { paragraphId: giây }. Rỗng thì UI vẫn dùng số trình duyệt tự đo như cũ.
+        const narrationSrv = ref({});
+        async function loadNarrationFromServer(postId) {
+            narrationSrv.value = {};
+            try {
+                const r = await (await fetch(`/api/narration/${postId}`)).json();
+                if (r && r.scenes) narrationSrv.value = r.scenes;
+            } catch (_) { /* đo hụt thì thôi, quay về cách cũ */ }
+        }
+
         async function computeNarration(para) {
             const details = para.details || [];
             // Lưu duration TỪNG detail (dùng cho coverage: tính offset để tô cam text theo media đã chọn)
@@ -4471,6 +4974,11 @@ createApp({
             // Narration tổng: ưu tiên audio gộp ở para nếu có, không thì cộng title + từng detail
             para._narrationViSec = para.content_vi_audio ? await loadAudioDuration(para.content_vi_audio) : (para._durTitleVi + details.reduce((s, d) => s + (d._durVi || 0), 0));
             para._narrationTargetSec = para.content_audio ? await loadAudioDuration(para.content_audio) : (para._durTitleTg + details.reduce((s, d) => s + (d._durTg || 0), 0));
+            // Số ffprobe từ server ĐÈ LÊN số trình duyệt tự đo: hai bên đọc độ dài mp3 lệch ~0.05s mỗi
+            // câu (trình duyệt bỏ phần đệm của bộ mã hoá), 15 câu là lệch ~0.8s mỗi cảnh -> thanh
+            // coverage báo "thừa" trong khi nền lấp đúng. Export dùng ffprobe nên lấy ffprobe làm chuẩn.
+            const srv = narrationSrv.value[para.id];
+            if (srv > 0) { if (para.content_audio == null) para._narrationTargetSec = srv; }
             // Luận cứ (Sentence #x.y): narration từng câu = title câu + các dòng detail của câu
             for (const s of (para.sentences || [])) {
                 s._durTitleVi = s.title_vi_audio ? await loadAudioDuration(s.title_vi_audio) : 0;
@@ -4677,7 +5185,7 @@ createApp({
         }
         async function openXBrowseLog() {
             if (!activePost.value) return showToast('⚠️ Chọn 1 dự án trước');
-            showMediaMenu.value = false;
+            showToolsMenu.value = false;
             xBrowseModal.value.open = true;
             await loadXBrowseLog();
         }
@@ -4927,6 +5435,9 @@ createApp({
         const showCapcutMenu = ref(false);
         const showVoiceMenu = ref(false);
         const showMediaMenu = ref(false);
+        // Menu "Media" cũ gom 14 nút; tách làm 3 theo việc: 🎨 Hình ảnh · 🎞️ Dựng · 🛠️ Tiện ích.
+        const showBuildMenu = ref(false);
+        const showToolsMenu = ref(false);
         // ===== Tự chọn ảnh/video =====
         // Máy chấm điểm hợp cảnh rồi chọn đủ lấp thời lượng lời đọc. Kết quả là GỢI Ý: viền vàng + 🤖
         // để soát lại, chạy lại KHÔNG đụng cảnh đã chọn tay (trừ khi bấm "chọn lại tất cả").
@@ -6144,34 +6655,59 @@ createApp({
             introOutroModal.value = { open: true, uploading: false, progress: 0, cacheBust: Date.now() };
         }
 
+        // Clip intro/outro đang xem thử (chỉ 1 cái mở tại một thời điểm cho khỏi rối)
+        const previewIntroOutro = ref('');
+
+        // Nạp NHIỀU clip một lượt; chúng NỐI VÀO CUỐI danh sách theo đúng thứ tự bạn chọn.
         async function uploadIntroOutro(kind, event) {
-            const file = event.target.files?.[0];
-            if (!file) return;
+            const files = [...(event.target.files || [])];
+            if (!files.length) return;
             introOutroModal.value.uploading = true;
             introOutroModal.value.progress = 0;
             try {
                 const fd = new FormData();
-                fd.append('file', file);
+                for (const f of files) fd.append('files', f);
                 fd.append('postId', activePostId.value);
                 fd.append('kind', kind);
                 const r = await xhrUpload('/api/upload-intro-outro', fd, pct => { introOutroModal.value.progress = pct; });
                 if (r.success) {
-                    showToast(`✅ Đã upload ${kind}`);
+                    showToast(`✅ Đã thêm ${files.length} clip ${kind} — tổng ${r.paths?.length || 0}`);
                     introOutroModal.value.cacheBust = Date.now(); // ép video preview tải lại file mới
-                    await selectPost({ id: activePostId.value }); // refresh intro_path/outro_path
+                    await selectPost({ id: activePostId.value }); // refresh intro_paths/outro_paths
                 } else { showToast('❌ ' + (r.error || 'Lỗi upload')); }
             } catch (e) { showToast('❌ ' + e.message); }
             finally { introOutroModal.value.uploading = false; event.target.value = ''; }
         }
 
-        async function removeIntroOutro(kind) {
-            if (!confirm(`Xoá ${kind}?`)) return;
+        // Không truyền path -> xoá sạch; truyền path -> chỉ xoá đúng clip đó
+        async function removeIntroOutro(kind, onePath = null) {
+            if (!confirm(onePath ? `Xoá clip "${onePath.split('/').pop()}"?` : `Xoá toàn bộ ${kind}?`)) return;
             try {
-                const res = await fetch('/api/remove-intro-outro', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: activePostId.value, kind }) });
+                const res = await fetch('/api/remove-intro-outro', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ postId: activePostId.value, kind, path: onePath }),
+                });
                 const r = await res.json();
-                if (r.success) { showToast(`🗑️ Đã xoá ${kind}`); await selectPost({ id: activePostId.value }); }
+                if (r.success) { showToast('🗑️ Đã xoá'); await selectPost({ id: activePostId.value }); }
                 else showToast('❌ ' + (r.error || 'Lỗi'));
             } catch (e) { showToast('❌ ' + e.message); }
+        }
+
+        // Đổi chỗ 1 clip trong danh sách ghép (▲ / ▼)
+        async function moveIntroOutro(kind, index, dir) {
+            const list = [...(activePost.value?.[`${kind}_paths`] || [])];
+            const to = index + dir;
+            if (to < 0 || to >= list.length) return;
+            [list[index], list[to]] = [list[to], list[index]];
+            activePost.value[`${kind}_paths`] = list;      // đổi ngay cho mượt, rồi mới lưu
+            try {
+                const res = await fetch('/api/reorder-intro-outro', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ postId: activePostId.value, kind, paths: list }),
+                });
+                const r = await res.json();
+                if (!r.success) throw new Error(r.error || 'Lỗi');
+            } catch (e) { showToast('❌ ' + e.message); await selectPost({ id: activePostId.value }); }
         }
 
         const downloadAudioModal = ref({ open: false, type: 'merged', silence: 0.5, contentType: 'content' });
@@ -6329,7 +6865,7 @@ createApp({
 
         function downloadSrt() {
             const post = activePost.value; if (!post) return;
-            showMediaMenu.value = false;
+            showBuildMenu.value = false;
             // Dự án nhập từ SRT (podcast, hoặc sport chế độ SRT) có mốc thời gian gốc → cho chọn
             // xuất theo bản dịch / bản gốc / song ngữ. Các dự án khác giữ nguyên hành vi cũ.
             if (post.genre === 'podcast' || srtExportAvailable.value) {
@@ -6934,6 +7470,8 @@ createApp({
             openIntroOutroModal,
             uploadIntroOutro,
             removeIntroOutro,
+            moveIntroOutro,
+            previewIntroOutro,
             downloadAudioModal,
             openDownloadAudioModal,
             openDownloadVoiceModal,
@@ -6950,7 +7488,7 @@ createApp({
             lipsLib, LIPS_TABS, openLipsLib, switchLipsGenre, uploadLipsLib, removeLipsLib, useLipsVideo,
             pollingTimer,
             startPollingVoice,
-            crawling, thumbLoading, createThumbnail, selectThumbnail, capcutExporting, capcutRendering, capcutLang, showCapcutMenu, showVoiceMenu, showMediaMenu, matteLips, matteState,
+            crawling, thumbLoading, createThumbnail, selectThumbnail, capcutExporting, capcutRendering, capcutLang, showCapcutMenu, showVoiceMenu, showMediaMenu, showBuildMenu, showToolsMenu, matteLips, matteState,
             triggerCrawlAll, triggerAutoSelect, autoSelecting, autoCls, exportCapcut, renderCapcut,
             exportProg, exportPhaseLabel, fmtElapsed,
             replaceModal, openReplaceModal, doReplace,
@@ -6994,10 +7532,14 @@ createApp({
             nazeModal,
             genreChooser,
             sportsModal, submitSports, sportsRetry,
-            podcastModal, submitPodcast, onPodcastVoiceToggle, addPodcastSrtFiles, srtPairs,
+            podcastModal, submitPodcast, submitPodcastAI, onPodcastVoiceToggle, addPodcastSrtFiles, srtPairs, aiImageCounts,
+            podcastImages, openPodcastImages, closePodcastImages, runPodcastImages,
+            podcastMemory, loadPodcastMemory, openPodcastMemory, deletePodcastMemory, clearPodcastMemory,
+            fixPodcastVi, fixViLoading,
             podcastLib, podcastLibTotalSize, podcastHasVoice, openPodcastLib, loadPodcastLib, uploadPodcastVideos, deletePodcastVideo, runPodcastFill, fmtSize, fmtDur,
             podcastQueue, loadPodcastQueue, cancelPodcastJob, queueBusy, stateIcon, stateText, stateCls,
             podcastExports, podcastExportsTotal, openPodcastExports, loadPodcastExports, deletePodcastExport,
+            podcastExportGroups, downloadExportPair, deleteExportPair,
             pageChooser,
             geoSheet, openGeoSheet, loadGeoSheet, runGeoRow,
             scoreModal, openScoreDetail, shownEval, evalLabel,
@@ -7015,6 +7557,27 @@ createApp({
         };
     }
 }).component('audio-bar', AudioBar).mount('#app');
+
+// ===== CHỮ BỊ CẮT -> HOVER LÀ HIỆN ĐỦ =====
+// Nhãn hẹp bị cắt cụt ("NGÔN NGỮ NG...", tên file dài, tên dự án...) thì rê chuột vào là thấy nguyên câu.
+// Làm bằng 1 listener chung thay vì đi thêm title="" vào 41 chỗ: chỗ nào cắt chữ cũng được, kể cả
+// những chỗ thêm về sau. Chỉ tính lúc HOVER nên không tốn gì khi trang đứng yên.
+document.addEventListener('mouseover', (e) => {
+    const el = e.target;
+    if (!(el instanceof HTMLElement)) return;
+    // Đã có title tự đặt (và không phải cái do chính hàm này gán) -> tôn trọng, đừng đè.
+    if (el.title && el.dataset.autoTitle !== el.title) return;
+    // Bọc ngoài to đùng mà tràn thì bỏ qua; chỉ nhắm phần tử chứa CHỮ.
+    if (el.children.length && !el.classList.contains('truncate')) return;
+    const text = (el.textContent || '').trim();
+    if (!text || text.length > 500) return;
+    // Cắt chữ = nội dung rộng/cao hơn khung hiển thị
+    const clipped = el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1;
+    if (!clipped) { if (el.dataset.autoTitle) { el.removeAttribute('title'); delete el.dataset.autoTitle; } return; }
+    if (el.title === text) return;
+    el.title = text;
+    el.dataset.autoTitle = text;   // nhớ lại để lần sau nội dung đổi thì cập nhật, không giữ chữ cũ
+}, true);
 </script>
 </body>
 </html>
